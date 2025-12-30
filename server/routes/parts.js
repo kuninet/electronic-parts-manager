@@ -27,9 +27,10 @@ const upload = uploadMiddleware.fields([
 router.get('/', async (req, res) => {
     try {
         const db = getDb();
-        const { category_id, location_id, search } = req.query;
+        const { category_id, location_id, tag_id, search } = req.query;
         let query = `
-      SELECT p.*, c.name as category_name, l.name as location_name 
+      SELECT p.*, c.name as category_name, l.name as location_name,
+      (SELECT GROUP_CONCAT(t.name, ',') FROM tags t JOIN part_tags pt ON t.id = pt.tag_id WHERE pt.part_id = p.id) as tags
       FROM parts p
       LEFT JOIN categories c ON p.category_id = c.id
       LEFT JOIN locations l ON p.location_id = l.id
@@ -45,6 +46,11 @@ router.get('/', async (req, res) => {
         if (location_id) {
             query += ` AND p.location_id = ?`;
             params.push(location_id);
+        }
+
+        if (tag_id) {
+            query += ` AND EXISTS (SELECT 1 FROM part_tags pt WHERE pt.part_id = p.id AND pt.tag_id = ?)`;
+            params.push(tag_id);
         }
 
         if (search) {
@@ -66,7 +72,8 @@ router.get('/:id', async (req, res) => {
     try {
         const db = getDb();
         const part = await db.get(`
-      SELECT p.*, c.name as category_name, l.name as location_name
+      SELECT p.*, c.name as category_name, l.name as location_name,
+      (SELECT GROUP_CONCAT(t.name, ',') FROM tags t JOIN part_tags pt ON t.id = pt.tag_id WHERE pt.part_id = p.id) as tags
       FROM parts p
       LEFT JOIN categories c ON p.category_id = c.id
       LEFT JOIN locations l ON p.location_id = l.id
@@ -85,6 +92,7 @@ router.post('/', upload, async (req, res) => {
     try {
         const db = getDb();
         const { name, description, category_id, location_id, quantity, datasheet_url } = req.body;
+        const tags = req.body.tags ? req.body.tags.split(',').map(t => t.trim()).filter(t => t) : [];
 
         const image_path = req.files['image'] ? '/uploads/' + req.files['image'][0].filename : null;
         const datasheet_path = req.files['datasheet'] ? '/uploads/' + req.files['datasheet'][0].filename : null;
@@ -94,7 +102,19 @@ router.post('/', upload, async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `, [name, description, category_id, location_id, quantity, image_path, datasheet_url, datasheet_path]);
 
-        res.status(201).json({ id: result.lastID });
+        const partId = result.lastID;
+
+        // Process Tags
+        for (const tagName of tags) {
+            let tag = await db.get('SELECT id FROM tags WHERE name = ?', [tagName]);
+            if (!tag) {
+                const tagResult = await db.run('INSERT INTO tags (name) VALUES (?)', [tagName]);
+                tag = { id: tagResult.lastID };
+            }
+            await db.run('INSERT INTO part_tags (part_id, tag_id) VALUES (?, ?)', [partId, tag.id]);
+        }
+
+        res.status(201).json({ id: partId });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: err.message });
@@ -144,6 +164,24 @@ router.put('/:id', upload, async (req, res) => {
         params.push(id);
 
         await db.run(query, params);
+
+        // Update Tags
+        if (req.body.tags !== undefined) {
+            const tags = req.body.tags ? req.body.tags.split(',').map(t => t.trim()).filter(t => t) : [];
+
+            // Clear existing tags
+            await db.run('DELETE FROM part_tags WHERE part_id = ?', [id]);
+
+            for (const tagName of tags) {
+                let tag = await db.get('SELECT id FROM tags WHERE name = ?', [tagName]);
+                if (!tag) {
+                    const tagResult = await db.run('INSERT INTO tags (name) VALUES (?)', [tagName]);
+                    tag = { id: tagResult.lastID };
+                }
+                await db.run('INSERT INTO part_tags (part_id, tag_id) VALUES (?, ?)', [id, tag.id]);
+            }
+        }
+
         res.json({ message: 'Updated successfully' });
     } catch (err) {
         res.status(500).json({ error: err.message });

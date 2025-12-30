@@ -41,6 +41,19 @@ async function initDb() {
       FOREIGN KEY(category_id) REFERENCES categories(id),
       FOREIGN KEY(location_id) REFERENCES locations(id)
     );
+
+    CREATE TABLE IF NOT EXISTS tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE
+    );
+
+    CREATE TABLE IF NOT EXISTS part_tags (
+      part_id INTEGER,
+      tag_id INTEGER,
+      PRIMARY KEY (part_id, tag_id),
+      FOREIGN KEY(part_id) REFERENCES parts(id) ON DELETE CASCADE,
+      FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
+    );
   `);
 
   // Seed some initial data if empty

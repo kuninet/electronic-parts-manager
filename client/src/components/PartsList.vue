@@ -5,24 +5,28 @@ import api from '../api';
 const parts = ref([]);
 const categories = ref([]);
 const locations = ref([]);
+const tags = ref([]);
 const loading = ref(true);
 const error = ref(null);
 
 // Filters
 const searchQuery = ref('');
 const selectedCategory = ref('');
+const selectedTag = ref('');
 
 const selectedLocation = ref('');
 const viewMode = ref('grid'); // 'grid' or 'list'
 
 const fetchMetadata = async () => {
   try {
-    const [catsRes, locsRes] = await Promise.all([
+    const [catsRes, locsRes, tagsRes] = await Promise.all([
       api.get('/categories'),
-      api.get('/locations')
+      api.get('/locations'),
+      api.get('/tags')
     ]);
     categories.value = catsRes.data;
     locations.value = locsRes.data;
+    tags.value = tagsRes.data;
   } catch (err) {
     console.error('Failed to load metadata', err);
   }
@@ -35,6 +39,7 @@ const fetchParts = async () => {
     if (searchQuery.value) params.search = searchQuery.value;
     if (selectedCategory.value) params.category_id = selectedCategory.value;
     if (selectedLocation.value) params.location_id = selectedLocation.value;
+    if (selectedTag.value) params.tag_id = selectedTag.value;
     
     const response = await api.get('/parts', { params });
     parts.value = response.data;
@@ -53,7 +58,7 @@ onMounted(() => {
 
 // Debounce search
 let timeout;
-watch([searchQuery, selectedCategory, selectedLocation], () => {
+watch([searchQuery, selectedCategory, selectedLocation, selectedTag], () => {
   clearTimeout(timeout);
   timeout = setTimeout(() => {
     fetchParts();
@@ -90,6 +95,13 @@ const openDatasheet = (e, part) => {
         <option value="">全ての保管場所</option>
         <option v-for="loc in locations" :key="loc.id" :value="loc.id">
           {{ loc.name }}
+        </option>
+      </select>
+
+      <select v-model="selectedTag" class="filter-select">
+        <option value="">全てのタグ</option>
+        <option v-for="tag in tags" :key="tag.id" :value="tag.id">
+          {{ tag.name }}
         </option>
       </select>
 
@@ -130,6 +142,9 @@ const openDatasheet = (e, part) => {
           </div>
           <div class="part-info">
             <h3>{{ part.name }}</h3>
+            <div class="tags-container" v-if="part.tags">
+                <span v-for="tag in part.tags.split(',')" :key="tag" class="small-tag-pill">{{ tag }}</span>
+            </div>
             <p class="category" v-if="part.category_name">{{ part.category_name }}</p>
             <div class="stock-badge" :class="{ 'low-stock': part.quantity < 5 }">
               {{ part.quantity }} pcs
@@ -172,6 +187,9 @@ const openDatasheet = (e, part) => {
               <td class="col-name">
                 <div class="name-cell">
                   <span class="part-name">{{ part.name }}</span>
+                  <div class="tags-container" v-if="part.tags">
+                       <span v-for="tag in part.tags.split(',')" :key="tag" class="small-tag-pill">{{ tag }}</span>
+                  </div>
                   <span class="part-desc" v-if="part.description">{{ part.description }}</span>
                 </div>
               </td>
@@ -551,5 +569,30 @@ td {
   .name-cell {
     align-items: flex-start;
   }
+}
+
+
+.tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.small-tag-pill {
+  background: rgba(30, 200, 255, 0.15); /* More blueish */
+  color: #5eead4; /* Accent color */
+  padding: 0.1rem 0.5rem;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  border: 1px solid rgba(94, 234, 212, 0.3);
+  display: inline-flex;
+  align-items: center;
+}
+
+.small-tag-pill:before {
+  content: "#";
+  margin-right: 2px;
+  opacity: 0.7;
 }
 </style>

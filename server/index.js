@@ -21,6 +21,7 @@ const backupRouter = require('./routes/backup');
 app.use('/api/parts', partsRouter);
 app.use('/api/categories', categoriesRouter);
 app.use('/api/locations', locationsRouter);
+app.use('/api/tags', require('./routes/tags'));
 app.use('/api/backup', backupRouter);
 
 // Initialize DB and start server

@@ -17,7 +17,8 @@ const formData = ref({
   category_id: '',
   location_id: '',
   quantity: 0,
-  datasheet_url: ''
+  datasheet_url: '',
+  tags: []
 });
 
 const categories = ref([]);
@@ -25,19 +26,27 @@ const locations = ref([]);
 const imageFile = ref(null);
 const datasheetFile = ref(null);
 const loading = ref(false);
+const newTag = ref('');
+const suggestedTags = ref([]);
 
 onMounted(async () => {
   try {
-    const [catsRes, locsRes] = await Promise.all([
+    const [catsRes, locsRes, tagsRes] = await Promise.all([
       api.get('/categories'),
-      api.get('/locations')
+      api.get('/locations'),
+      api.get('/tags')
     ]);
     categories.value = catsRes.data;
     locations.value = locsRes.data;
+    suggestedTags.value = tagsRes.data;
 
     if (props.part) {
       formData.value = { ...props.part };
-      // ID shouldn't be in formData for update if we use separate logic, but fine here
+      if (typeof formData.value.tags === 'string') {
+          formData.value.tags = formData.value.tags.split(',').filter(t => t);
+      } else if (!formData.value.tags) {
+          formData.value.tags = [];
+      }
     }
   } catch (err) {
     console.error('Failed to load metadata', err);
@@ -50,6 +59,18 @@ const handleImageChange = (e) => {
 
 const handleDatasheetChange = (e) => {
   datasheetFile.value = e.target.files[0];
+};
+
+const addTag = () => {
+    const val = newTag.value.trim();
+    if (val && !formData.value.tags.includes(val)) {
+        formData.value.tags.push(val);
+    }
+    newTag.value = '';
+};
+
+const removeTag = (index) => {
+    formData.value.tags.splice(index, 1);
 };
 
 const handleSubmit = async () => {
@@ -71,7 +92,9 @@ const handleSubmit = async () => {
     }
 
     Object.keys(formData.value).forEach(key => {
-        if (formData.value[key] !== null && formData.value[key] !== undefined) {
+        if (key === 'tags') {
+            data.append('tags', formData.value.tags.join(','));
+        } else if (formData.value[key] !== null && formData.value[key] !== undefined) {
              data.append(key, formData.value[key]);
         }
     });
@@ -156,6 +179,28 @@ const handleSubmit = async () => {
             </a>
           </div>
           <input type="file" accept="application/pdf" @change="handleDatasheetChange" />
+        </div>
+
+        <div class="form-group">
+          <label>タグ</label>
+          <div class="tag-input-container">
+            <input 
+              v-model="newTag" 
+              @keydown.enter.prevent="addTag" 
+              placeholder="タグを入力してEnter" 
+              list="tag-suggestions"
+            />
+            <datalist id="tag-suggestions">
+              <option v-for="tag in suggestedTags" :key="tag.id" :value="tag.name" />
+            </datalist>
+            <button type="button" class="btn btn-small" @click="addTag">追加</button>
+          </div>
+          <div class="tags-list">
+            <span v-for="(tag, index) in formData.tags" :key="index" class="tag-pill">
+              {{ tag }}
+              <button type="button" class="remove-tag" @click="removeTag(index)">×</button>
+            </span>
+          </div>
         </div>
 
         <div class="form-group">
@@ -279,5 +324,52 @@ input:focus, select:focus, textarea:focus {
   max-height: 200px;
   border-radius: 8px;
   border: 1px solid var(--border-color);
+}
+.current-image-preview img {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.tag-input-container {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.tag-pill {
+  background: var(--accent-color);
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 1rem;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.remove-tag {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.remove-tag:hover {
+  color: #ffcccc;
+}
+
+.btn-small {
+  padding: 0.5rem 1rem;
 }
 </style>
