@@ -1,0 +1,40 @@
+const express = require('express');
+const router = express.Router();
+const { getDb } = require('../database');
+
+// GET /api/categories
+router.get('/', async (req, res) => {
+    try {
+        const db = getDb();
+        const categories = await db.all('SELECT * FROM categories');
+        res.json(categories);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/categories
+router.post('/', async (req, res) => {
+    try {
+        const db = getDb();
+        const { name } = req.body;
+        const result = await db.run('INSERT INTO categories (name) VALUES (?)', [name]);
+        res.status(201).json({ id: result.lastID, name });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/categories/:id
+router.delete('/:id', async (req, res) => {
+    try {
+        const db = getDb();
+        // Checks if used in parts? For now, simplistic delete.
+        await db.run('DELETE FROM categories WHERE id = ?', [req.params.id]);
+        res.json({ message: 'Category deleted' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+module.exports = router;

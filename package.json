@@ -1,0 +1,16 @@
+{
+    "name": "electronic-parts-manager",
+    "version": "1.0.0",
+    "description": "Electronic Parts Management App",
+    "scripts": {
+        "start": "concurrently \"npm run server\" \"npm run client\"",
+        "server": "cd server && npm start",
+        "client": "cd client && npm run dev"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "dependencies": {
+        "concurrently": "^9.2.1"
+    }
+}
