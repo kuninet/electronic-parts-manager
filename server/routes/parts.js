@@ -27,7 +27,7 @@ const upload = uploadMiddleware.fields([
 router.get('/', async (req, res) => {
     try {
         const db = getDb();
-        const { category_id, location_id, tag_id, search } = req.query;
+        const { category_id, location_id, tag_id, search, status } = req.query;
         let query = `
       SELECT p.*, c.name as category_name, l.name as location_name,
       (SELECT GROUP_CONCAT(t.name, ',') FROM tags t JOIN part_tags pt ON t.id = pt.tag_id WHERE pt.part_id = p.id) as tags
@@ -37,6 +37,12 @@ router.get('/', async (req, res) => {
       WHERE 1=1
     `;
         const params = [];
+
+        if (status === 'trash') {
+            query += ` AND p.deleted_at IS NOT NULL`;
+        } else {
+            query += ` AND p.deleted_at IS NULL`;
+        }
 
         if (category_id) {
             query += ` AND p.category_id = ?`;
@@ -188,12 +194,89 @@ router.put('/:id', upload, async (req, res) => {
     }
 });
 
-// DELETE /api/parts/:id - Delete part
+// DELETE /api/parts/:id - Soft Delete part
 router.delete('/:id', async (req, res) => {
     try {
         const db = getDb();
-        await db.run('DELETE FROM parts WHERE id = ?', [req.params.id]);
-        res.json({ message: 'Deleted successfully' });
+        await db.run('UPDATE parts SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
+        res.json({ message: 'Moved to trash' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/parts/:id/permanent - Permanent Delete
+router.delete('/:id/permanent', async (req, res) => {
+    try {
+        const db = getDb();
+        const id = req.params.id;
+
+        // Fetch current file paths to delete files
+        const currentPart = await db.get('SELECT image_path, datasheet_path FROM parts WHERE id = ?', [id]);
+
+        if (currentPart) {
+            if (currentPart.image_path) {
+                const oldPath = path.join(__dirname, '../../', currentPart.image_path);
+                fs.unlink(oldPath, (err) => { if (err) console.error('Failed to delete image:', err); });
+            }
+            if (currentPart.datasheet_path) {
+                const oldPath = path.join(__dirname, '../../', currentPart.datasheet_path);
+                fs.unlink(oldPath, (err) => { if (err) console.error('Failed to delete datasheet:', err); });
+            }
+        }
+
+        await db.run('DELETE FROM parts WHERE id = ?', [id]);
+        res.json({ message: 'Permanently deleted' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/parts/:id/restore - Restore part
+router.post('/:id/restore', async (req, res) => {
+    try {
+        const db = getDb();
+        await db.run('UPDATE parts SET deleted_at = NULL WHERE id = ?', [req.params.id]);
+        res.json({ message: 'Restored successfully' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/parts/bulk - Bulk actions
+router.post('/bulk/action', async (req, res) => {
+    try {
+        const db = getDb();
+        const { ids, action } = req.body; // action: 'trash', 'restore', 'delete'
+
+        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({ error: 'Invalid IDs' });
+        }
+
+        const placeholders = ids.map(() => '?').join(',');
+
+        if (action === 'trash') {
+            await db.run(`UPDATE parts SET deleted_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`, ids);
+            res.json({ message: `Moved ${ids.length} items to trash` });
+        } else if (action === 'restore') {
+            await db.run(`UPDATE parts SET deleted_at = NULL WHERE id IN (${placeholders})`, ids);
+            res.json({ message: `Restored ${ids.length} items` });
+        } else if (action === 'delete') {
+            // Permanent delete - need to handle file cleanup for each
+            const parts = await db.all(`SELECT image_path, datasheet_path FROM parts WHERE id IN (${placeholders})`, ids);
+            parts.forEach(part => {
+                if (part.image_path) {
+                    fs.unlink(path.join(__dirname, '../../', part.image_path), () => { });
+                }
+                if (part.datasheet_path) {
+                    fs.unlink(path.join(__dirname, '../../', part.datasheet_path), () => { });
+                }
+            });
+            await db.run(`DELETE FROM parts WHERE id IN (${placeholders})`, ids);
+            res.json({ message: `Permanently deleted ${ids.length} items` });
+        } else {
+            res.status(400).json({ error: 'Invalid action' });
+        }
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

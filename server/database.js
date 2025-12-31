@@ -38,6 +38,7 @@ async function initDb() {
       datasheet_path TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      deleted_at DATETIME DEFAULT NULL,
       FOREIGN KEY(category_id) REFERENCES categories(id),
       FOREIGN KEY(location_id) REFERENCES locations(id)
     );
@@ -55,6 +56,13 @@ async function initDb() {
       FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
     );
   `);
+
+  // Migration: Add deleted_at column if not exists
+  try {
+    await db.run('ALTER TABLE parts ADD COLUMN deleted_at DATETIME DEFAULT NULL');
+  } catch (e) {
+    // Column likely already exists, ignore
+  }
 
   // Seed some initial data if empty
   const categories = await db.all('SELECT * FROM categories');

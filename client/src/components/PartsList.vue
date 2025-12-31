@@ -16,6 +16,9 @@ const selectedTag = ref('');
 
 const selectedLocation = ref('');
 const viewMode = ref('grid'); // 'grid' or 'list'
+const showTrash = ref(false);
+const selectedItems = ref(new Set());
+const isSelecting = ref(false);
 
 const fetchMetadata = async () => {
   try {
@@ -40,9 +43,11 @@ const fetchParts = async () => {
     if (selectedCategory.value) params.category_id = selectedCategory.value;
     if (selectedLocation.value) params.location_id = selectedLocation.value;
     if (selectedTag.value) params.tag_id = selectedTag.value;
+    if (showTrash.value) params.status = 'trash';
     
     const response = await api.get('/parts', { params });
     parts.value = response.data;
+    selectedItems.value.clear(); // Clear selection on reload
   } catch (err) {
     error.value = 'Failed to load parts';
     console.error(err);
@@ -58,7 +63,7 @@ onMounted(() => {
 
 // Debounce search
 let timeout;
-watch([searchQuery, selectedCategory, selectedLocation, selectedTag], () => {
+watch([searchQuery, selectedCategory, selectedLocation, selectedTag, showTrash], () => {
   clearTimeout(timeout);
   timeout = setTimeout(() => {
     fetchParts();
@@ -71,6 +76,42 @@ const openDatasheet = (e, part) => {
   if (url) {
     window.open(url, '_blank');
   }
+};
+
+const toggleSelection = (part) => {
+    if (selectedItems.value.has(part.id)) {
+        selectedItems.value.delete(part.id);
+    } else {
+        selectedItems.value.add(part.id);
+    }
+};
+
+const toggleSelectAll = () => {
+    if (selectedItems.value.size === parts.value.length) {
+        selectedItems.value.clear();
+    } else {
+        parts.value.forEach(p => selectedItems.value.add(p.id));
+    }
+};
+
+const handleBulkAction = async (action) => {
+    if (selectedItems.value.size === 0) return;
+    if (!confirm(`${selectedItems.value.size}個のアイテムを${action === 'delete' ? '完全に削除' : action === 'trash' ? 'ゴミ箱へ移動' : '復元'}しますか？`)) return;
+
+    loading.value = true;
+    try {
+        await api.post('/parts/bulk/action', {
+            ids: Array.from(selectedItems.value),
+            action
+        });
+        await fetchParts();
+        selectedItems.value.clear();
+    } catch (err) {
+        alert('操作に失敗しました');
+        console.error(err);
+    } finally {
+        loading.value = false;
+    }
 };
 </script>
 
@@ -105,8 +146,18 @@ const openDatasheet = (e, part) => {
         </option>
       </select>
 
-      <button class="btn btn-primary" @click="$emit('add')">
+      <button class="btn btn-primary" @click="$emit('add')" v-if="!showTrash">
         + 追加
+      </button>
+
+      <button 
+        class="btn hover-danger" 
+        :class="{ active: showTrash }"
+        @click="showTrash = !showTrash"
+        title="ゴミ箱モード切り替え"
+      >
+        <span v-if="!showTrash">🗑️ ゴミ箱を表示</span>
+        <span v-else>🔙 一覧に戻る</span>
       </button>
 
       <div class="view-toggle">
@@ -129,13 +180,37 @@ const openDatasheet = (e, part) => {
       </div>
     </div>
 
+    <!-- Bulk Actions Bar -->
+    <div v-if="selectedItems.size > 0" class="bulk-actions glass-panel">
+        <span class="selection-count">{{ selectedItems.size }}個選択中</span>
+        <div class="bulk-buttons">
+            <template v-if="!showTrash">
+                <button class="btn btn-danger" @click="handleBulkAction('trash')">🗑️ ゴミ箱へ</button>
+            </template>
+            <template v-else>
+                <button class="btn btn-success" @click="handleBulkAction('restore')">♻️ 復元</button>
+                <button class="btn btn-danger" @click="handleBulkAction('delete')">❌ 完全削除</button>
+            </template>
+        </div>
+    </div>
+
     <div v-if="loading" class="loading">読み込み中...</div>
     <div v-else-if="error" class="error">{{ error }}</div>
     
     <div v-else>
       <!-- Grid View -->
       <div v-if="viewMode === 'grid'" class="parts-grid">
-        <div v-for="part in parts" :key="part.id" class="part-card glass-panel" @click="$emit('edit', part)">
+        <div 
+            v-for="part in parts" 
+            :key="part.id" 
+            class="part-card glass-panel" 
+            :class="{ selected: selectedItems.has(part.id) }"
+            @click="isSelecting ? toggleSelection(part) : $emit('edit', part)"
+        >
+          <div class="card-selection" @click.stop>
+            <input type="checkbox" :checked="selectedItems.has(part.id)" @change="toggleSelection(part)" />
+          </div>
+
           <div class="part-image">
             <img v-if="part.image_path" :src="part.image_path" :alt="part.name" />
             <div v-else class="placeholder-image">⚡️</div>
@@ -168,6 +243,9 @@ const openDatasheet = (e, part) => {
         <table>
           <thead>
             <tr>
+              <th class="col-checkbox">
+                <input type="checkbox" :checked="selectedItems.size === parts.length && parts.length > 0" @change="toggleSelectAll" />
+              </th>
               <th>画像</th>
               <th>パーツ名</th>
               <th>カテゴリ</th>
@@ -177,7 +255,10 @@ const openDatasheet = (e, part) => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="part in parts" :key="part.id" @click="$emit('edit', part)" class="list-row">
+            <tr v-for="part in parts" :key="part.id" @click="$emit('edit', part)" class="list-row" :class="{ selected: selectedItems.has(part.id) }">
+              <td class="col-checkbox" @click.stop>
+                 <input type="checkbox" :checked="selectedItems.has(part.id)" @change="toggleSelection(part)" />
+              </td>
               <td class="col-img">
                 <div class="list-thumb">
                    <img v-if="part.image_path" :src="part.image_path" :alt="part.name" />
@@ -594,5 +675,76 @@ td {
   content: "#";
   margin-right: 2px;
   opacity: 0.7;
+}
+
+/* Bulk Actions */
+.bulk-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    background: rgba(30, 41, 59, 0.95);
+    border: 1px solid var(--accent-color);
+    position: sticky;
+    top: 1rem;
+    z-index: 10;
+}
+
+.selection-count {
+    font-weight: bold;
+    color: white;
+}
+
+.bulk-buttons {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Selection Styles */
+.part-card {
+    position: relative;
+}
+
+.card-selection {
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    z-index: 5;
+}
+
+.part-card.selected {
+    border: 2px solid var(--accent-color);
+    background: rgba(94, 234, 212, 0.05); /* Accent tint */
+}
+
+.list-row.selected {
+    background: rgba(94, 234, 212, 0.1) !important;
+}
+
+.col-checkbox {
+    width: 40px;
+    text-align: center;
+}
+
+.hover-danger:hover {
+    background-color: var(--danger) !important;
+    border-color: var(--danger) !important;
+}
+
+.hover-danger.active {
+    background-color: var(--danger);
+    border-color: var(--danger);
+}
+
+.btn-success {
+    background: var(--success);
+    color: white;
+    border: none;
+}
+.btn-danger {
+    background: var(--danger);
+    color: white;
+    border: none;
 }
 </style>
