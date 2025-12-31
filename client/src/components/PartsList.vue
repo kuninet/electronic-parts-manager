@@ -3,6 +3,13 @@ import { ref, onMounted, watch } from 'vue';
 import api from '../api';
 import TagInput from './TagInput.vue';
 
+const props = defineProps({
+  initialLocationId: {
+    type: [Number, String],
+    default: ''
+  }
+});
+
 const parts = ref([]);
 const categories = ref([]);
 const locations = ref([]);
@@ -15,7 +22,7 @@ const searchQuery = ref('');
 const selectedCategory = ref('');
 const selectedTag = ref('');
 
-const selectedLocation = ref('');
+const selectedLocation = ref(props.initialLocationId || '');
 const viewMode = ref('grid'); // 'grid' or 'list'
 const showTrash = ref(false);
 const selectedItems = ref(new Set());

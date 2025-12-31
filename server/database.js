@@ -64,6 +64,13 @@ async function initDb() {
     // Column likely already exists, ignore
   }
 
+  // Migration: Add image_path to locations if not exists
+  try {
+    await db.run('ALTER TABLE locations ADD COLUMN image_path TEXT');
+  } catch (e) {
+    // Column likely already exists
+  }
+
   // Seed some initial data if empty
   const categories = await db.all('SELECT * FROM categories');
   if (categories.length === 0) {

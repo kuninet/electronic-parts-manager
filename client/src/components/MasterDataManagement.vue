@@ -52,11 +52,22 @@ const deleteCategory = async (id) => {
   }
 };
 
+const newLocationImage = ref(null);
+const editingImage = ref(null);
+
 const addLocation = async () => {
   if (!newLocation.value) return;
   try {
-    await api.post('/locations', { name: newLocation.value, description: '' });
+    const formData = new FormData();
+    formData.append('name', newLocation.value);
+    formData.append('description', '');
+    if (newLocationImage.value) {
+        formData.append('image', newLocationImage.value);
+    }
+    
+    await api.post('/locations', formData);
     newLocation.value = '';
+    newLocationImage.value = null;
     fetchData();
   } catch (err) {
     alert('Failed to add location');
@@ -77,6 +88,7 @@ const startEdit = (type, item) => {
     editingId.value = item.id;
     editingType.value = type;
     editingName.value = item.name;
+    editingImage.value = null; // Reset
     if (type === 'location') editingDesc.value = item.description || '';
 };
 
@@ -85,6 +97,7 @@ const cancelEdit = () => {
     editingType.value = null;
     editingName.value = '';
     editingDesc.value = '';
+    editingImage.value = null;
 };
 
 const saveEdit = async () => {
@@ -93,11 +106,18 @@ const saveEdit = async () => {
         if (editingType.value === 'category') {
             await api.put(`/categories/${editingId.value}`, { name: editingName.value });
         } else {
-            await api.put(`/locations/${editingId.value}`, { name: editingName.value, description: editingDesc.value });
+            const formData = new FormData();
+            formData.append('name', editingName.value);
+            formData.append('description', editingDesc.value);
+            if (editingImage.value) {
+                formData.append('image', editingImage.value);
+            }
+            await api.put(`/locations/${editingId.value}`, formData);
         }
         fetchData();
         cancelEdit();
     } catch (err) {
+        console.error(err);
         alert('Updates failed');
     }
 };
@@ -141,22 +161,53 @@ const saveEdit = async () => {
           <h3>保管場所</h3>
           <div class="input-group">
             <input v-model="newLocation" placeholder="新しい保管場所" @keyup.enter="addLocation" />
+            <div class="file-upload-mini">
+              <label class="btn-icon camera-icon">
+                📷
+                <input type="file" accept="image/*" class="hidden-input" @change="e => newLocationImage = e.target.files[0]">
+              </label>
+            </div>
             <button class="btn btn-primary" @click="addLocation">+</button>
           </div>
+          <div v-if="newLocationImage" class="preview-mini">
+              <span>画像選択中: {{ newLocationImage.name }}</span>
+              <button @click="newLocationImage = null" class="btn-icon text-danger">×</button>
+          </div>
+
           <ul class="list">
             <li v-for="loc in locations" :key="loc.id">
               <template v-if="editingId === loc.id && editingType === 'location'">
-                   <div class="edit-group">
-                      <input v-model="editingName" @keyup.enter="saveEdit" />
-                      <button class="btn-icon text-success" @click="saveEdit">✅</button>
-                      <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
+                   <div class="edit-group-col">
+                      <input v-model="editingName" @keyup.enter="saveEdit" placeholder="名前" />
+                      <input v-model="editingDesc" placeholder="説明" />
+                      
+                      <div class="edit-image-row">
+                          <label class="btn btn-sm btn-outline">
+                            画像変更
+                            <input type="file" accept="image/*" class="hidden-input" @change="e => editingImage = e.target.files[0]">
+                          </label>
+                          <span v-if="editingImage" class="text-success">変更あり</span>
+                      </div>
+
+                      <div class="edit-actions">
+                          <button class="btn-icon text-success" @click="saveEdit">✅</button>
+                          <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
+                      </div>
                    </div>
               </template>
               <template v-else>
-                  <span>{{ loc.name }}</span>
-                  <div class="actions">
-                      <button class="btn-icon" @click="startEdit('location', loc)">✏️</button>
-                      <button class="btn-icon" @click="deleteLocation(loc.id)">🗑</button>
+                  <div class="list-item-content">
+                      <div class="list-item-main">
+                          <img v-if="loc.image_path" :src="`${api.defaults.baseURL.replace('/api', '')}${loc.image_path}`" class="loc-thumb" />
+                          <div class="loc-info">
+                              <span class="loc-name">{{ loc.name }}</span>
+                              <span v-if="loc.description" class="loc-desc">{{ loc.description }}</span>
+                          </div>
+                      </div>
+                      <div class="actions">
+                          <button class="btn-icon" @click="startEdit('location', loc)">✏️</button>
+                          <button class="btn-icon" @click="deleteLocation(loc.id)">🗑</button>
+                      </div>
                   </div>
               </template>
             </li>
@@ -279,5 +330,79 @@ input {
   margin-top: 2rem;
   display: flex;
   justify-content: flex-end;
+}
+
+.file-upload-mini {
+    display: flex;
+    align-items: center;
+}
+
+.camera-icon {
+    font-size: 1.2rem;
+    cursor: pointer;
+}
+
+.preview-mini {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.list-item-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+.list-item-main {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+}
+
+.loc-thumb {
+    width: 40px;
+    height: 40px;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+}
+
+.loc-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.loc-desc {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.edit-group-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.edit-image-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.9rem;
+}
+
+.edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+.hidden-input {
+  display: none;
 }
 </style>
