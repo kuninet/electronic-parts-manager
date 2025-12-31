@@ -261,6 +261,13 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--accent-color);
 }
 
+/* Fix for dropdown options visibility */
+select option {
+    background-color: #1e293b;
+    color: white;
+}
+
+
 .form-actions {
   display: flex;
   justify-content: flex-end;

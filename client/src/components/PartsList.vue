@@ -529,6 +529,13 @@ const openDatasheetUrl = (part) => {
   outline: none;
 }
 
+/* Fix for dropdown options visibility */
+select option {
+    background-color: #1e293b;
+    color: white;
+}
+
+
 .parts-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
