@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue';
-import { ref, onMounted } from 'vue';
+
 import api from '../api';
 import TagInput from './TagInput.vue';
 
@@ -28,8 +28,7 @@ const locations = ref([]);
 const imageFile = ref(null);
 const datasheetFile = ref(null);
 const loading = ref(false);
-const datasheetFile = ref(null);
-const loading = ref(false);
+
 const suggestedTags = ref([]);
 
 onMounted(async () => {
@@ -64,9 +63,7 @@ const handleDatasheetChange = (e) => {
   datasheetFile.value = e.target.files[0];
 };
 
-const handleDatasheetChange = (e) => {
-  datasheetFile.value = e.target.files[0];
-};
+
 
 const handleSubmit = async () => {
   loading.value = true;
@@ -182,7 +179,7 @@ const handleSubmit = async () => {
         </div>
 
         <div class="form-group">
-          <label>データシート URL</label>
+          <label>データシート等 URL</label>
           <input v-model="formData.datasheet_url" placeholder="https://..." />
         </div>
 

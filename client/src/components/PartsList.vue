@@ -179,6 +179,21 @@ const saveInlineEdit = async (part) => {
         console.error(err);
     }
 };
+
+const openDatasheetFile = (part) => {
+    if (part.datasheet_path) {
+        // Use relative path if VITE_API_URL is not set (relying on proxy)
+        const baseUrl = import.meta.env.VITE_API_URL || '';
+        const url = `${baseUrl}${part.datasheet_path}`;
+        window.open(url, '_blank');
+    }
+};
+
+const openDatasheetUrl = (part) => {
+    if (part.datasheet_url) {
+        window.open(part.datasheet_url, '_blank');
+    }
+};
 </script>
 
 <template>
@@ -305,14 +320,24 @@ const saveInlineEdit = async (part) => {
             </div>
             <p class="location" v-if="part.location_name">📍 {{ part.location_name }}</p>
             
-            <button 
-              v-if="part.datasheet_url || part.datasheet_path" 
-              class="btn-icon datasheet-link" 
-              @click="(e) => openDatasheet(e, part)"
-              title="データシートを開く"
-            >
-              📄
-            </button>
+            <div class="card-icons">
+               <button 
+                v-if="part.datasheet_path" 
+                class="btn-icon small-icon" 
+                @click.stop="openDatasheetFile(part)"
+                title="データシート (PDF)"
+                >
+                📄
+                </button>
+                <button 
+                v-if="part.datasheet_url" 
+                class="btn-icon small-icon" 
+                @click.stop="openDatasheetUrl(part)"
+                title="関連リンク"
+                >
+                🌐
+                </button>
+           </div>
           </div>
         </div>
       </div>
@@ -406,12 +431,20 @@ const saveInlineEdit = async (part) => {
                         ✏️
                         </button>
                         <button 
-                        v-if="part.datasheet_url || part.datasheet_path" 
+                        v-if="part.datasheet_path" 
                         class="btn-icon list-datasheet-btn" 
-                        @click="(e) => openDatasheet(e, part)"
-                        title="データシート"
+                        @click.stop="openDatasheetFile(part)"
+                        title="データシート (PDF)"
                         >
                         📄
+                        </button>
+                         <button 
+                        v-if="part.datasheet_url" 
+                        class="btn-icon list-datasheet-btn" 
+                        @click.stop="openDatasheetUrl(part)"
+                        title="関連リンク"
+                        >
+                        🌐
                         </button>
                     </template>
                     <!-- Edit Mode: Actions -->
@@ -566,29 +599,27 @@ const saveInlineEdit = async (part) => {
   margin-top: 0.5rem;
 }
 
-.datasheet-link {
-  position: absolute;
-  bottom: 1rem;
-  right: 1rem;
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--accent-color);
-  border: 1px solid var(--border-color);
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.2rem;
-  transition: all 0.2s;
-  z-index: 2;
+.card-icons {
+    position: absolute;
+    bottom: 1rem;
+    right: 1rem;
+    display: flex;
+    gap: 0.5rem;
 }
 
-.datasheet-link:hover {
-  background: var(--accent-color);
-  color: white;
-  transform: scale(1.1);
+.small-icon {
+    font-size: 1.2rem;
+    padding: 0.2rem;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
 }
+
+.small-icon:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+
 
 /* View Toggle */
 .view-toggle {
