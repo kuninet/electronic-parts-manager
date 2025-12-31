@@ -19,4 +19,3 @@ echo Backend logs will appear in a separate window.
 echo Frontend logs will appear in a separate window.
 echo Access the app at: http://localhost:5173
 echo ===================================================
-pause

@@ -28,4 +28,4 @@ echo "Press Ctrl+C to stop both servers."
 echo "==================================================="
 
 # Keep script running to maintain processes
-wait
+
