@@ -1,0 +1,92 @@
+{
+  "parts": [
+    {
+      "id": 1,
+      "name": "テスト1",
+      "description": "テスト",
+      "category_id": 3,
+      "location_id": 1,
+      "quantity": 10,
+      "image_path": "/uploads/1767144326224-745804139.jpeg",
+      "datasheet_url": "http://sample.com",
+      "datasheet_path": "/uploads/1767144378108-380279401.pdf",
+      "created_at": "2025-12-30 09:06:40",
+      "updated_at": "2025-12-31 01:26:18",
+      "deleted_at": null,
+      "tags_list": "酒"
+    },
+    {
+      "id": 3,
+      "name": "べんと",
+      "description": "",
+      "category_id": 1,
+      "location_id": 1,
+      "quantity": 0,
+      "image_path": "/uploads/1767144269130-145042393.jpeg",
+      "datasheet_url": "http://sample2.com",
+      "datasheet_path": "/uploads/1767144304496-45675381.pdf",
+      "created_at": "2025-12-30 09:31:53",
+      "updated_at": "2025-12-31 01:25:04",
+      "deleted_at": null,
+      "tags_list": "すし,酒"
+    }
+  ],
+  "categories": [
+    {
+      "id": 1,
+      "name": "抵抗器"
+    },
+    {
+      "id": 2,
+      "name": "コンデンサ"
+    },
+    {
+      "id": 3,
+      "name": "IC"
+    },
+    {
+      "id": 4,
+      "name": "コネクタ"
+    }
+  ],
+  "locations": [
+    {
+      "id": 1,
+      "name": "Box A",
+      "description": "Red huge box"
+    },
+    {
+      "id": 2,
+      "name": "Box B",
+      "description": "Blue small box"
+    }
+  ],
+  "tags": [
+    {
+      "id": 1,
+      "name": "ベント"
+    },
+    {
+      "id": 2,
+      "name": "すし"
+    },
+    {
+      "id": 3,
+      "name": "酒"
+    }
+  ],
+  "partTags": [
+    {
+      "part_id": 3,
+      "tag_id": 2
+    },
+    {
+      "part_id": 3,
+      "tag_id": 3
+    },
+    {
+      "part_id": 1,
+      "tag_id": 3
+    }
+  ]
+}

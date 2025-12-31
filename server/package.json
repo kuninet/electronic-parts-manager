@@ -12,6 +12,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "adm-zip": "^0.5.16",
+    "archiver": "^7.0.1",
     "body-parser": "^2.2.1",
     "cors": "^2.8.5",
     "csv-parse": "^6.1.0",

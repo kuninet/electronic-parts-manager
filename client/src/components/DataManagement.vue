@@ -8,6 +8,51 @@ const importing = ref(false);
 const importMessage = ref('');
 const importError = ref('');
 
+const downloadFull = async () => {
+  try {
+    const response = await api.get('/backup/export/full', { responseType: 'blob' });
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `full_backup_${new Date().toISOString().split('T')[0]}.zip`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } catch (err) {
+    console.error('Export failed', err);
+    alert('Export failed');
+  }
+};
+
+const handleFullImport = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (!confirm('【警告】フルバックアップから復元しますか？\n\n現在のデータは全て上書きされ、元に戻せません。\nよろしいですか？')) {
+        event.target.value = '';
+        return;
+    }
+
+    importing.value = true;
+    importError.value = '';
+    
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        await api.post('/backup/import/full', formData);
+        alert('復元が完了しました。ページをリロードします。');
+        window.location.reload();
+    } catch (err) {
+        console.error('Full import failed', err);
+        importError.value = err.response?.data?.error || 'Restore failed';
+        alert('復元に失敗しました');
+    } finally {
+        importing.value = false;
+        event.target.value = '';
+    }
+};
+
 const downloadCsv = async () => {
   try {
     const response = await api.get('/backup/export/csv', { responseType: 'blob' });
@@ -43,7 +88,9 @@ const handleImport = async (event, type) => {
   try {
     const endpoint = type === 'csv' ? '/backup/import/csv' : '/backup/import/excel';
     const res = await api.post(endpoint, formData);
-    importMessage.value = res.data.message;
+    alert('インポートが完了しました。ページを更新します。');
+    emit('close');
+    window.location.reload();
   } catch (err) {
     console.error('Import failed', err);
     importError.value = err.response?.data?.error || 'Import failed';
@@ -51,6 +98,28 @@ const handleImport = async (event, type) => {
     importing.value = false;
     event.target.value = '';
   }
+};
+
+const handleReset = async () => {
+    if (!confirm('本当に全てのデータを削除しますか？\nこの操作は取り消せません。\n(カテゴリや場所のマスタは保持されます)')) {
+        return;
+    }
+
+    const userInput = prompt('確認のため "delete" と入力してください');
+    if (userInput !== 'delete') {
+        alert('入力が一致しません。操作をキャンセルしました。');
+        return;
+    }
+
+    try {
+        await api.post('/backup/reset');
+        alert('全てのデータを削除しました。');
+        emit('close');
+        window.location.reload(); // Refresh to clear lists
+    } catch (err) {
+        console.error('Reset failed', err);
+        alert('削除に失敗しました: ' + (err.response?.data?.error || err.message));
+    }
 };
 </script>
 
@@ -60,38 +129,54 @@ const handleImport = async (event, type) => {
       <h2>データ管理</h2>
 
       <div class="data-section">
-        <h3>バックアップ (エクスポート)</h3>
-        <p>在庫データのフルバックアップ(CSV)をダウンロードします。</p>
-        <button class="btn btn-primary" @click="downloadCsv">
-          CSV ダウンロード
-        </button>
+        <h3>システム完全バックアップ (ZIP)</h3>
+        <p>画像・PDF・すべてのデータをまとめて保存・復元します。基本はこちらを使用してください。</p>
+        
+        <div class="backup-actions">
+             <button class="btn btn-primary" @click="downloadFull">
+              📦 フルバックアップをダウンロード
+            </button>
+            
+            <label class="btn btn-outline hover-danger">
+              📥 バックアップから復元
+              <input type="file" accept=".zip" class="hidden-input" @change="e => handleFullImport(e)" :disabled="importing">
+            </label>
+        </div>
       </div>
 
       <div class="divider"></div>
 
       <div class="data-section">
-        <h3>リストア / インポート</h3>
-        <p>CSVまたはExcelからデータを取り込みます。注意: データベースが変更される可能性があります。</p>
+        <h3>簡易データ操作 (CSV/Excel)</h3>
+        <p>他のツールとの連携用です。画像ファイルは含まれません。</p>
         
         <div class="import-actions">
-          <div class="import-group">
-            <label class="btn btn-outline">
-              CSV インポート (リストア)
+           <button class="btn btn-sm btn-outline" @click="downloadCsv">CSV Export</button>
+           
+            <label class="btn btn-sm btn-outline">
+              CSV Import
               <input type="file" accept=".csv" class="hidden-input" @change="e => handleImport(e, 'csv')" :disabled="importing">
             </label>
-          </div>
-          
-          <div class="import-group">
-            <label class="btn btn-outline">
-              Excel インポート
+            
+            <label class="btn btn-sm btn-outline">
+              Excel Import
               <input type="file" accept=".xlsx, .xls" class="hidden-input" @change="e => handleImport(e, 'excel')" :disabled="importing">
             </label>
-          </div>
         </div>
-
-        <div v-if="importing" class="status-msg">インポート中...</div>
+        
+        <div v-if="importing" class="status-msg">処理中...</div>
         <div v-if="importMessage" class="status-msg success">{{ importMessage }}</div>
         <div v-if="importError" class="status-msg error">{{ importError }}</div>
+      </div>
+
+      <div class="divider"></div>
+      
+      <div class="data-section danger-zone">
+        <h3>🗑️ 危険な操作</h3>
+        <p>登録された全パーツデータ・タグ紐付け・画像・PDFを完全に削除します。<br>(カテゴリ・保管場所・タグのマスタデータは残ります)</p>
+        <button class="btn btn-danger" @click="handleReset">
+          全データを削除する
+        </button>
       </div>
 
       <div class="footer">
@@ -117,7 +202,20 @@ const handleImport = async (event, type) => {
   padding: 2rem;
   width: 100%;
   max-width: 500px;
+  max-height: 90vh; /* Handle small screens */
+  overflow-y: auto;
   position: relative;
+}
+
+.danger-zone {
+    border: 1px solid var(--danger);
+    padding: 1rem;
+    border-radius: 8px;
+    background: rgba(220, 38, 38, 0.1);
+}
+
+.danger-zone h3 {
+    color: var(--danger);
 }
 
 h2 {
@@ -128,12 +226,6 @@ h2 {
 h3 {
   margin-bottom: 0.5rem;
   font-size: 1.1rem;
-}
-
-p {
-  color: var(--text-secondary);
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
 }
 
 .data-section {
@@ -149,6 +241,18 @@ p {
 .import-actions {
   display: flex;
   gap: 1rem;
+}
+
+.backup-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1rem;
+    align-items: center;
+}
+
+.btn-sm {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
 }
 
 .btn-outline {
