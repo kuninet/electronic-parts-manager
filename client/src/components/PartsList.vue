@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue';
 import api from '../api';
+import TagInput from './TagInput.vue';
 
 const parts = ref([]);
 const categories = ref([]);
@@ -23,6 +24,16 @@ const isSelecting = ref(false);
 // Sorting
 const sortField = ref('id');
 const sortOrder = ref('desc');
+
+// Inline Editing
+const editingPartId = ref(null);
+const editingForm = ref({
+    name: '',
+    category_id: '',
+    location_id: '',
+    quantity: 0,
+    tags: []
+});
 
 const fetchMetadata = async () => {
   try {
@@ -120,6 +131,52 @@ const handleBulkAction = async (action) => {
         console.error(err);
     } finally {
         loading.value = false;
+    }
+};
+
+const startInlineEdit = (part) => {
+    editingPartId.value = part.id;
+    editingForm.value = {
+        name: part.name,
+        category_id: part.category_id || '',
+        location_id: part.location_id || '',
+        quantity: part.quantity || 0,
+        tags: part.tags ? part.tags.split(',').filter(t => t) : []
+    };
+};
+
+const cancelInlineEdit = () => {
+    editingPartId.value = null;
+    editingForm.value = {};
+};
+
+const saveInlineEdit = async (part) => {
+    try {
+        const formData = new FormData();
+        // Required fields per existing API contract
+        formData.append('name', editingForm.value.name);
+        formData.append('category_id', editingForm.value.category_id || '');
+        formData.append('location_id', editingForm.value.location_id || '');
+        formData.append('quantity', editingForm.value.quantity);
+        formData.append('tags', editingForm.value.tags.join(','));
+        
+        // Preserve other fields
+        formData.append('description', part.description || '');
+        formData.append('datasheet_url', part.datasheet_url || '');
+
+        // Note: For files, we don't append anything, so they won't be changed/deleted logic-wise 
+        // unless we explicitly handle that in backend, but existing PUT logic is:
+        // if file provided -> update path. Else -> keep path? 
+        // Wait, standard file input ... req.files['image']. 
+        // Backend: `if (req.files['image']) ...` . 
+        // So if we don't send files, it just updates text fields. Perfect.
+
+        await api.put(`/parts/${part.id}`, formData);
+        await fetchParts(); // Refresh list
+        cancelInlineEdit();
+    } catch (err) {
+        alert('Saved failed');
+        console.error(err);
     }
 };
 </script>
@@ -288,30 +345,81 @@ const handleBulkAction = async (action) => {
                 </div>
               </td>
               <td class="col-name">
-                <div class="name-cell">
+                <div class="name-cell" v-if="editingPartId !== part.id">
                   <span class="part-name">{{ part.name }}</span>
                   <div class="tags-container" v-if="part.tags">
                        <span v-for="tag in part.tags.split(',')" :key="tag" class="small-tag-pill">{{ tag }}</span>
                   </div>
                   <span class="part-desc" v-if="part.description">{{ part.description }}</span>
                 </div>
+                <!-- Edit Mode: Name -->
+                <div class="name-cell" v-else @click.stop>
+                    <input v-model="editingForm.name" class="inline-input" placeholder="パーツ名" />
+                    <div style="margin-top: 0.5rem;" @click.stop>
+                        <TagInput v-model="editingForm.tags" :suggestions="tags" />
+                    </div>
+                </div>
               </td>
-              <td>{{ part.category_name || '-' }}</td>
-              <td>{{ part.location_name || '-' }}</td>
               <td>
-                <span class="qty-badge" :class="{ 'low-stock': part.quantity < 5 }">
-                  {{ part.quantity }}
-                </span>
+                  <template v-if="editingPartId !== part.id">
+                      {{ part.category_name || '-' }}
+                  </template>
+                  <!-- Edit Mode: Category -->
+                  <div v-else @click.stop>
+                      <select v-model="editingForm.category_id" class="inline-select">
+                          <option value="">(未分類)</option>
+                          <option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
+                      </select>
+                  </div>
               </td>
               <td>
-                <button 
-                  v-if="part.datasheet_url || part.datasheet_path" 
-                  class="btn-icon list-datasheet-btn" 
-                  @click="(e) => openDatasheet(e, part)"
-                  title="データシート"
-                >
-                  📄
-                </button>
+                  <template v-if="editingPartId !== part.id">
+                      {{ part.location_name || '-' }}
+                  </template>
+                  <!-- Edit Mode: Location -->
+                  <div v-else @click.stop>
+                       <select v-model="editingForm.location_id" class="inline-select">
+                          <option value="">(未設定)</option>
+                          <option v-for="loc in locations" :key="loc.id" :value="loc.id">{{ loc.name }}</option>
+                      </select>
+                  </div>
+              </td>
+              <td>
+                  <template v-if="editingPartId !== part.id">
+                    <span class="qty-badge" :class="{ 'low-stock': part.quantity < 5 }">
+                      {{ part.quantity }}
+                    </span>
+                  </template>
+                  <!-- Edit Mode: Quantity -->
+                  <div v-else @click.stop>
+                      <input type="number" v-model="editingForm.quantity" class="inline-input qty-input" min="0" />
+                  </div>
+              </td>
+              <td>
+                <div class="action-cell">
+                    <template v-if="editingPartId !== part.id">
+                        <button 
+                        class="btn-icon list-action-btn" 
+                        @click.stop="startInlineEdit(part)"
+                        title="編集"
+                        >
+                        ✏️
+                        </button>
+                        <button 
+                        v-if="part.datasheet_url || part.datasheet_path" 
+                        class="btn-icon list-datasheet-btn" 
+                        @click="(e) => openDatasheet(e, part)"
+                        title="データシート"
+                        >
+                        📄
+                        </button>
+                    </template>
+                    <!-- Edit Mode: Actions -->
+                    <template v-else>
+                         <button class="btn-icon text-success" @click.stop="saveInlineEdit(part)">✅</button>
+                         <button class="btn-icon text-danger" @click.stop="cancelInlineEdit">❌</button>
+                    </template>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -793,4 +901,41 @@ td {
     color: white;
     border: none;
 }
+
+/* Inline Editing Styles */
+.inline-input, .inline-select {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--border-color);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    color: white;
+}
+
+.qty-input {
+    width: 70px;
+    text-align: right;
+}
+
+.action-cell {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.list-action-btn {
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  padding: 0.4rem;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+.list-action-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+}
+
+.text-success { color: var(--success); font-size: 1.2rem; }
+.text-danger { color: var(--danger); font-size: 1.2rem; }
 </style>

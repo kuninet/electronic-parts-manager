@@ -1,6 +1,8 @@
 <script setup>
 import { ref, onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
 import api from '../api';
+import TagInput from './TagInput.vue';
 
 const props = defineProps({
   part: {
@@ -26,7 +28,8 @@ const locations = ref([]);
 const imageFile = ref(null);
 const datasheetFile = ref(null);
 const loading = ref(false);
-const newTag = ref('');
+const datasheetFile = ref(null);
+const loading = ref(false);
 const suggestedTags = ref([]);
 
 onMounted(async () => {
@@ -61,16 +64,8 @@ const handleDatasheetChange = (e) => {
   datasheetFile.value = e.target.files[0];
 };
 
-const addTag = () => {
-    const val = newTag.value.trim();
-    if (val && !formData.value.tags.includes(val)) {
-        formData.value.tags.push(val);
-    }
-    newTag.value = '';
-};
-
-const removeTag = (index) => {
-    formData.value.tags.splice(index, 1);
+const handleDatasheetChange = (e) => {
+  datasheetFile.value = e.target.files[0];
 };
 
 const handleSubmit = async () => {
@@ -183,24 +178,7 @@ const handleSubmit = async () => {
 
         <div class="form-group">
           <label>タグ</label>
-          <div class="tag-input-container">
-            <input 
-              v-model="newTag" 
-              @keydown.enter.prevent="addTag" 
-              placeholder="タグを入力してEnter" 
-              list="tag-suggestions"
-            />
-            <datalist id="tag-suggestions">
-              <option v-for="tag in suggestedTags" :key="tag.id" :value="tag.name" />
-            </datalist>
-            <button type="button" class="btn btn-small" @click="addTag">追加</button>
-          </div>
-          <div class="tags-list">
-            <span v-for="(tag, index) in formData.tags" :key="index" class="tag-pill">
-              {{ tag }}
-              <button type="button" class="remove-tag" @click="removeTag(index)">×</button>
-            </span>
-          </div>
+          <TagInput v-model="formData.tags" :suggestions="suggestedTags" />
         </div>
 
         <div class="form-group">
@@ -330,46 +308,5 @@ input:focus, select:focus, textarea:focus {
   max-height: 200px;
   border-radius: 8px;
   border: 1px solid var(--border-color);
-}
-
-.tag-input-container {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.tags-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-}
-
-.tag-pill {
-  background: var(--accent-color);
-  color: white;
-  padding: 0.25rem 0.75rem;
-  border-radius: 1rem;
-  font-size: 0.85rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.remove-tag {
-  background: none;
-  border: none;
-  color: white;
-  font-size: 1.1rem;
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-}
-
-.remove-tag:hover {
-  color: #ffcccc;
-}
-
-.btn-small {
-  padding: 0.5rem 1rem;
 }
 </style>
