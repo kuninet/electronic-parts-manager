@@ -8,7 +8,13 @@ const categories = ref([]);
 const locations = ref([]);
 const newCategory = ref('');
 const newLocation = ref('');
+
 const loading = ref(false);
+
+const editingId = ref(null);
+const editingType = ref(null); // 'category' or 'location'
+const editingName = ref('');
+const editingDesc = ref('');
 
 const fetchData = async () => {
   try {
@@ -66,6 +72,35 @@ const deleteLocation = async (id) => {
     alert('Failed to delete location');
   }
 };
+
+const startEdit = (type, item) => {
+    editingId.value = item.id;
+    editingType.value = type;
+    editingName.value = item.name;
+    if (type === 'location') editingDesc.value = item.description || '';
+};
+
+const cancelEdit = () => {
+    editingId.value = null;
+    editingType.value = null;
+    editingName.value = '';
+    editingDesc.value = '';
+};
+
+const saveEdit = async () => {
+    if (!editingName.value) return;
+    try {
+        if (editingType.value === 'category') {
+            await api.put(`/categories/${editingId.value}`, { name: editingName.value });
+        } else {
+            await api.put(`/locations/${editingId.value}`, { name: editingName.value, description: editingDesc.value });
+        }
+        fetchData();
+        cancelEdit();
+    } catch (err) {
+        alert('Updates failed');
+    }
+};
 </script>
 
 <template>
@@ -83,8 +118,20 @@ const deleteLocation = async (id) => {
           </div>
           <ul class="list">
             <li v-for="cat in categories" :key="cat.id">
-              <span>{{ cat.name }}</span>
-              <button class="btn-icon" @click="deleteCategory(cat.id)">🗑</button>
+              <template v-if="editingId === cat.id && editingType === 'category'">
+                  <div class="edit-group">
+                      <input v-model="editingName" @keyup.enter="saveEdit" />
+                      <button class="btn-icon text-success" @click="saveEdit">✅</button>
+                      <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
+                  </div>
+              </template>
+              <template v-else>
+                  <span>{{ cat.name }}</span>
+                  <div class="actions">
+                      <button class="btn-icon" @click="startEdit('category', cat)">✏️</button>
+                      <button class="btn-icon" @click="deleteCategory(cat.id)">🗑</button>
+                  </div>
+              </template>
             </li>
           </ul>
         </div>
@@ -98,8 +145,20 @@ const deleteLocation = async (id) => {
           </div>
           <ul class="list">
             <li v-for="loc in locations" :key="loc.id">
-              <span>{{ loc.name }}</span>
-              <button class="btn-icon" @click="deleteLocation(loc.id)">🗑</button>
+              <template v-if="editingId === loc.id && editingType === 'location'">
+                   <div class="edit-group">
+                      <input v-model="editingName" @keyup.enter="saveEdit" />
+                      <button class="btn-icon text-success" @click="saveEdit">✅</button>
+                      <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
+                   </div>
+              </template>
+              <template v-else>
+                  <span>{{ loc.name }}</span>
+                  <div class="actions">
+                      <button class="btn-icon" @click="startEdit('location', loc)">✏️</button>
+                      <button class="btn-icon" @click="deleteLocation(loc.id)">🗑</button>
+                  </div>
+              </template>
             </li>
           </ul>
         </div>
@@ -197,9 +256,24 @@ input {
 }
 
 .btn-icon:hover {
-  background: rgba(239, 68, 68, 0.2);
-  color: var(--danger);
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 1;
 }
+
+.actions {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.edit-group {
+    display: flex;
+    gap: 0.5rem;
+    flex: 1;
+    align-items: center;
+}
+
+.text-success { color: var(--success); }
+.text-danger { color: var(--danger); }
 
 .footer {
   margin-top: 2rem;

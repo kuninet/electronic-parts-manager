@@ -24,6 +24,16 @@ router.post('/', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+router.put('/:id', async (req, res) => {
+    try {
+        const db = getDb();
+        const { name } = req.body;
+        await db.run('UPDATE categories SET name = ? WHERE id = ?', [name, req.params.id]);
+        res.json({ message: 'Category updated' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 // DELETE /api/categories/:id
 router.delete('/:id', async (req, res) => {
