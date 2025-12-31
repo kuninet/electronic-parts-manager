@@ -20,6 +20,10 @@ const showTrash = ref(false);
 const selectedItems = ref(new Set());
 const isSelecting = ref(false);
 
+// Sorting
+const sortField = ref('id');
+const sortOrder = ref('desc');
+
 const fetchMetadata = async () => {
   try {
     const [catsRes, locsRes, tagsRes] = await Promise.all([
@@ -43,8 +47,13 @@ const fetchParts = async () => {
     if (selectedCategory.value) params.category_id = selectedCategory.value;
     if (selectedLocation.value) params.location_id = selectedLocation.value;
     if (selectedTag.value) params.tag_id = selectedTag.value;
+
     if (showTrash.value) params.status = 'trash';
     
+    // Sorting parameters
+    params.sort = sortField.value;
+    params.order = sortOrder.value;
+
     const response = await api.get('/parts', { params });
     parts.value = response.data;
     selectedItems.value.clear(); // Clear selection on reload
@@ -63,7 +72,7 @@ onMounted(() => {
 
 // Debounce search
 let timeout;
-watch([searchQuery, selectedCategory, selectedLocation, selectedTag, showTrash], () => {
+watch([searchQuery, selectedCategory, selectedLocation, selectedTag, showTrash, sortField, sortOrder], () => {
   clearTimeout(timeout);
   timeout = setTimeout(() => {
     fetchParts();
@@ -145,6 +154,19 @@ const handleBulkAction = async (action) => {
           {{ tag.name }}
         </option>
       </select>
+
+      <div class="sort-controls">
+         <select v-model="sortField" class="filter-select sort-select">
+            <option value="id">登録順</option>
+            <option value="name">名前順</option>
+            <option value="category">カテゴリ順</option>
+            <option value="location">保管場所順</option>
+            <option value="quantity">個数順</option>
+         </select>
+         <button class="btn-icon sort-order-btn" @click="sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'" :title="sortOrder === 'asc' ? '昇順' : '降順'">
+             {{ sortOrder === 'asc' ? '⬆️' : '⬇️' }}
+         </button>
+      </div>
 
       <button class="btn btn-primary" @click="$emit('add')" v-if="!showTrash">
         + 追加
@@ -306,6 +328,30 @@ const handleBulkAction = async (action) => {
   display: flex;
   gap: 1rem;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.sort-controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.sort-select {
+    min-width: 110px;
+}
+
+.sort-order-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    padding: 0.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+.sort-order-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
 }
 
 .search-input {

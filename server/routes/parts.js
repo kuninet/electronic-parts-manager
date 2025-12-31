@@ -27,7 +27,7 @@ const upload = uploadMiddleware.fields([
 router.get('/', async (req, res) => {
     try {
         const db = getDb();
-        const { category_id, location_id, tag_id, search, status } = req.query;
+        const { category_id, location_id, tag_id, search, status, sort, order } = req.query;
         let query = `
       SELECT p.*, c.name as category_name, l.name as location_name,
       (SELECT GROUP_CONCAT(t.name, ',') FROM tags t JOIN part_tags pt ON t.id = pt.tag_id WHERE pt.part_id = p.id) as tags
@@ -64,7 +64,19 @@ router.get('/', async (req, res) => {
             params.push(`%${search}%`, `%${search}%`);
         }
 
-        query += ` ORDER BY p.id DESC`;
+        // Sorting
+        let sortColumn = 'p.id';
+        let sortOrder = 'DESC';
+
+        if (sort === 'name') sortColumn = 'p.name';
+        else if (sort === 'category') sortColumn = 'category_name';
+        else if (sort === 'location') sortColumn = 'location_name';
+        else if (sort === 'created_at') sortColumn = 'p.created_at';
+        else if (sort === 'quantity') sortColumn = 'p.quantity';
+
+        if (order && order.toUpperCase() === 'ASC') sortOrder = 'ASC';
+
+        query += ` ORDER BY ${sortColumn} ${sortOrder}`;
 
         const parts = await db.all(query, params);
         res.json(parts);
