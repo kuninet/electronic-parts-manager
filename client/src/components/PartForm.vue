@@ -114,7 +114,15 @@ const handleSubmit = async () => {
 <template>
   <div class="modal-overlay" @click.self="$emit('close')">
     <div class="modal-content glass-panel">
-      <h2>{{ part ? 'パーツ編集' : '新規パーツ追加' }}</h2>
+      <div class="modal-header-actions">
+          <h2>{{ part ? 'パーツ編集' : '新規パーツ追加' }}</h2>
+           <div class="form-actions-top">
+              <button type="button" class="btn btn-sm" @click="$emit('close')">キャンセル</button>
+              <button type="button" class="btn btn-primary btn-sm" @click="handleSubmit" :disabled="loading">
+                {{ loading ? '保存中...' : '保存' }}
+              </button>
+            </div>
+      </div>
       
       <form @submit.prevent="handleSubmit" class="part-form">
         <div class="form-group">
@@ -220,8 +228,28 @@ const handleSubmit = async () => {
 }
 
 h2 {
-  margin-bottom: 1.5rem;
+  margin-bottom: 0; /* Changed from 1.5rem */
   color: var(--accent-color);
+  font-size: 1.25rem;
+}
+
+.modal-header-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.form-actions-top {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.btn-sm {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.9rem;
 }
 
 .part-form {

@@ -106,7 +106,7 @@ const onCameraFileChange = async (event) => {
              showModal.value = true;
         }
 
-        alert('画像を登録しました！詳細を編集してください。');
+
 
     } catch (err) {
         console.error(err);
