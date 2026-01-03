@@ -196,6 +196,74 @@ const openDatasheetUrl = (part) => {
         window.open(part.datasheet_url, '_blank');
     }
 };
+
+// Quick Edit Logic
+const editingNameId = ref(null);
+const editNameModel = ref('');
+const editingQtyId = ref(null);
+const editQtyModel = ref(0);
+
+const quickUpdatePart = async (part, changes) => {
+    try {
+        const formData = new FormData();
+        // Construct full object from part + changes
+        const merged = { ...part, ...changes };
+        
+        formData.append('name', merged.name);
+        formData.append('quantity', merged.quantity);
+        formData.append('category_id', merged.category_id || '');
+        formData.append('location_id', merged.location_id || '');
+        formData.append('tags', merged.tags || '');
+        formData.append('description', merged.description || '');
+        formData.append('datasheet_url', merged.datasheet_url || '');
+
+        await api.put(`/parts/${part.id}`, formData);
+        await fetchParts(); // Refresh
+    } catch (err) {
+        console.error(err);
+        alert('Update failed');
+    }
+};
+
+const startNameEdit = (part) => {
+    editingNameId.value = part.id;
+    editNameModel.value = part.name;
+    // Wait for DOM update to focus input (requires nextTick or similar, but template ref handling is easier)
+};
+
+const saveNameEdit = async (part) => {
+    if (editingNameId.value !== part.id) return;
+    if (editNameModel.value !== part.name) {
+        await quickUpdatePart(part, { name: editNameModel.value });
+    }
+    editingNameId.value = null;
+};
+
+const startQtyEdit = (part) => {
+    editingQtyId.value = part.id;
+    editQtyModel.value = part.quantity;
+};
+
+const saveQtyEdit = async (part) => {
+    if (editingQtyId.value !== part.id) return;
+    if (editQtyModel.value != part.quantity) {
+        await quickUpdatePart(part, { quantity: editQtyModel.value });
+    }
+    editingQtyId.value = null;
+};
+
+const quickRemoveTag = async (part, tagToRemove) => {
+    if(!confirm(`タグ「${tagToRemove}」を削除しますか？`)) return;
+    
+    const currentTags = part.tags ? part.tags.split(',') : [];
+    const newTags = currentTags.filter(t => t !== tagToRemove);
+    await quickUpdatePart(part, { tags: newTags.join(',') });
+};
+
+
+const vFocus = {
+  mounted: (el) => el.focus()
+};
 </script>
 
 <template>
@@ -319,21 +387,52 @@ const openDatasheetUrl = (part) => {
                 <div v-else class="placeholder-image">⚡️</div>
               </div>
               <div class="part-info">
-                <h3>{{ part.name }}</h3>
+                
+                <!-- Quick Edit: Name -->
+                <div v-if="editingNameId === part.id" class="name-edit-wrapper" @click.stop>
+                    <input 
+                        v-model="editNameModel" 
+                        @blur="saveNameEdit(part)" 
+                        @keyup.enter="saveNameEdit(part)"
+                        class="quick-edit-input"
+                        ref="nameInput"
+                        v-focus
+                    />
+                </div>
+                <h3 v-else @click.stop="startNameEdit(part)" class="editable-text" title="クリックで編集">
+                    {{ part.name }}
+                </h3>
+
+                <!-- Quick Edit: Tags -->
                 <div class="tags-container" v-if="part.tags">
-                    <span v-for="tag in part.tags.split(',')" :key="tag" class="small-tag-pill">{{ tag }}</span>
+                    <span v-for="tag in part.tags.split(',')" :key="tag" class="small-tag-pill">
+                        {{ tag }}
+                    </span>
                 </div>
                 <p class="category" v-if="part.category_name">{{ part.category_name }}</p>
-                <div class="stock-badge" :class="{ 'low-stock': part.quantity < 5 }">
+                
+                <!-- Quick Edit: Quantity -->
+                <div v-if="editingQtyId === part.id" class="stock-badge editing" @click.stop>
+                     <input 
+                        type="number"
+                        v-model="editQtyModel" 
+                        @blur="saveQtyEdit(part)" 
+                        @keyup.enter="saveQtyEdit(part)"
+                        class="quick-edit-input-qty"
+                        v-focus
+                    />
+                </div>
+                <div v-else class="stock-badge editable-badge" :class="{ 'low-stock': part.quantity < 5 }" @click.stop="startQtyEdit(part)" title="クリックで編集">
                   {{ part.quantity }} pcs
                 </div>
+
                 <p class="location" v-if="part.location_name">📍 {{ part.location_name }}</p>
                 
                 <div class="card-icons">
                    <button 
                     class="btn-icon small-icon" 
                         @click.stop="startInlineEdit(part)"
-                        title="編集"
+                        title="詳細編集モード"
                     >
                     ✏️
                     </button>
@@ -818,6 +917,54 @@ select option {
 
 .grid-tag-input {
     min-height: 40px;
+}
+
+/* Quick Edit Styles */
+.editable-text {
+    cursor: pointer;
+    border-bottom: 1px dashed transparent;
+    transition: border-color 0.2s;
+}
+
+.editable-text:hover {
+    border-bottom-color: var(--accent-color);
+}
+
+.quick-edit-input {
+    width: 100%;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--accent-color);
+    color: white;
+    font-size: 1.1rem;
+    font-weight: bold;
+    padding: 0.2rem 0.5rem;
+    padding-right: 4.5rem; /* Avoid overlap with stock badge */
+    border-radius: 4px;
+}
+
+.quick-edit-input-qty {
+    width: 60px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid white;
+    color: white;
+    font-size: 0.8rem;
+    font-weight: bold;
+    padding: 0;
+    text-align: center;
+    border-radius: 4px;
+}
+
+.editable-tag {
+    /* position: relative; padding-right: 1.2rem; Tag delete removed per user request */
+}
+
+.editable-badge {
+    cursor: pointer;
+    transition: transform 0.1s;
+}
+
+.editable-badge:hover {
+    transform: scale(1.1);
 }
 
 table {
