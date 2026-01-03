@@ -36,6 +36,7 @@ erDiagram
         integer id PK
         string name
         string description
+        string image_path
     }
 
     tags {
@@ -79,6 +80,7 @@ erDiagram
 | `id` | INTEGER | 主キー |
 | `name` | TEXT | 場所名 (例: Box A) |
 | `description` | TEXT | 場所の説明 |
+| `image_path` | TEXT | 保管場所の写真パス (`/uploads/...`) |
 
 ### `tags` (タグマスタ)
 | カラム名 | 型 | 説明 |

@@ -67,8 +67,8 @@
 
 #### 保管場所 (`/api/locations`)
 -   `GET /`: 一覧取得
--   `POST /`: 新規作成 (`{ name, description }`)
--   `PUT /:id`: 名称変更 (`{ name, description }`)
+-   `POST /`: 新規作成 (`multipart/form-data`: `{ name, description, image }`)
+-   `PUT /:id`: 更新 (`multipart/form-data`: `{ name, description, image }`)
 -   `DELETE /:id`: 削除
 
 #### タグ (`/api/tags`)
