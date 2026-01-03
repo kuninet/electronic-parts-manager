@@ -28,6 +28,8 @@ const showTrash = ref(false);
 const selectedItems = ref(new Set());
 const isSelecting = ref(false);
 
+const gridSize = ref('medium'); // 'small', 'medium', 'large'
+
 // Sorting
 const sortField = ref('id');
 const sortOrder = ref('desc');
@@ -171,13 +173,6 @@ const saveInlineEdit = async (part) => {
         formData.append('description', part.description || '');
         formData.append('datasheet_url', part.datasheet_url || '');
 
-        // Note: For files, we don't append anything, so they won't be changed/deleted logic-wise 
-        // unless we explicitly handle that in backend, but existing PUT logic is:
-        // if file provided -> update path. Else -> keep path? 
-        // Wait, standard file input ... req.files['image']. 
-        // Backend: `if (req.files['image']) ...` . 
-        // So if we don't send files, it just updates text fields. Perfect.
-
         await api.put(`/parts/${part.id}`, formData);
         await fetchParts(); // Refresh list
         cancelInlineEdit();
@@ -247,6 +242,12 @@ const openDatasheetUrl = (part) => {
          </button>
       </div>
 
+      <div v-if="viewMode === 'grid'" class="grid-size-controls">
+          <button class="btn-icon size-btn" :class="{ active: gridSize === 'small' }" @click="gridSize = 'small'" title="小">S</button>
+          <button class="btn-icon size-btn" :class="{ active: gridSize === 'medium' }" @click="gridSize = 'medium'" title="中">M</button>
+          <button class="btn-icon size-btn" :class="{ active: gridSize === 'large' }" @click="gridSize = 'large'" title="大">L</button>
+      </div>
+
       <button class="btn btn-primary" @click="$emit('add')" v-if="!showTrash">
         + 追加
       </button>
@@ -300,51 +301,85 @@ const openDatasheetUrl = (part) => {
     
     <div v-else>
       <!-- Grid View -->
-      <div v-if="viewMode === 'grid'" class="parts-grid">
+      <div v-if="viewMode === 'grid'" class="parts-grid" :class="gridSize">
         <div 
             v-for="part in parts" 
             :key="part.id" 
             class="part-card glass-panel" 
-            :class="{ selected: selectedItems.has(part.id) }"
-            @click="isSelecting ? toggleSelection(part) : $emit('edit', part)"
+            :class="{ selected: selectedItems.has(part.id), 'editing': editingPartId === part.id }"
+            @click="isSelecting ? toggleSelection(part) : (editingPartId === part.id ? null : $emit('edit', part))"
         >
-          <div class="card-selection" @click.stop>
-            <input type="checkbox" :checked="selectedItems.has(part.id)" @change="toggleSelection(part)" />
-          </div>
+          <div v-if="editingPartId !== part.id" class="card-view-content">
+              <div class="card-selection" @click.stop>
+                <input type="checkbox" :checked="selectedItems.has(part.id)" @change="toggleSelection(part)" />
+              </div>
 
-          <div class="part-image">
-            <img v-if="part.image_path" :src="part.image_path" :alt="part.name" />
-            <div v-else class="placeholder-image">⚡️</div>
+              <div class="part-image">
+                <img v-if="part.image_path" :src="part.image_path" :alt="part.name" />
+                <div v-else class="placeholder-image">⚡️</div>
+              </div>
+              <div class="part-info">
+                <h3>{{ part.name }}</h3>
+                <div class="tags-container" v-if="part.tags">
+                    <span v-for="tag in part.tags.split(',')" :key="tag" class="small-tag-pill">{{ tag }}</span>
+                </div>
+                <p class="category" v-if="part.category_name">{{ part.category_name }}</p>
+                <div class="stock-badge" :class="{ 'low-stock': part.quantity < 5 }">
+                  {{ part.quantity }} pcs
+                </div>
+                <p class="location" v-if="part.location_name">📍 {{ part.location_name }}</p>
+                
+                <div class="card-icons">
+                   <button 
+                    class="btn-icon small-icon" 
+                        @click.stop="startInlineEdit(part)"
+                        title="編集"
+                    >
+                    ✏️
+                    </button>
+                   <button 
+                    v-if="part.datasheet_path" 
+                    class="btn-icon small-icon" 
+                    @click.stop="openDatasheetFile(part)"
+                    title="データシート (PDF)"
+                    >
+                    📄
+                    </button>
+                    <button 
+                    v-if="part.datasheet_url" 
+                    class="btn-icon small-icon" 
+                    @click.stop="openDatasheetUrl(part)"
+                    title="関連リンク"
+                    >
+                    🌐
+                    </button>
+               </div>
+              </div>
           </div>
-          <div class="part-info">
-            <h3>{{ part.name }}</h3>
-            <div class="tags-container" v-if="part.tags">
-                <span v-for="tag in part.tags.split(',')" :key="tag" class="small-tag-pill">{{ tag }}</span>
-            </div>
-            <p class="category" v-if="part.category_name">{{ part.category_name }}</p>
-            <div class="stock-badge" :class="{ 'low-stock': part.quantity < 5 }">
-              {{ part.quantity }} pcs
-            </div>
-            <p class="location" v-if="part.location_name">📍 {{ part.location_name }}</p>
-            
-            <div class="card-icons">
-               <button 
-                v-if="part.datasheet_path" 
-                class="btn-icon small-icon" 
-                @click.stop="openDatasheetFile(part)"
-                title="データシート (PDF)"
-                >
-                📄
-                </button>
-                <button 
-                v-if="part.datasheet_url" 
-                class="btn-icon small-icon" 
-                @click.stop="openDatasheetUrl(part)"
-                title="関連リンク"
-                >
-                🌐
-                </button>
-           </div>
+          <!-- Edit Mode Card -->
+          <div v-else class="card-edit-content" @click.stop>
+              <div class="card-edit-header">
+                  <span class="edit-title">編集</span>
+                  <div class="edit-actions">
+                      <button class="btn-icon text-success" @click="saveInlineEdit(part)">✅</button>
+                      <button class="btn-icon text-danger" @click="cancelInlineEdit">❌</button>
+                  </div>
+              </div>
+              <div class="card-edit-form">
+                  <input v-model="editingForm.name" class="inline-input" placeholder="パーツ名" />
+                  <input type="number" v-model="editingForm.quantity" class="inline-input" placeholder="個数" />
+                  <select v-model="editingForm.category_id" class="inline-select">
+                      <option value="">(未分類)</option>
+                      <option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
+                  </select>
+                  <select v-model="editingForm.location_id" class="inline-select">
+                      <option value="">(未設定)</option>
+                      <option v-for="loc in locations" :key="loc.id" :value="loc.id">{{ loc.name }}</option>
+                  </select>
+                  <div class="grid-tag-input">
+                      <TagInput v-model="editingForm.tags" :suggestions="tags" />
+                  </div>
+              </div>
           </div>
         </div>
       </div>
@@ -637,7 +672,7 @@ select option {
 
 
 
-/* View Toggle */
+/* View Toggle & Grid Size */
 .view-toggle {
   display: flex;
   background: rgba(255, 255, 255, 0.05);
@@ -645,6 +680,37 @@ select option {
   border-radius: 8px;
   overflow: hidden;
 }
+
+.grid-size-controls {
+    display: flex;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-right: 0.5rem;
+}
+
+.size-btn {
+    padding: 0.5rem 0.8rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+    font-weight: bold;
+}
+
+.size-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.size-btn.active {
+  background: var(--accent-color);
+  color: white;
+}
+
 
 .toggle-btn {
   padding: 0.5rem 1rem;
@@ -669,6 +735,89 @@ select option {
 /* List View */
 .parts-list {
   overflow-x: auto;
+}
+
+.parts-grid {
+  display: grid;
+  gap: 1.5rem;
+  /* Default Medium */
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+}
+
+.parts-grid.small {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1rem;
+}
+
+.parts-grid.small .part-image { height: 120px; }
+.parts-grid.small .part-info h3 { font-size: 1rem; }
+
+.parts-grid.large {
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 2rem;
+}
+
+.parts-grid.large .part-image { height: 200px; }
+.parts-grid.large .part-info h3 { font-size: 1.3rem; }
+
+
+.part-card {
+  overflow: hidden;
+  transition: transform 0.2s;
+  cursor: pointer;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+.part-card.editing {
+    border: 2px solid var(--accent-color);
+    transform: none !important;
+    cursor: default;
+}
+
+.card-view-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    position: relative;
+}
+
+.card-edit-content {
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    height: 100%;
+}
+
+.card-edit-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5rem;
+}
+
+.edit-title {
+    font-weight: bold;
+    color: var(--accent-color);
+}
+
+.edit-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.card-edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    overflow-y: auto;
+}
+
+.grid-tag-input {
+    min-height: 40px;
 }
 
 table {
