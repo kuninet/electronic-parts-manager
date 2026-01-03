@@ -6,6 +6,8 @@ import DataManagement from './components/DataManagement.vue';
 import MasterDataManagement from './components/MasterDataManagement.vue';
 import LocationGridView from './components/LocationGridView.vue';
 
+import api from './api';
+
 const showModal = ref(false);
 const showDataModal = ref(false);
 const showMasterModal = ref(false);
@@ -14,6 +16,10 @@ const partsListKey = ref(0);
 
 const currentView = ref('parts'); // 'parts' or 'locations'
 const targetLocationId = ref('');
+
+// Mobile detection
+const isMobile = ref(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
+const cameraInput = ref(null);
 
 const openAddModal = () => {
   editingPart.value = null;
@@ -44,6 +50,71 @@ const switchView = (view) => {
     currentView.value = view;
     if (view === 'parts') targetLocationId.value = ''; // Reset filter when manually switching
 };
+
+const handleCameraClick = () => {
+    cameraInput.value.click();
+};
+
+const onCameraFileChange = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    try {
+        const now = new Date();
+        const timestamp = now.toLocaleString('ja-JP', { 
+            year: 'numeric', 
+            month: '2-digit', 
+            day: '2-digit', 
+            hour: '2-digit', 
+            minute: '2-digit' 
+        });
+        
+        const formData = new FormData();
+        formData.append('name', `(カメラ登録) ${timestamp}`);
+        formData.append('quantity', 1);
+        formData.append('image', file);
+
+        const res = await api.post('/parts', formData);
+        
+        // Refresh list
+        partsListKey.value++;
+        
+        // Open edit modal for the new part
+        // We need to fetch the full part data or construct it. The API returns id, name, etc.
+        // Let's assume response contains the ID.
+        if (res.data && res.data.id) {
+             // Fetch full details to be safe or use returned data
+             const partRes = await api.get(`/parts?search=${res.data.id}`); // This might not be efficient way to get by ID, but parts list logic uses filters.
+             // Actually, simplest is to just open edit with what we have + new.
+             // But PartForm expects full object. Let's just pass what we know + ID.
+             // Better: GET /parts/:id but we don't have that endpoint implemented in plan?
+             // Checking routes/parts.js -> It has GET / but no GET /:id. The GET / returns all.
+             // Filters work. Let's try to pass constructed object.
+             
+             const newPart = {
+                 id: res.data.id,
+                 name: res.data.name,
+                 image_path: res.data.image_path,
+                 quantity: 1,
+                 tags: [],
+                 category_id: null,
+                 location_id: null,
+                 description: ''
+             };
+             
+             editingPart.value = newPart;
+             showModal.value = true;
+        }
+
+        alert('画像を登録しました！詳細を編集してください。');
+
+    } catch (err) {
+        console.error(err);
+        alert('登録に失敗しました');
+    } finally {
+        event.target.value = ''; // Reset input
+    }
+};
 </script>
 
 <template>
@@ -73,6 +144,17 @@ const switchView = (view) => {
         </div>
 
         <nav class="nav-actions">
+          <input 
+            type="file" 
+            ref="cameraInput" 
+            accept="image/*" 
+            capture="environment" 
+            class="hidden-input" 
+            @change="onCameraFileChange"
+          />
+          <button class="btn btn-outline btn-sm camera-btn" @click="handleCameraClick">
+            📷 {{ isMobile ? 'カメラで追加' : '画像から追加' }}
+          </button>
           <button class="btn btn-outline btn-sm" @click="showMasterModal = true">⚙️ マスタ管理</button>
           <button class="btn btn-outline btn-sm" @click="showDataModal = true">📂 データ管理</button>
           <button class="btn btn-primary" @click="openAddModal">+ パーツ追加</button>
@@ -216,5 +298,9 @@ const switchView = (view) => {
     background: var(--accent-color);
     color: white;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.hidden-input {
+    display: none;
 }
 </style>

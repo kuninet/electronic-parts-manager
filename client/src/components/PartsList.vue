@@ -579,6 +579,8 @@ select option {
 .part-info h3 {
   margin-bottom: 0.5rem;
   font-size: 1.1rem;
+  padding-right: 4.5rem; /* Avoid overlap with stock badge */
+  word-break: break-all;
 }
 
 .category {
