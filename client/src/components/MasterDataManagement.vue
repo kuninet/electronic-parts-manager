@@ -121,6 +121,11 @@ const saveEdit = async () => {
         alert('Updates failed');
     }
 };
+
+const onEnter = (e, callback) => {
+    if (e.isComposing) return;
+    callback();
+};
 </script>
 
 <template>
@@ -133,14 +138,14 @@ const saveEdit = async () => {
         <div class="col">
           <h3>カテゴリ</h3>
           <div class="input-group">
-            <input v-model="newCategory" placeholder="新しいカテゴリ" @keyup.enter="addCategory" />
+            <input v-model="newCategory" placeholder="新しいカテゴリ" @keydown.enter="onEnter($event, addCategory)" />
             <button class="btn btn-primary" @click="addCategory">+</button>
           </div>
           <ul class="list">
             <li v-for="cat in categories" :key="cat.id">
               <template v-if="editingId === cat.id && editingType === 'category'">
                   <div class="edit-group">
-                      <input v-model="editingName" @keyup.enter="saveEdit" />
+                      <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" />
                       <button class="btn-icon text-success" @click="saveEdit">✅</button>
                       <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
                   </div>
@@ -160,7 +165,7 @@ const saveEdit = async () => {
         <div class="col">
           <h3>保管場所</h3>
           <div class="input-group">
-            <input v-model="newLocation" placeholder="新しい保管場所" @keyup.enter="addLocation" />
+            <input v-model="newLocation" placeholder="新しい保管場所" @keydown.enter="onEnter($event, addLocation)" />
             <div class="file-upload-mini">
               <label class="btn-icon camera-icon">
                 📷
@@ -178,7 +183,7 @@ const saveEdit = async () => {
             <li v-for="loc in locations" :key="loc.id">
               <template v-if="editingId === loc.id && editingType === 'location'">
                    <div class="edit-group-col">
-                      <input v-model="editingName" @keyup.enter="saveEdit" placeholder="名前" />
+                      <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" placeholder="名前" />
                       <input v-model="editingDesc" placeholder="説明" />
                       
                       <div class="edit-image-row">
