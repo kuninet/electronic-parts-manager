@@ -261,6 +261,11 @@ const quickRemoveTag = async (part, tagToRemove) => {
 };
 
 
+const onEnter = (e, callback) => {
+    if (e.isComposing) return;
+    callback();
+};
+
 const vFocus = {
   mounted: (el) => el.focus()
 };
@@ -393,7 +398,7 @@ const vFocus = {
                     <input 
                         v-model="editNameModel" 
                         @blur="saveNameEdit(part)" 
-                        @keyup.enter="saveNameEdit(part)"
+                        @keydown.enter="onEnter($event, () => saveNameEdit(part))"
                         class="quick-edit-input"
                         ref="nameInput"
                         v-focus
@@ -417,7 +422,7 @@ const vFocus = {
                         type="number"
                         v-model="editQtyModel" 
                         @blur="saveQtyEdit(part)" 
-                        @keyup.enter="saveQtyEdit(part)"
+                        @keydown.enter="onEnter($event, () => saveQtyEdit(part))"
                         class="quick-edit-input-qty"
                         v-focus
                     />
@@ -708,6 +713,7 @@ select option {
 .part-info {
   padding: 1rem;
   position: relative;
+  min-height: 110px; /* Increased to 110px to definitely prevent badge/icon overlap */
 }
 
 .part-info h3 {
