@@ -146,8 +146,11 @@ router.put('/:id', upload, async (req, res) => {
         const { name, description, category_id, location_id, quantity, datasheet_url } = req.body;
         const id = req.params.id;
 
+        const safeCategoryId = (category_id === '' || category_id === 'null' || category_id === undefined) ? null : category_id;
+        const safeLocationId = (location_id === '' || location_id === 'null' || location_id === undefined) ? null : location_id;
+
         let query = `UPDATE parts SET name = ?, description = ?, category_id = ?, location_id = ?, quantity = ?, datasheet_url = ?, updated_at = CURRENT_TIMESTAMP`;
-        const params = [name, description, category_id, location_id, quantity, datasheet_url];
+        const params = [name, description, safeCategoryId, safeLocationId, quantity, datasheet_url];
 
         // Fetch current file paths to delete old files if necessary
         const currentPart = await db.get('SELECT image_path, datasheet_path FROM parts WHERE id = ?', [id]);

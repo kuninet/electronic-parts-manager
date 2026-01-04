@@ -177,8 +177,9 @@ const saveInlineEdit = async (part) => {
         await fetchParts(); // Refresh list
         cancelInlineEdit();
     } catch (err) {
-        alert('Saved failed');
         console.error(err);
+        const msg = err.response?.data?.error || 'Save failed';
+        alert(msg);
     }
 };
 
@@ -221,7 +222,8 @@ const quickUpdatePart = async (part, changes) => {
         await fetchParts(); // Refresh
     } catch (err) {
         console.error(err);
-        alert('Update failed');
+        const msg = err.response?.data?.error || 'Update failed';
+        alert(msg);
     }
 };
 
