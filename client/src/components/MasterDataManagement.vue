@@ -52,7 +52,8 @@ const deleteCategory = async (id) => {
     await api.delete(`/categories/${id}`);
     fetchData();
   } catch (err) {
-    alert('Failed to delete category');
+    const msg = err.response?.data?.error || 'Failed to delete category';
+    alert(msg);
   }
 };
 
@@ -84,7 +85,8 @@ const deleteLocation = async (id) => {
     await api.delete(`/locations/${id}`);
     fetchData();
   } catch (err) {
-    alert('Failed to delete location');
+    const msg = err.response?.data?.error || 'Failed to delete location';
+    alert(msg);
   }
 };
 
@@ -296,7 +298,7 @@ const onEnter = (e, callback) => {
   background: #1e293b;
   padding: 2rem;
   width: 90%;
-  max-width: 800px;
+  max-width: 1100px;
   max-height: 80vh;
   overflow-y: auto;
 }
