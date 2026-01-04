@@ -19,13 +19,16 @@ async function initDb() {
   await db.exec(`
     CREATE TABLE IF NOT EXISTS categories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL
+      name TEXT NOT NULL,
+      display_order INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS locations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      description TEXT
+      description TEXT,
+      image_path TEXT,
+      display_order INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS parts (
@@ -47,7 +50,8 @@ async function initDb() {
 
     CREATE TABLE IF NOT EXISTS tags (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE
+      name TEXT NOT NULL UNIQUE,
+      display_order INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS part_tags (
@@ -72,6 +76,17 @@ async function initDb() {
   } catch (e) {
     // Column likely already exists
   }
+
+  // Migration: Add display_order to categories, locations, tags
+  try {
+    await db.run('ALTER TABLE categories ADD COLUMN display_order INTEGER DEFAULT 0');
+  } catch (e) { }
+  try {
+    await db.run('ALTER TABLE locations ADD COLUMN display_order INTEGER DEFAULT 0');
+  } catch (e) { }
+  try {
+    await db.run('ALTER TABLE tags ADD COLUMN display_order INTEGER DEFAULT 0');
+  } catch (e) { }
 
   // Seed some initial data if empty
   const categories = await db.all('SELECT * FROM categories');

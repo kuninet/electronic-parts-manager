@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import api from '../api';
+import draggable from 'vuedraggable';
 
 const emit = defineEmits(['close']);
 
@@ -155,6 +156,16 @@ const onEnter = (e, callback) => {
     if (e.isComposing) return;
     callback();
 };
+
+const handleReorder = async (type, list) => {
+    try {
+        const ids = list.map(item => item.id);
+        await api.post('/master/reorder', { type, ids });
+    } catch (err) {
+        console.error('Reorder failed', err);
+        alert('順序の保存に失敗しました');
+    }
+};
 </script>
 
 <template>
@@ -170,24 +181,34 @@ const onEnter = (e, callback) => {
             <input v-model="newCategory" placeholder="新しいカテゴリ" @keydown.enter="onEnter($event, addCategory)" />
             <button class="btn btn-primary" @click="addCategory">+</button>
           </div>
-          <ul class="list">
-            <li v-for="cat in categories" :key="cat.id">
-              <template v-if="editingId === cat.id && editingType === 'category'">
-                  <div class="edit-group">
-                      <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" />
-                      <button class="btn-icon text-success" @click="saveEdit">✅</button>
-                      <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
-                  </div>
-              </template>
-              <template v-else>
-                  <span>{{ cat.name }}</span>
-                  <div class="actions">
-                      <button class="btn-icon" @click="startEdit('category', cat)">✏️</button>
-                      <button class="btn-icon" @click="deleteCategory(cat.id)">🗑</button>
-                  </div>
-              </template>
-            </li>
-          </ul>
+          <draggable 
+            v-model="categories" 
+            item-key="id" 
+            tag="ul" 
+            class="list"
+            handle=".drag-handle"
+            @change="handleReorder('categories', categories)"
+          >
+            <template #item="{ element: cat }">
+                <li>
+                  <template v-if="editingId === cat.id && editingType === 'category'">
+                      <div class="edit-group">
+                          <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" />
+                          <button class="btn-icon text-success" @click="saveEdit">✅</button>
+                          <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
+                      </div>
+                  </template>
+                  <template v-else>
+                      <span class="drag-handle">☰</span>
+                      <span>{{ cat.name }}</span>
+                      <div class="actions">
+                          <button class="btn-icon" @click="startEdit('category', cat)">✏️</button>
+                          <button class="btn-icon" @click="deleteCategory(cat.id)">🗑</button>
+                      </div>
+                  </template>
+                </li>
+            </template>
+          </draggable>
         </div>
 
         <!-- Tags -->
@@ -197,24 +218,34 @@ const onEnter = (e, callback) => {
             <input v-model="newTag" placeholder="新しいタグ" @keydown.enter="onEnter($event, addTag)" />
             <button class="btn btn-primary" @click="addTag">+</button>
           </div>
-          <ul class="list">
-            <li v-for="tag in tags" :key="tag.id">
-              <template v-if="editingId === tag.id && editingType === 'tag'">
-                  <div class="edit-group">
-                      <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" />
-                      <button class="btn-icon text-success" @click="saveEdit">✅</button>
-                      <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
-                  </div>
-              </template>
-              <template v-else>
-                  <span>{{ tag.name }}</span>
-                  <div class="actions">
-                      <button class="btn-icon" @click="startEdit('tag', tag)">✏️</button>
-                      <button class="btn-icon" @click="deleteTag(tag.id)">🗑</button>
-                  </div>
-              </template>
-            </li>
-          </ul>
+          <draggable 
+            v-model="tags" 
+            item-key="id" 
+            tag="ul" 
+            class="list"
+            handle=".drag-handle"
+            @change="handleReorder('tags', tags)"
+          >
+            <template #item="{ element: tag }">
+                <li>
+                  <template v-if="editingId === tag.id && editingType === 'tag'">
+                      <div class="edit-group">
+                          <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" />
+                          <button class="btn-icon text-success" @click="saveEdit">✅</button>
+                          <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
+                      </div>
+                  </template>
+                  <template v-else>
+                      <span class="drag-handle">☰</span>
+                      <span>{{ tag.name }}</span>
+                      <div class="actions">
+                          <button class="btn-icon" @click="startEdit('tag', tag)">✏️</button>
+                          <button class="btn-icon" @click="deleteTag(tag.id)">🗑</button>
+                      </div>
+                  </template>
+                </li>
+            </template>
+          </draggable>
         </div>
 
         <!-- Locations -->
@@ -235,44 +266,54 @@ const onEnter = (e, callback) => {
               <button @click="newLocationImage = null" class="btn-icon text-danger">×</button>
           </div>
 
-          <ul class="list">
-            <li v-for="loc in locations" :key="loc.id">
-              <template v-if="editingId === loc.id && editingType === 'location'">
-                   <div class="edit-group-col">
-                      <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" placeholder="名前" />
-                      <input v-model="editingDesc" placeholder="説明" />
-                      
-                      <div class="edit-image-row">
-                          <label class="btn btn-sm btn-outline">
-                            画像変更
-                            <input type="file" accept="image/*" class="hidden-input" @change="e => editingImage = e.target.files[0]">
-                          </label>
-                          <span v-if="editingImage" class="text-success">変更あり</span>
-                      </div>
-
-                      <div class="edit-actions">
-                          <button class="btn-icon text-success" @click="saveEdit">✅</button>
-                          <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
-                      </div>
-                   </div>
-              </template>
-              <template v-else>
-                  <div class="list-item-content">
-                      <div class="list-item-main">
-                          <img v-if="loc.image_path" :src="`${api.defaults.baseURL.replace('/api', '')}${loc.image_path}`" class="loc-thumb" />
-                          <div class="loc-info">
-                              <span class="loc-name">{{ loc.name }}</span>
-                              <span v-if="loc.description" class="loc-desc">{{ loc.description }}</span>
+          <draggable 
+            v-model="locations" 
+            item-key="id" 
+            tag="ul" 
+            class="list"
+            handle=".drag-handle"
+            @change="handleReorder('locations', locations)"
+          >
+            <template #item="{ element: loc }">
+                <li>
+                  <template v-if="editingId === loc.id && editingType === 'location'">
+                       <div class="edit-group-col">
+                          <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" placeholder="名前" />
+                          <input v-model="editingDesc" placeholder="説明" />
+                          
+                          <div class="edit-image-row">
+                              <label class="btn btn-sm btn-outline">
+                                画像変更
+                                <input type="file" accept="image/*" class="hidden-input" @change="e => editingImage = e.target.files[0]">
+                              </label>
+                              <span v-if="editingImage" class="text-success">変更あり</span>
+                          </div>
+    
+                          <div class="edit-actions">
+                              <button class="btn-icon text-success" @click="saveEdit">✅</button>
+                              <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
+                          </div>
+                       </div>
+                  </template>
+                  <template v-else>
+                      <div class="list-item-content">
+                          <div class="list-item-main">
+                              <span class="drag-handle">☰</span>
+                              <img v-if="loc.image_path" :src="`${api.defaults.baseURL.replace('/api', '')}${loc.image_path}`" class="loc-thumb" />
+                              <div class="loc-info">
+                                  <span class="loc-name">{{ loc.name }}</span>
+                                  <span v-if="loc.description" class="loc-desc">{{ loc.description }}</span>
+                              </div>
+                          </div>
+                          <div class="actions">
+                              <button class="btn-icon" @click="startEdit('location', loc)">✏️</button>
+                              <button class="btn-icon" @click="deleteLocation(loc.id)">🗑</button>
                           </div>
                       </div>
-                      <div class="actions">
-                          <button class="btn-icon" @click="startEdit('location', loc)">✏️</button>
-                          <button class="btn-icon" @click="deleteLocation(loc.id)">🗑</button>
-                      </div>
-                  </div>
-              </template>
-            </li>
-          </ul>
+                  </template>
+                </li>
+            </template>
+          </draggable>
         </div>
       </div>
 
@@ -466,4 +507,18 @@ input {
 .hidden-input {
   display: none;
 }
+
+.drag-handle {
+    cursor: grab;
+    color: var(--text-secondary);
+    margin-right: 0.5rem;
+    font-size: 1.2rem;
+    display: inline-flex;
+    align-items: center;
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
 </style>

@@ -23,7 +23,7 @@ const upload = multer({ storage: storage });
 router.get('/', async (req, res) => {
     try {
         const db = getDb();
-        const locations = await db.all('SELECT * FROM locations');
+        const locations = await db.all('SELECT * FROM locations ORDER BY display_order ASC');
         res.json(locations);
     } catch (err) {
         res.status(500).json({ error: err.message });

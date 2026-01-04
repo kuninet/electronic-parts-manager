@@ -6,7 +6,7 @@ const { getDb } = require('../database');
 router.get('/', async (req, res) => {
     try {
         const db = getDb();
-        const tags = await db.all('SELECT * FROM tags ORDER BY name ASC');
+        const tags = await db.all('SELECT * FROM tags ORDER BY display_order ASC');
         res.json(tags);
     } catch (err) {
         res.status(500).json({ error: err.message });
