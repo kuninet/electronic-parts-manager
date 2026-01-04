@@ -14,6 +14,8 @@ async function initDb() {
     driver: sqlite3.Database
   });
 
+  await db.run('PRAGMA foreign_keys = ON');
+
   await db.exec(`
     CREATE TABLE IF NOT EXISTS categories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

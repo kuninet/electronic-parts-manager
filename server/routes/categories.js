@@ -24,6 +24,7 @@ router.post('/', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
 router.put('/:id', async (req, res) => {
     try {
         const db = getDb();
@@ -39,7 +40,16 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
     try {
         const db = getDb();
-        // Checks if used in parts? For now, simplistic delete.
+
+        // Check if used in parts
+        const id = parseInt(req.params.id);
+
+        const usage = await db.get('SELECT COUNT(*) as count FROM parts WHERE category_id = ?', [id]);
+
+        if (usage && usage.count > 0) {
+            return res.status(400).json({ error: 'このカテゴリは使用されているため削除できません' });
+        }
+
         await db.run('DELETE FROM categories WHERE id = ?', [req.params.id]);
         res.json({ message: 'Category deleted' });
     } catch (err) {

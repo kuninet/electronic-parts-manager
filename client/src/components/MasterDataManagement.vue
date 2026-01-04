@@ -6,8 +6,10 @@ const emit = defineEmits(['close']);
 
 const categories = ref([]);
 const locations = ref([]);
+const tags = ref([]);
 const newCategory = ref('');
 const newLocation = ref('');
+const newTag = ref('');
 
 const loading = ref(false);
 
@@ -18,12 +20,14 @@ const editingDesc = ref('');
 
 const fetchData = async () => {
   try {
-    const [catsRes, locsRes] = await Promise.all([
+    const [catsRes, locsRes, tagsRes] = await Promise.all([
       api.get('/categories'),
-      api.get('/locations')
+      api.get('/locations'),
+      api.get('/tags')
     ]);
     categories.value = catsRes.data;
     locations.value = locsRes.data;
+    tags.value = tagsRes.data;
   } catch (err) {
     console.error('Failed to load data', err);
   }
@@ -84,6 +88,27 @@ const deleteLocation = async (id) => {
   }
 };
 
+const addTag = async () => {
+  if (!newTag.value) return;
+  try {
+    await api.post('/tags', { name: newTag.value });
+    newTag.value = '';
+    fetchData();
+  } catch (err) {
+    alert('Failed to add tag');
+  }
+};
+
+const deleteTag = async (id) => {
+  if (!confirm('タグを削除しますか?')) return;
+  try {
+    await api.delete(`/tags/${id}`);
+    fetchData();
+  } catch (err) {
+    alert('Failed to delete tag');
+  }
+};
+
 const startEdit = (type, item) => {
     editingId.value = item.id;
     editingType.value = type;
@@ -105,6 +130,8 @@ const saveEdit = async () => {
     try {
         if (editingType.value === 'category') {
             await api.put(`/categories/${editingId.value}`, { name: editingName.value });
+        } else if (editingType.value === 'tag') {
+            await api.put(`/tags/${editingId.value}`, { name: editingName.value });
         } else {
             const formData = new FormData();
             formData.append('name', editingName.value);
@@ -155,6 +182,33 @@ const onEnter = (e, callback) => {
                   <div class="actions">
                       <button class="btn-icon" @click="startEdit('category', cat)">✏️</button>
                       <button class="btn-icon" @click="deleteCategory(cat.id)">🗑</button>
+                  </div>
+              </template>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Tags -->
+        <div class="col">
+          <h3>タグ</h3>
+          <div class="input-group">
+            <input v-model="newTag" placeholder="新しいタグ" @keydown.enter="onEnter($event, addTag)" />
+            <button class="btn btn-primary" @click="addTag">+</button>
+          </div>
+          <ul class="list">
+            <li v-for="tag in tags" :key="tag.id">
+              <template v-if="editingId === tag.id && editingType === 'tag'">
+                  <div class="edit-group">
+                      <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" />
+                      <button class="btn-icon text-success" @click="saveEdit">✅</button>
+                      <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
+                  </div>
+              </template>
+              <template v-else>
+                  <span>{{ tag.name }}</span>
+                  <div class="actions">
+                      <button class="btn-icon" @click="startEdit('tag', tag)">✏️</button>
+                      <button class="btn-icon" @click="deleteTag(tag.id)">🗑</button>
                   </div>
               </template>
             </li>

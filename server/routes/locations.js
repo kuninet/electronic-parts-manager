@@ -80,14 +80,32 @@ router.put('/:id', upload.single('image'), async (req, res) => {
 router.delete('/:id', async (req, res) => {
     try {
         const db = getDb();
-        // Delete image first
-        const loc = await db.get('SELECT image_path FROM locations WHERE id = ?', [req.params.id]);
-        if (loc && loc.image_path) {
-            const oldPath = path.join(__dirname, '../../', loc.image_path);
-            if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+
+        // Check if used in parts
+        const usage = await db.get('SELECT COUNT(*) as count FROM parts WHERE location_id = ?', [req.params.id]);
+        if (usage.count > 0) {
+            return res.status(400).json({ error: 'この保管場所は使用されているため削除できません' });
         }
 
+        // Get image path first
+        const loc = await db.get('SELECT image_path FROM locations WHERE id = ?', [req.params.id]);
+
+        // Delete from DB first
         await db.run('DELETE FROM locations WHERE id = ?', [req.params.id]);
+
+        // If DB delete successful, delete image
+        if (loc && loc.image_path) {
+            const oldPath = path.join(__dirname, '../../', loc.image_path);
+            if (fs.existsSync(oldPath)) {
+                try {
+                    fs.unlinkSync(oldPath);
+                } catch (e) {
+                    console.error('Failed to delete image file:', e);
+                    // Don't fail the request since DB delete was successful
+                }
+            }
+        }
+
         res.json({ message: 'Location deleted' });
     } catch (err) {
         res.status(500).json({ error: err.message });
