@@ -114,90 +114,96 @@ const handleSubmit = async () => {
 <template>
   <div class="modal-overlay" @click.self="$emit('close')">
     <div class="modal-content glass-panel">
-      <div class="modal-header-actions">
-          <h2>{{ part ? 'パーツ編集' : '新規パーツ追加' }}</h2>
-           <div class="form-actions-top">
-              <button type="button" class="btn btn-sm" @click="$emit('close')">キャンセル</button>
-              <button type="button" class="btn btn-primary btn-sm" @click="handleSubmit" :disabled="loading">
-                {{ loading ? '保存中...' : '保存' }}
-              </button>
-            </div>
-      </div>
+      <div v-if="formData.image_path" class="cover-image" :style="{ backgroundImage: `url(${formData.image_path})` }"></div>
       
-      <form @submit.prevent="handleSubmit" class="part-form">
-        <div class="form-group">
-          <label>パーツ名</label>
-          <input v-model="formData.name" placeholder="未入力で自動生成" />
+      <div class="modal-body">
+        <div class="modal-header-actions">
+            <h2>{{ part ? 'パーツ編集' : '新規パーツ追加' }}</h2>
+             <div class="form-actions-top">
+                <button type="button" class="btn btn-sm" @click="$emit('close')">キャンセル</button>
+                <button type="button" class="btn btn-primary btn-sm" @click="handleSubmit" :disabled="loading">
+                  {{ loading ? '保存中...' : '保存' }}
+                </button>
+              </div>
         </div>
-
-        <div class="form-row">
+        
+        <form @submit.prevent="handleSubmit" class="part-form">
           <div class="form-group">
-            <label>カテゴリ</label>
-            <select v-model="formData.category_id">
-              <option value="">カテゴリを選択</option>
-              <option v-for="cat in categories" :key="cat.id" :value="cat.id">
-                {{ cat.name }}
-              </option>
-            </select>
+            <label>パーツ名</label>
+            <input v-model="formData.name" placeholder="未入力で自動生成" />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>カテゴリ</label>
+              <select v-model="formData.category_id">
+                <option value="">カテゴリを選択</option>
+                <option v-for="cat in categories" :key="cat.id" :value="cat.id">
+                  {{ cat.name }}
+                </option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>保管場所</label>
+              <select v-model="formData.location_id">
+                <option value="">保管場所を選択</option>
+                <option v-for="loc in locations" :key="loc.id" :value="loc.id">
+                  {{ loc.name }}
+                </option>
+              </select>
+            </div>
           </div>
 
           <div class="form-group">
-            <label>保管場所</label>
-            <select v-model="formData.location_id">
-              <option value="">保管場所を選択</option>
-              <option v-for="loc in locations" :key="loc.id" :value="loc.id">
-                {{ loc.name }}
-              </option>
-            </select>
+            <label>個数</label>
+            <input type="number" v-model="formData.quantity" min="0" />
           </div>
-        </div>
 
-        <div class="form-group">
-          <label>個数</label>
-          <input type="number" v-model="formData.quantity" min="0" />
-        </div>
-
-        <div class="form-group">
-          <label>説明</label>
-          <textarea v-model="formData.description" rows="3" placeholder="簡単な説明を入力..."></textarea>
-        </div>
-
-        <div class="form-group">
-          <label>画像</label>
-          <input type="file" accept="image/*" @change="handleImageChange" />
-          <div v-if="formData.image_path" class="current-image-preview">
-            <p>現在の画像:</p>
-            <img :src="formData.image_path" alt="Current Part Image" />
+          <div class="form-group">
+            <label>説明</label>
+            <textarea v-model="formData.description" rows="3" placeholder="簡単な説明を入力..."></textarea>
           </div>
-        </div>
 
-        <div class="form-group">
-          <label>データシート (PDF)</label>
-          <div v-if="formData.datasheet_path" class="current-file">
-            <a :href="formData.datasheet_path" target="_blank" class="file-link">
-              📄 現在のPDFを確認
-            </a>
+          <div class="form-group">
+            <label>画像</label>
+            <input type="file" accept="image/*" @change="handleImageChange" />
+            <!-- Preview kept for new uploads or if no cover image shows (though cover image logic covers this) -->
+            <!-- We can keep it or remove it. Let's keep it but maybe hide if same as cover? -->
+            <!-- For now, keep as is for simplicity, user can see what file is selected -->
+             <div v-if="imageFile" class="current-image-preview">
+                 <p>新規選択画像: {{ imageFile.name }}</p>
+             </div>
           </div>
-          <input type="file" accept="application/pdf" @change="handleDatasheetChange" />
-        </div>
 
-        <div class="form-group">
-          <label>タグ</label>
-          <TagInput v-model="formData.tags" :suggestions="suggestedTags" />
-        </div>
+          <div class="form-group">
+            <label>データシート (PDF)</label>
+            <div v-if="formData.datasheet_path" class="current-file">
+              <a :href="formData.datasheet_path" target="_blank" class="file-link">
+                📄 現在のPDFを確認
+              </a>
+            </div>
+            <input type="file" accept="application/pdf" @change="handleDatasheetChange" />
+          </div>
 
-        <div class="form-group">
-          <label>データシート等 URL</label>
-          <input v-model="formData.datasheet_url" placeholder="https://..." />
-        </div>
+          <div class="form-group">
+            <label>タグ</label>
+            <TagInput v-model="formData.tags" :suggestions="suggestedTags" />
+          </div>
 
-        <div class="form-actions">
-          <button type="button" class="btn" @click="$emit('close')">キャンセル</button>
-          <button type="submit" class="btn btn-primary" :disabled="loading">
-            {{ loading ? '保存中...' : '保存' }}
-          </button>
-        </div>
-      </form>
+          <div class="form-group">
+            <label>データシート等 URL</label>
+            <input v-model="formData.datasheet_url" placeholder="https://..." />
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn" @click="$emit('close')">キャンセル</button>
+            <button type="submit" class="btn btn-primary" :disabled="loading">
+              {{ loading ? '保存中...' : '保存' }}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
 </template>
@@ -222,9 +228,33 @@ const handleSubmit = async () => {
   max-width: 600px;
   max-height: 90vh;
   overflow-y: auto;
-  padding: 2rem;
+  padding: 0; /* Changed from 2rem to 0 for cover image */
   background: #1e293b; /* Fallback */
   background: rgba(30, 41, 59, 0.95);
+  border-radius: 12px; /* Ensure rounded corners */
+}
+
+.modal-body {
+    padding: 2rem;
+}
+
+.cover-image {
+    width: 100%;
+    height: 200px;
+    background-size: cover;
+    background-position: center;
+    border-radius: 12px 12px 0 0; /* Top rounded corners */
+    position: relative;
+}
+
+.cover-image::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 60px;
+    background: linear-gradient(to bottom, transparent, rgba(30, 41, 59, 0.95)); /* Seamless blend */
 }
 
 h2 {
