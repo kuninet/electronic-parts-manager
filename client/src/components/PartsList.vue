@@ -2,6 +2,7 @@
 import { ref, onMounted, watch } from 'vue';
 import api from '../api';
 import TagInput from './TagInput.vue';
+import BulkEditModal from './BulkEditModal.vue';
 
 const props = defineProps({
   initialLocationId: {
@@ -138,6 +139,28 @@ const handleBulkAction = async (action) => {
     } catch (err) {
         alert('操作に失敗しました');
         console.error(err);
+    } finally {
+        loading.value = false;
+    }
+};
+
+const showBulkEdit = ref(false);
+
+const handleBulkUpdate = async (updates) => {
+    loading.value = true;
+    try {
+        await api.post('/parts/bulk/update', {
+            ids: Array.from(selectedItems.value),
+            updates
+        });
+        await fetchParts();
+        selectedItems.value.clear();
+        showBulkEdit.value = false;
+        alert('一括変更を適用しました');
+    } catch (err) {
+        console.error(err);
+        const msg = err.response?.data?.error || '変更に失敗しました';
+        alert(msg);
     } finally {
         loading.value = false;
     }
@@ -362,6 +385,7 @@ const vFocus = {
         <span class="selection-count">{{ selectedItems.size }}個選択中</span>
         <div class="bulk-buttons">
             <template v-if="!showTrash">
+                <button class="btn btn-secondary" @click="showBulkEdit = true">✏️ 一括編集</button>
                 <button class="btn btn-danger" @click="handleBulkAction('trash')">🗑️ ゴミ箱へ</button>
             </template>
             <template v-else>
@@ -370,6 +394,13 @@ const vFocus = {
             </template>
         </div>
     </div>
+    
+    <BulkEditModal 
+        v-if="showBulkEdit" 
+        :selectedCount="selectedItems.size" 
+        @close="showBulkEdit = false" 
+        @save="handleBulkUpdate" 
+    />
 
     <div v-if="loading" class="loading">読み込み中...</div>
     <div v-else-if="error" class="error">{{ error }}</div>

@@ -297,4 +297,90 @@ router.post('/bulk/action', async (req, res) => {
     }
 });
 
+// POST /api/parts/bulk/update - Bulk update
+router.post('/bulk/update', async (req, res) => {
+    try {
+        const db = getDb();
+        const { ids, updates } = req.body;
+
+        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({ error: 'Invalid IDs' });
+        }
+
+        if (!updates) {
+            return res.status(400).json({ error: 'No updates provided' });
+        }
+
+        // 1. Update direct fields (Category, Location)
+        const fieldsToUpdate = [];
+        const params = [];
+
+        if (Object.prototype.hasOwnProperty.call(updates, 'category_id')) {
+            fieldsToUpdate.push('category_id = ?');
+            // Handle null explicitly if passed, strictly checks for property existence
+            const val = updates.category_id;
+            const safeVal = (val === '' || val === 'null') ? null : val;
+            params.push(safeVal);
+        }
+
+        if (Object.prototype.hasOwnProperty.call(updates, 'location_id')) {
+            fieldsToUpdate.push('location_id = ?');
+            const val = updates.location_id;
+            const safeVal = (val === '' || val === 'null') ? null : val;
+            params.push(safeVal);
+        }
+
+        // Also update timestamp if any main field changes
+        if (fieldsToUpdate.length > 0) {
+            fieldsToUpdate.push('updated_at = CURRENT_TIMESTAMP');
+
+            const placeholders = ids.map(() => '?').join(',');
+            const sql = `UPDATE parts SET ${fieldsToUpdate.join(', ')} WHERE id IN (${placeholders})`;
+
+            // params so far + ids
+            await db.run(sql, [...params, ...ids]);
+        }
+
+        // 2. Handle Tags
+        // Add Tags
+        if (updates.add_tags && Array.isArray(updates.add_tags) && updates.add_tags.length > 0) {
+            for (const tagName of updates.add_tags) {
+                if (!tagName) continue;
+                // Ensure tag exists
+                let tag = await db.get('SELECT id FROM tags WHERE name = ?', [tagName]);
+                if (!tag) {
+                    const tagResult = await db.run('INSERT INTO tags (name) VALUES (?)', [tagName]);
+                    tag = { id: tagResult.lastID };
+                }
+
+                // Add to all selected parts (ignore if exists)
+                // Checking first is safer for bulk.
+                for (const partId of ids) {
+                    const exists = await db.get('SELECT 1 FROM part_tags WHERE part_id = ? AND tag_id = ?', [partId, tag.id]);
+                    if (!exists) {
+                        await db.run('INSERT INTO part_tags (part_id, tag_id) VALUES (?, ?)', [partId, tag.id]);
+                    }
+                }
+            }
+        }
+
+        // Remove Tags
+        if (updates.remove_tags && Array.isArray(updates.remove_tags) && updates.remove_tags.length > 0) {
+            for (const tagName of updates.remove_tags) {
+                if (!tagName) continue;
+                const tag = await db.get('SELECT id FROM tags WHERE name = ?', [tagName]);
+                if (tag) {
+                    const placeholders = ids.map(() => '?').join(',');
+                    await db.run(`DELETE FROM part_tags WHERE tag_id = ? AND part_id IN (${placeholders})`, [tag.id, ...ids]);
+                }
+            }
+        }
+
+        res.json({ message: `Updated ${ids.length} items` });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;
