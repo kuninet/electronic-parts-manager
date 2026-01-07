@@ -73,6 +73,7 @@ erDiagram
 | --- | --- | --- |
 | `id` | INTEGER | 主キー |
 | `name` | TEXT | カテゴリ名 (例: Resistors, ICs) |
+| `display_order` | INTEGER | 表示順 (0, 1, 2...) |
 
 ### `locations` (保管場所マスタ)
 | カラム名 | 型 | 説明 |
@@ -81,12 +82,14 @@ erDiagram
 | `name` | TEXT | 場所名 (例: Box A) |
 | `description` | TEXT | 場所の説明 |
 | `image_path` | TEXT | 保管場所の写真パス (`/uploads/...`) |
+| `display_order` | INTEGER | 表示順 (0, 1, 2...) |
 
 ### `tags` (タグマスタ)
 | カラム名 | 型 | 説明 |
 | --- | --- | --- |
 | `id` | INTEGER | 主キー |
 | `name` | TEXT | タグ名 (UNIQUE) |
+| `display_order` | INTEGER | 表示順 (0, 1, 2...) |
 
 ### `part_tags` (中間テーブル)
 パーツとタグの多対多関係を管理します。

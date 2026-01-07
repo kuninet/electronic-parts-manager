@@ -55,24 +55,49 @@
 複数のパーツを一括操作します。
 -   **Body**: `{ ids: [1, 2, ...], permanent: boolean }`
 
+#### `POST /api/parts/bulk-delete`
+複数のパーツを一括操作します。
+-   **Body**: `{ ids: [1, 2, ...], permanent: boolean }`
+
+#### `POST /api/parts/bulk/update`
+複数のパーツを一括更新します。
+-   **Body**:
+    -   `ids`: `[1, 2, ...]` (更新対象ID配列)
+    -   `updates`:
+        -   `category_id`: ID または `null` (解除)
+        -   `location_id`: ID または `null` (解除)
+        -   `add_tags`: `['TagA', ...]` (追加するタグ)
+        -   `remove_tags`: `['TagB', ...]` (削除するタグ)
+
 ---
 
 ### マスタデータ管理
+共通: 一覧取得APIは `display_order` (表示順) の昇順でソートされて返されます。
 
 #### カテゴリ (`/api/categories`)
 -   `GET /`: 一覧取得
 -   `POST /`: 新規作成 (`{ name }`)
 -   `PUT /:id`: 名称変更 (`{ name }`)
 -   `DELETE /:id`: 削除
+    -   ※使用中の場合は `400 Bad Request` を返却します。
 
 #### 保管場所 (`/api/locations`)
 -   `GET /`: 一覧取得
 -   `POST /`: 新規作成 (`multipart/form-data`: `{ name, description, image }`)
 -   `PUT /:id`: 更新 (`multipart/form-data`: `{ name, description, image }`)
 -   `DELETE /:id`: 削除
+    -   ※使用中の場合は `400 Bad Request` を返却します。
 
 #### タグ (`/api/tags`)
 -   `GET /`: 一覧取得
+-   `POST /`: 新規作成 (`{ name }`)
+-   `PUT /:id`: 名称変更 (`{ name }`)
+-   `DELETE /:id`: 削除
+
+#### 共通リオーダー (`/api/master/reorder`)
+ドラッグ＆ドロップによる並び順を保存します。
+-   **Method**: `POST`
+-   **Body**: `{ type: 'categories'|'locations'|'tags', ids: [id1, id2, ...] }`
 
 ---
 
