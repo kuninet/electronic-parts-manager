@@ -1,13 +1,20 @@
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
+import basicSsl from '@vitejs/plugin-basic-ssl'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
+
+  // HTTPS有効化（スマホからのカメラ使用に必要）
+  const useHttps = env.VITE_HTTPS !== 'false'; // デフォルトで有効
+
   return {
     plugins: [
       vue(),
+      // HTTPS自己署名証明書（iOS Safariのカメラ許可に必要）
+      ...(useHttps ? [basicSsl()] : []),
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
