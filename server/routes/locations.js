@@ -48,11 +48,19 @@ router.post('/', upload.single('image'), async (req, res) => {
 router.put('/:id', upload.single('image'), async (req, res) => {
     try {
         const db = getDb();
-        const { name, description } = req.body;
+        const { name, description, qr_code } = req.body;
         const id = req.params.id;
 
-        let query = 'UPDATE locations SET name = ?, description = ?';
-        const params = [name, description || ''];
+        // QRコード重複チェック（自分自身は除外）
+        if (qr_code) {
+            const dupLoc = await db.get('SELECT id FROM locations WHERE qr_code = ? AND id != ?', [qr_code, id]);
+            if (dupLoc) return res.status(409).json({ error: 'このQRコードは別の保管場所に登録済みです' });
+            const dupPart = await db.get('SELECT id FROM parts WHERE qr_code = ? AND deleted_at IS NULL', [qr_code]);
+            if (dupPart) return res.status(409).json({ error: 'このQRコードは部品に登録済みです' });
+        }
+
+        let query = 'UPDATE locations SET name = ?, description = ?, qr_code = ?';
+        const params = [name, description || '', qr_code || null];
 
         if (req.file) {
             query += ', image_path = ?';

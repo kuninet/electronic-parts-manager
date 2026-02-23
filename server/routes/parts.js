@@ -143,14 +143,23 @@ router.post('/', upload, async (req, res) => {
 router.put('/:id', upload, async (req, res) => {
     try {
         const db = getDb();
-        const { name, description, category_id, location_id, quantity, datasheet_url } = req.body;
-        const id = req.params.id;
+        const { name, description, category_id, location_id, quantity, datasheet_url, qr_code } = req.body;
+        const id = req.params.id; console.log("req.body:", req.body);
 
         const safeCategoryId = (category_id === '' || category_id === 'null' || category_id === undefined) ? null : category_id;
         const safeLocationId = (location_id === '' || location_id === 'null' || location_id === undefined) ? null : location_id;
 
-        let query = `UPDATE parts SET name = ?, description = ?, category_id = ?, location_id = ?, quantity = ?, datasheet_url = ?, updated_at = CURRENT_TIMESTAMP`;
-        const params = [name, description, safeCategoryId, safeLocationId, quantity, datasheet_url];
+        // QRコード重複チェック（自分自身は除外）
+        const safeQrCode = (qr_code === '' || qr_code === 'null' || qr_code === undefined) ? null : qr_code;
+        if (safeQrCode) {
+            const dupPart = await db.get('SELECT id FROM parts WHERE qr_code = ? AND id != ? AND deleted_at IS NULL', [safeQrCode, id]);
+            if (dupPart) return res.status(409).json({ error: 'このQRコードは別の部品に登録済みです' });
+            const dupLoc = await db.get('SELECT id FROM locations WHERE qr_code = ?', [safeQrCode]);
+            if (dupLoc) return res.status(409).json({ error: 'このQRコードは保管場所に登録済みです' });
+        }
+
+        let query = `UPDATE parts SET name = ?, description = ?, category_id = ?, location_id = ?, quantity = ?, datasheet_url = ?, qr_code = ?, updated_at = CURRENT_TIMESTAMP`;
+        const params = [name, description, safeCategoryId, safeLocationId, quantity, datasheet_url, safeQrCode];
 
         // Fetch current file paths to delete old files if necessary
         const currentPart = await db.get('SELECT image_path, datasheet_path FROM parts WHERE id = ?', [id]);
@@ -225,7 +234,7 @@ router.delete('/:id', async (req, res) => {
 router.delete('/:id/permanent', async (req, res) => {
     try {
         const db = getDb();
-        const id = req.params.id;
+        const id = req.params.id; console.log("req.body:", req.body);
 
         // Fetch current file paths to delete files
         const currentPart = await db.get('SELECT image_path, datasheet_path FROM parts WHERE id = ?', [id]);
@@ -390,7 +399,7 @@ router.put('/:id/qr', async (req, res) => {
     try {
         const db = getDb();
         const { qr_code } = req.body;
-        const id = req.params.id;
+        const id = req.params.id; console.log("req.body:", req.body);
 
         // QRコード重複チェック
         const existing = await db.get('SELECT id FROM parts WHERE qr_code = ? AND id != ?', [qr_code, id]);

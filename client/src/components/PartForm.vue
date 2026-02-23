@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue';
 
 import api from '../api';
 import TagInput from './TagInput.vue';
+import MiniQrScanner from './MiniQrScanner.vue';
 
 const props = defineProps({
   part: {
@@ -20,6 +21,7 @@ const formData = ref({
   location_id: '',
   quantity: 0,
   datasheet_url: '',
+  qr_code: '',
   tags: []
 });
 
@@ -28,6 +30,7 @@ const locations = ref([]);
 const imageFile = ref(null);
 const datasheetFile = ref(null);
 const loading = ref(false);
+const showQrScanner = ref(false);
 
 const suggestedTags = ref([]);
 
@@ -129,6 +132,21 @@ const handleSubmit = async () => {
         
         <form @submit.prevent="handleSubmit" class="part-form">
           <div class="form-group">
+            <label>🏷️ QRコード</label>
+            <div class="qr-input-row">
+              <input v-model="formData.qr_code" placeholder="QRコードID（任意）" />
+              <button type="button" class="btn btn-sm btn-scan" @click="showQrScanner = true">📷</button>
+            </div>
+            <small style="color: var(--text-secondary); font-size: 0.8rem;">スキャンまたは手動入力</small>
+          </div>
+
+          <MiniQrScanner
+            v-if="showQrScanner"
+            @scanned="(code) => { formData.qr_code = code; showQrScanner = false; }"
+            @close="showQrScanner = false"
+          />
+
+          <div class="form-group">
             <label>パーツ名</label>
             <input v-model="formData.name" placeholder="未入力で自動生成" />
           </div>
@@ -168,9 +186,6 @@ const handleSubmit = async () => {
           <div class="form-group">
             <label>画像</label>
             <input type="file" accept="image/*" @change="handleImageChange" />
-            <!-- Preview kept for new uploads or if no cover image shows (though cover image logic covers this) -->
-            <!-- We can keep it or remove it. Let's keep it but maybe hide if same as cover? -->
-            <!-- For now, keep as is for simplicity, user can see what file is selected -->
              <div v-if="imageFile" class="current-image-preview">
                  <p>新規選択画像: {{ imageFile.name }}</p>
              </div>
@@ -336,6 +351,27 @@ select option {
 .current-file {
   margin-bottom: 0.5rem;
   font-size: 0.9rem;
+}
+
+.qr-input-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.btn-scan {
+  background: rgba(245, 158, 11, 0.2);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.btn-scan:hover {
+  background: rgba(245, 158, 11, 0.3);
 }
 
 .file-link {

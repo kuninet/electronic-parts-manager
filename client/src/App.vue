@@ -6,12 +6,15 @@ import DataManagement from './components/DataManagement.vue';
 import MasterDataManagement from './components/MasterDataManagement.vue';
 import LocationGridView from './components/LocationGridView.vue';
 import QrScanner from './components/QrScanner.vue';
+import QrGenerator from './components/QrGenerator.vue';
 
 import api from './api';
 
 const showModal = ref(false);
 const showDataModal = ref(false);
 const showMasterModal = ref(false);
+const showQrGenerator = ref(false);
+const showDropdown = ref(false);
 const editingPart = ref(null);
 const partsListKey = ref(0);
 
@@ -20,8 +23,21 @@ const currentPage = ref(window.location.hash === '#/qr' ? 'qr' : 'main');
 const onHashChange = () => {
     currentPage.value = window.location.hash === '#/qr' ? 'qr' : 'main';
 };
-onMounted(() => window.addEventListener('hashchange', onHashChange));
-onUnmounted(() => window.removeEventListener('hashchange', onHashChange));
+
+// Close dropdown when clicked outside
+const closeDropdown = (e) => {
+  if (!e.target.closest('.dropdown-container')) {
+    showDropdown.value = false;
+  }
+};
+onMounted(() => {
+  window.addEventListener('hashchange', onHashChange);
+  document.addEventListener('click', closeDropdown);
+});
+onUnmounted(() => {
+  window.removeEventListener('hashchange', onHashChange);
+  document.removeEventListener('click', closeDropdown);
+});
 
 const currentView = ref('parts'); // 'parts' or 'locations'
 const targetLocationId = ref('');
@@ -169,8 +185,18 @@ const onCameraFileChange = async (event) => {
             📷 {{ isMobile ? 'カメラで追加' : '画像から追加' }}
           </button>
           <a href="#/qr" class="btn btn-outline btn-sm qr-link">📦 QR入出庫</a>
-          <button class="btn btn-outline btn-sm" @click="showMasterModal = true">⚙️ マスタ管理</button>
-          <button class="btn btn-outline btn-sm" @click="showDataModal = true">📂 データ管理</button>
+          
+          <div class="dropdown-container">
+            <button class="btn btn-outline btn-sm" @click="showDropdown = !showDropdown">
+              ⚙️ 設定 ▾
+            </button>
+            <div class="dropdown-menu glass-panel" v-if="showDropdown">
+              <button class="dropdown-item" @click="showQrGenerator = true; showDropdown = false">🖨️ QR印刷</button>
+              <button class="dropdown-item" @click="showMasterModal = true; showDropdown = false">⚙️ マスタ管理</button>
+              <button class="dropdown-item" @click="showDataModal = true; showDropdown = false">📂 データ管理</button>
+            </div>
+          </div>
+
           <button class="btn btn-primary" @click="openAddModal">+ パーツ追加</button>
         </nav>
       </div>
@@ -206,6 +232,11 @@ const onCameraFileChange = async (event) => {
       v-if="showMasterModal"
       @close="showMasterModal = false"
     />
+
+    <QrGenerator
+      v-if="showQrGenerator"
+      @close="showQrGenerator = false"
+    />
   </div>
 </template>
 
@@ -227,6 +258,41 @@ const onCameraFileChange = async (event) => {
 }
 .btn-outline:hover {
   border-color: var(--accent-color);
+}
+
+.dropdown-container {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 0.5rem;
+  background: #1e293b;
+  min-width: 160px;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.4);
+  z-index: 200;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.dropdown-item {
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  text-align: left;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .app-container {
