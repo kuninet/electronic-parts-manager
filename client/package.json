@@ -10,10 +10,15 @@
   },
   "dependencies": {
     "axios": "^1.13.2",
+    "html5-qrcode": "^2.3.8",
+    "jspdf": "^4.2.0",
+    "playwright": "^1.58.2",
+    "qrcode": "^1.5.4",
     "vue": "^3.5.24",
     "vuedraggable": "^4.1.0"
   },
   "devDependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.1.4",
     "@vitejs/plugin-vue": "^6.0.1",
     "vite": "^7.2.4",
     "vite-plugin-pwa": "^1.2.0"

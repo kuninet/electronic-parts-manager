@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import api from '../api';
 import draggable from 'vuedraggable';
+import MiniQrScanner from './MiniQrScanner.vue';
 
 const emit = defineEmits(['close']);
 
@@ -13,11 +14,14 @@ const newLocation = ref('');
 const newTag = ref('');
 
 const loading = ref(false);
+const activeTab = ref('locations'); // 'locations' | 'categories' | 'tags'
 
 const editingId = ref(null);
-const editingType = ref(null); // 'category' or 'location'
+const editingType = ref(null);
 const editingName = ref('');
 const editingDesc = ref('');
+const editingQrCode = ref('');
+const showQrScanner = ref(false);
 
 const fetchData = async () => {
   try {
@@ -116,8 +120,11 @@ const startEdit = (type, item) => {
     editingId.value = item.id;
     editingType.value = type;
     editingName.value = item.name;
-    editingImage.value = null; // Reset
-    if (type === 'location') editingDesc.value = item.description || '';
+    editingImage.value = null;
+    if (type === 'location') {
+        editingDesc.value = item.description || '';
+        editingQrCode.value = item.qr_code || '';
+    }
 };
 
 const cancelEdit = () => {
@@ -125,6 +132,7 @@ const cancelEdit = () => {
     editingType.value = null;
     editingName.value = '';
     editingDesc.value = '';
+    editingQrCode.value = '';
     editingImage.value = null;
 };
 
@@ -139,6 +147,7 @@ const saveEdit = async () => {
             const formData = new FormData();
             formData.append('name', editingName.value);
             formData.append('description', editingDesc.value);
+            formData.append('qr_code', editingQrCode.value);
             if (editingImage.value) {
                 formData.append('image', editingImage.value);
             }
@@ -148,7 +157,8 @@ const saveEdit = async () => {
         cancelEdit();
     } catch (err) {
         console.error(err);
-        alert('Updates failed');
+        const msg = err.response?.data?.error || '更新に失敗しました';
+        alert(msg);
     }
 };
 
@@ -173,148 +183,173 @@ const handleReorder = async (type, list) => {
     <div class="modal-content glass-panel">
       <h2>マスタデータ管理</h2>
 
-      <div class="row">
-        <!-- Categories -->
-        <div class="col">
-          <h3>カテゴリ</h3>
-          <div class="input-group">
-            <input v-model="newCategory" placeholder="新しいカテゴリ" @keydown.enter="onEnter($event, addCategory)" />
-            <button class="btn btn-primary" @click="addCategory">+</button>
+      <!-- タブ切替 -->
+      <div class="tab-bar">
+        <button 
+          class="tab-btn" 
+          :class="{ active: activeTab === 'locations' }" 
+          @click="activeTab = 'locations'"
+        >🗄️ 保管場所</button>
+        <button 
+          class="tab-btn" 
+          :class="{ active: activeTab === 'categories' }" 
+          @click="activeTab = 'categories'"
+        >📁 カテゴリ</button>
+        <button 
+          class="tab-btn" 
+          :class="{ active: activeTab === 'tags' }" 
+          @click="activeTab = 'tags'"
+        >🏷️ タグ</button>
+      </div>
+
+      <!-- 保管場所 -->
+      <div v-if="activeTab === 'locations'" class="tab-content">
+        <div class="input-group">
+          <input v-model="newLocation" placeholder="新しい保管場所" @keydown.enter="onEnter($event, addLocation)" />
+          <div class="file-upload-mini">
+            <label class="btn-icon camera-icon">
+              📷
+              <input type="file" accept="image/*" class="hidden-input" @change="e => newLocationImage = e.target.files[0]">
+            </label>
           </div>
-          <draggable 
-            v-model="categories" 
-            item-key="id" 
-            tag="ul" 
-            class="list"
-            handle=".drag-handle"
-            @change="handleReorder('categories', categories)"
-          >
-            <template #item="{ element: cat }">
-                <li>
-                  <template v-if="editingId === cat.id && editingType === 'category'">
-                      <div class="edit-group">
-                          <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" />
-                          <button class="btn-icon text-success" @click="saveEdit">✅</button>
-                          <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
-                      </div>
-                  </template>
-                  <template v-else>
-                      <span class="drag-handle">☰</span>
-                      <span>{{ cat.name }}</span>
-                      <div class="actions">
-                          <button class="btn-icon" @click="startEdit('category', cat)">✏️</button>
-                          <button class="btn-icon" @click="deleteCategory(cat.id)">🗑</button>
-                      </div>
-                  </template>
-                </li>
-            </template>
-          </draggable>
+          <button class="btn btn-primary" @click="addLocation">+</button>
+        </div>
+        <div v-if="newLocationImage" class="preview-mini">
+            <span>画像選択中: {{ newLocationImage.name }}</span>
+            <button @click="newLocationImage = null" class="btn-icon text-danger">×</button>
         </div>
 
-        <!-- Tags -->
-        <div class="col">
-          <h3>タグ</h3>
-          <div class="input-group">
-            <input v-model="newTag" placeholder="新しいタグ" @keydown.enter="onEnter($event, addTag)" />
-            <button class="btn btn-primary" @click="addTag">+</button>
-          </div>
-          <draggable 
-            v-model="tags" 
-            item-key="id" 
-            tag="ul" 
-            class="list"
-            handle=".drag-handle"
-            @change="handleReorder('tags', tags)"
-          >
-            <template #item="{ element: tag }">
-                <li>
-                  <template v-if="editingId === tag.id && editingType === 'tag'">
-                      <div class="edit-group">
-                          <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" />
-                          <button class="btn-icon text-success" @click="saveEdit">✅</button>
-                          <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
-                      </div>
-                  </template>
-                  <template v-else>
-                      <span class="drag-handle">☰</span>
-                      <span>{{ tag.name }}</span>
-                      <div class="actions">
-                          <button class="btn-icon" @click="startEdit('tag', tag)">✏️</button>
-                          <button class="btn-icon" @click="deleteTag(tag.id)">🗑</button>
-                      </div>
-                  </template>
-                </li>
-            </template>
-          </draggable>
-        </div>
+        <draggable 
+          v-model="locations" 
+          item-key="id" 
+          tag="ul" 
+          class="list"
+          handle=".drag-handle"
+          @change="handleReorder('locations', locations)"
+        >
+          <template #item="{ element: loc }">
+              <li>
+                <template v-if="editingId === loc.id && editingType === 'location'">
+                     <div class="edit-group-col">
+                        <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" placeholder="名前" />
+                        <input v-model="editingDesc" placeholder="説明" />
+                        <div class="qr-input-row">
+                          <input v-model="editingQrCode" placeholder="🏷️ QRコード（任意）" />
+                          <button type="button" class="btn-icon btn-scan" @click="showQrScanner = true">📷</button>
+                        </div>
 
-        <!-- Locations -->
-        <div class="col">
-          <h3>保管場所</h3>
-          <div class="input-group">
-            <input v-model="newLocation" placeholder="新しい保管場所" @keydown.enter="onEnter($event, addLocation)" />
-            <div class="file-upload-mini">
-              <label class="btn-icon camera-icon">
-                📷
-                <input type="file" accept="image/*" class="hidden-input" @change="e => newLocationImage = e.target.files[0]">
-              </label>
-            </div>
-            <button class="btn btn-primary" @click="addLocation">+</button>
-          </div>
-          <div v-if="newLocationImage" class="preview-mini">
-              <span>画像選択中: {{ newLocationImage.name }}</span>
-              <button @click="newLocationImage = null" class="btn-icon text-danger">×</button>
-          </div>
+                        <MiniQrScanner
+                          v-if="showQrScanner"
+                          @scanned="(code) => { editingQrCode = code; showQrScanner = false; }"
+                          @close="showQrScanner = false"
+                        />
+                        
+                        <div class="edit-image-row">
+                            <label class="btn btn-sm btn-outline">
+                              画像変更
+                              <input type="file" accept="image/*" class="hidden-input" @change="e => editingImage = e.target.files[0]">
+                            </label>
+                            <span v-if="editingImage" class="text-success">変更あり</span>
+                        </div>
+  
+                        <div class="edit-actions">
+                            <button class="btn-icon text-success" @click="saveEdit">✅</button>
+                            <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
+                        </div>
+                     </div>
+                </template>
+                <template v-else>
+                    <div class="list-item-content">
+                        <div class="list-item-main">
+                            <span class="drag-handle">☰</span>
+                            <img v-if="loc.image_path" :src="`${api.defaults.baseURL.replace('/api', '')}${loc.image_path}`" class="loc-thumb" />
+                            <div class="loc-info">
+                                <span class="loc-name">{{ loc.name }}</span>
+                                <span v-if="loc.qr_code" class="loc-qr">🏷️ {{ loc.qr_code }}</span>
+                                <span v-if="loc.description" class="loc-desc">{{ loc.description }}</span>
+                            </div>
+                        </div>
+                        <div class="actions">
+                            <button class="btn-icon" @click="startEdit('location', loc)">✏️</button>
+                            <button class="btn-icon" @click="deleteLocation(loc.id)">🗑</button>
+                        </div>
+                    </div>
+                </template>
+              </li>
+          </template>
+        </draggable>
+      </div>
 
-          <draggable 
-            v-model="locations" 
-            item-key="id" 
-            tag="ul" 
-            class="list"
-            handle=".drag-handle"
-            @change="handleReorder('locations', locations)"
-          >
-            <template #item="{ element: loc }">
-                <li>
-                  <template v-if="editingId === loc.id && editingType === 'location'">
-                       <div class="edit-group-col">
-                          <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" placeholder="名前" />
-                          <input v-model="editingDesc" placeholder="説明" />
-                          
-                          <div class="edit-image-row">
-                              <label class="btn btn-sm btn-outline">
-                                画像変更
-                                <input type="file" accept="image/*" class="hidden-input" @change="e => editingImage = e.target.files[0]">
-                              </label>
-                              <span v-if="editingImage" class="text-success">変更あり</span>
-                          </div>
-    
-                          <div class="edit-actions">
-                              <button class="btn-icon text-success" @click="saveEdit">✅</button>
-                              <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
-                          </div>
-                       </div>
-                  </template>
-                  <template v-else>
-                      <div class="list-item-content">
-                          <div class="list-item-main">
-                              <span class="drag-handle">☰</span>
-                              <img v-if="loc.image_path" :src="`${api.defaults.baseURL.replace('/api', '')}${loc.image_path}`" class="loc-thumb" />
-                              <div class="loc-info">
-                                  <span class="loc-name">{{ loc.name }}</span>
-                                  <span v-if="loc.description" class="loc-desc">{{ loc.description }}</span>
-                              </div>
-                          </div>
-                          <div class="actions">
-                              <button class="btn-icon" @click="startEdit('location', loc)">✏️</button>
-                              <button class="btn-icon" @click="deleteLocation(loc.id)">🗑</button>
-                          </div>
-                      </div>
-                  </template>
-                </li>
-            </template>
-          </draggable>
+      <!-- カテゴリ -->
+      <div v-if="activeTab === 'categories'" class="tab-content">
+        <div class="input-group">
+          <input v-model="newCategory" placeholder="新しいカテゴリ" @keydown.enter="onEnter($event, addCategory)" />
+          <button class="btn btn-primary" @click="addCategory">+</button>
         </div>
+        <draggable 
+          v-model="categories" 
+          item-key="id" 
+          tag="ul" 
+          class="list"
+          handle=".drag-handle"
+          @change="handleReorder('categories', categories)"
+        >
+          <template #item="{ element: cat }">
+              <li>
+                <template v-if="editingId === cat.id && editingType === 'category'">
+                    <div class="edit-group">
+                        <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" />
+                        <button class="btn-icon text-success" @click="saveEdit">✅</button>
+                        <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
+                    </div>
+                </template>
+                <template v-else>
+                    <span class="drag-handle">☰</span>
+                    <span>{{ cat.name }}</span>
+                    <div class="actions">
+                        <button class="btn-icon" @click="startEdit('category', cat)">✏️</button>
+                        <button class="btn-icon" @click="deleteCategory(cat.id)">🗑</button>
+                    </div>
+                </template>
+              </li>
+          </template>
+        </draggable>
+      </div>
+
+      <!-- タグ -->
+      <div v-if="activeTab === 'tags'" class="tab-content">
+        <div class="input-group">
+          <input v-model="newTag" placeholder="新しいタグ" @keydown.enter="onEnter($event, addTag)" />
+          <button class="btn btn-primary" @click="addTag">+</button>
+        </div>
+        <draggable 
+          v-model="tags" 
+          item-key="id" 
+          tag="ul" 
+          class="list"
+          handle=".drag-handle"
+          @change="handleReorder('tags', tags)"
+        >
+          <template #item="{ element: tag }">
+              <li>
+                <template v-if="editingId === tag.id && editingType === 'tag'">
+                    <div class="edit-group">
+                        <input v-model="editingName" @keydown.enter="onEnter($event, saveEdit)" />
+                        <button class="btn-icon text-success" @click="saveEdit">✅</button>
+                        <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
+                    </div>
+                </template>
+                <template v-else>
+                    <span class="drag-handle">☰</span>
+                    <span>{{ tag.name }}</span>
+                    <div class="actions">
+                        <button class="btn-icon" @click="startEdit('tag', tag)">✏️</button>
+                        <button class="btn-icon" @click="deleteTag(tag.id)">🗑</button>
+                    </div>
+                </template>
+              </li>
+          </template>
+        </draggable>
       </div>
 
       <div class="footer">
@@ -333,35 +368,59 @@ const handleReorder = async (type, list) => {
   justify-content: center;
   align-items: center;
   z-index: 1000;
+  padding: 1rem;
 }
 
 .modal-content {
   background: #1e293b;
-  padding: 2rem;
-  width: 90%;
-  max-width: 1100px;
-  max-height: 80vh;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 600px;
+  max-height: 85vh;
   overflow-y: auto;
+  border-radius: 12px;
 }
 
 h2 {
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
   color: var(--accent-color);
 }
 
-.row {
+/* タブバー */
+.tab-bar {
   display: flex;
-  gap: 2rem;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  background: rgba(0,0,0,0.2);
+  padding: 0.25rem;
+  border-radius: 10px;
 }
 
-.col {
+.tab-btn {
   flex: 1;
+  padding: 0.6rem 0.5rem;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.9rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
 }
 
-h3 {
-  margin-bottom: 1rem;
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 0.5rem;
+.tab-btn:hover {
+  color: white;
+}
+
+.tab-btn.active {
+  background: rgba(14, 165, 233, 0.2);
+  color: var(--accent-color);
+}
+
+/* タブコンテンツ */
+.tab-content {
+  min-height: 200px;
 }
 
 .input-group {
@@ -374,14 +433,20 @@ input {
   flex: 1;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border-color);
-  padding: 0.5rem;
-  border-radius: 4px;
+  padding: 0.6rem;
+  border-radius: 8px;
   color: white;
+  font-family: inherit;
+}
+
+input:focus {
+  outline: none;
+  border-color: var(--accent-color);
 }
 
 .list {
   list-style: none;
-  max-height: 300px;
+  max-height: 400px;
   overflow-y: auto;
 }
 
@@ -389,7 +454,7 @@ input {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.5rem;
+  padding: 0.6rem;
   border-bottom: 1px solid rgba(255,255,255,0.05);
 }
 
@@ -399,18 +464,19 @@ input {
 
 .btn-icon {
   background: transparent;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-secondary);
-  border-radius: 4px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
 }
 
 .btn-icon:hover {
   background: rgba(255, 255, 255, 0.1);
-  opacity: 1;
 }
 
 .actions {
@@ -429,7 +495,7 @@ input {
 .text-danger { color: var(--danger); }
 
 .footer {
-  margin-top: 2rem;
+  margin-top: 1.5rem;
   display: flex;
   justify-content: flex-end;
 }
@@ -470,7 +536,7 @@ input {
     width: 40px;
     height: 40px;
     object-fit: cover;
-    border-radius: 4px;
+    border-radius: 6px;
     border: 1px solid var(--border-color);
 }
 
@@ -479,9 +545,34 @@ input {
     flex-direction: column;
 }
 
+.loc-name {
+    font-weight: 600;
+}
+
 .loc-desc {
     font-size: 0.8rem;
     color: var(--text-secondary);
+}
+
+.loc-qr {
+    font-size: 0.75rem;
+    font-family: monospace;
+    color: #f59e0b;
+}
+
+.qr-input-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.btn-scan {
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1.1rem;
 }
 
 .edit-group-col {

@@ -24,6 +24,7 @@ app.use('/api/locations', locationsRouter);
 app.use('/api/tags', require('./routes/tags'));
 app.use('/api/master', require('./routes/master'));
 app.use('/api/backup', backupRouter);
+app.use('/api/qr', require('./routes/qr'));
 
 // Initialize DB and start server
 initDb().then(() => {
