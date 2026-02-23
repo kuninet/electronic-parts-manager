@@ -80,11 +80,14 @@ router.post('/import/full', upload.single('file'), async (req, res) => {
         // 2. Read DB Dump
         const dbDump = JSON.parse(dataEntry.getData().toString('utf8'));
 
+        // Disable foreign key constraints temporarily for safe restore
+        await db.run('PRAGMA foreign_keys = OFF');
         await db.run('BEGIN TRANSACTION');
 
         // 3. Clear existing data (FULL RESTORE)
         // Note: For full restore, we might want to clear master data too if it's in the dump.
         // The plan says "Truncate current tables".
+        await db.run('DELETE FROM storage_logs');
         await db.run('DELETE FROM part_tags');
         await db.run('DELETE FROM parts');
         await db.run('DELETE FROM categories');
@@ -149,6 +152,8 @@ router.post('/import/full', upload.single('file'), async (req, res) => {
         console.error('Full restore failed', err);
         res.status(500).json({ error: err.message });
     } finally {
+        // Always re-enable foreign keys
+        await db.run('PRAGMA foreign_keys = ON');
         if (tempZipPath && fs.existsSync(tempZipPath)) {
             fs.unlinkSync(tempZipPath);
         }
@@ -160,9 +165,11 @@ router.post('/import/full', upload.single('file'), async (req, res) => {
 router.post('/reset', async (req, res) => {
     const db = getDb();
     try {
+        await db.run('PRAGMA foreign_keys = OFF');
         await db.run('BEGIN TRANSACTION');
 
         // Delete all parts and links
+        await db.run('DELETE FROM storage_logs');
         await db.run('DELETE FROM parts');
         await db.run('DELETE FROM part_tags');
         // Note: Keeping categories, locations, and tags master data for now as requested.
@@ -185,6 +192,8 @@ router.post('/reset', async (req, res) => {
         await db.run('ROLLBACK');
         console.error(err);
         res.status(500).json({ error: err.message });
+    } finally {
+        await db.run('PRAGMA foreign_keys = ON');
     }
 });
 
