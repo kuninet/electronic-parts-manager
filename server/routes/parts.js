@@ -213,7 +213,8 @@ router.put('/:id', upload, async (req, res) => {
 router.delete('/:id', async (req, res) => {
     try {
         const db = getDb();
-        await db.run('UPDATE parts SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
+        // ソフトデリート時にQRコードを解放（再利用可能にする）
+        await db.run('UPDATE parts SET deleted_at = CURRENT_TIMESTAMP, qr_code = NULL WHERE id = ?', [req.params.id]);
         res.json({ message: 'Moved to trash' });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -271,7 +272,8 @@ router.post('/bulk/action', async (req, res) => {
         const placeholders = ids.map(() => '?').join(',');
 
         if (action === 'trash') {
-            await db.run(`UPDATE parts SET deleted_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`, ids);
+            // ソフトデリート時にQRコードを解放（再利用可能にする）
+            await db.run(`UPDATE parts SET deleted_at = CURRENT_TIMESTAMP, qr_code = NULL WHERE id IN (${placeholders})`, ids);
             res.json({ message: `Moved ${ids.length} items to trash` });
         } else if (action === 'restore') {
             await db.run(`UPDATE parts SET deleted_at = NULL WHERE id IN (${placeholders})`, ids);
@@ -379,6 +381,26 @@ router.post('/bulk/update', async (req, res) => {
         res.json({ message: `Updated ${ids.length} items` });
     } catch (err) {
         console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PUT /api/parts/:id/qr - 既存パーツにQRコード紐付け
+router.put('/:id/qr', async (req, res) => {
+    try {
+        const db = getDb();
+        const { qr_code } = req.body;
+        const id = req.params.id;
+
+        // QRコード重複チェック
+        const existing = await db.get('SELECT id FROM parts WHERE qr_code = ? AND id != ?', [qr_code, id]);
+        if (existing) {
+            return res.status(409).json({ error: 'このQRコードは別のパーツに登録済みです' });
+        }
+
+        await db.run('UPDATE parts SET qr_code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [qr_code, id]);
+        res.json({ message: 'QRコードを紐付けました' });
+    } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });

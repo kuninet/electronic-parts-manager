@@ -1,10 +1,11 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import PartsList from './components/PartsList.vue';
 import PartForm from './components/PartForm.vue';
 import DataManagement from './components/DataManagement.vue';
 import MasterDataManagement from './components/MasterDataManagement.vue';
 import LocationGridView from './components/LocationGridView.vue';
+import QrScanner from './components/QrScanner.vue';
 
 import api from './api';
 
@@ -13,6 +14,14 @@ const showDataModal = ref(false);
 const showMasterModal = ref(false);
 const editingPart = ref(null);
 const partsListKey = ref(0);
+
+// ハッシュルーティング（#/qr でQR画面表示）
+const currentPage = ref(window.location.hash === '#/qr' ? 'qr' : 'main');
+const onHashChange = () => {
+    currentPage.value = window.location.hash === '#/qr' ? 'qr' : 'main';
+};
+onMounted(() => window.addEventListener('hashchange', onHashChange));
+onUnmounted(() => window.removeEventListener('hashchange', onHashChange));
 
 const currentView = ref('parts'); // 'parts' or 'locations'
 const targetLocationId = ref('');
@@ -118,7 +127,11 @@ const onCameraFileChange = async (event) => {
 </script>
 
 <template>
-  <div class="app-container">
+  <!-- QRスキャン画面 -->
+  <QrScanner v-if="currentPage === 'qr'" />
+
+  <!-- メイン画面 -->
+  <div v-else class="app-container">
     <header class="main-header glass-panel">
       <div class="container header-content">
         <h1 class="logo">
@@ -155,6 +168,7 @@ const onCameraFileChange = async (event) => {
           <button class="btn btn-outline btn-sm camera-btn" @click="handleCameraClick">
             📷 {{ isMobile ? 'カメラで追加' : '画像から追加' }}
           </button>
+          <a href="#/qr" class="btn btn-outline btn-sm qr-link">📦 QR入出庫</a>
           <button class="btn btn-outline btn-sm" @click="showMasterModal = true">⚙️ マスタ管理</button>
           <button class="btn btn-outline btn-sm" @click="showDataModal = true">📂 データ管理</button>
           <button class="btn btn-primary" @click="openAddModal">+ パーツ追加</button>
@@ -302,5 +316,18 @@ const onCameraFileChange = async (event) => {
 
 .hidden-input {
     display: none;
+}
+
+.qr-link {
+    background: rgba(245, 158, 11, 0.15) !important;
+    border-color: rgba(245, 158, 11, 0.4) !important;
+    color: #f59e0b !important;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+}
+.qr-link:hover {
+    background: rgba(245, 158, 11, 0.25) !important;
+    border-color: #f59e0b !important;
 }
 </style>
