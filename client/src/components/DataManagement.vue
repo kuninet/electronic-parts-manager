@@ -53,52 +53,6 @@ const handleFullImport = async (event) => {
     }
 };
 
-const downloadCsv = async () => {
-  try {
-    const response = await api.get('/backup/export/csv', { responseType: 'blob' });
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `parts_backup_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  } catch (err) {
-    console.error('Export failed', err);
-    alert('Export failed');
-  }
-};
-
-const handleImport = async (event, type) => {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  if (!confirm(`本当に ${type} をインポートしますか? 既存のデータが上書きされる可能性があります。`)) {
-    event.target.value = '';
-    return;
-  }
-
-  importing.value = true;
-  importMessage.value = '';
-  importError.value = '';
-
-  const formData = new FormData();
-  formData.append('file', file);
-
-  try {
-    const endpoint = type === 'csv' ? '/backup/import/csv' : '/backup/import/excel';
-    const res = await api.post(endpoint, formData);
-    alert('インポートが完了しました。ページを更新します。');
-    emit('close');
-    window.location.reload();
-  } catch (err) {
-    console.error('Import failed', err);
-    importError.value = err.response?.data?.error || 'Import failed';
-  } finally {
-    importing.value = false;
-    event.target.value = '';
-  }
-};
 
 const handleReset = async () => {
     if (!confirm('本当に全てのデータを削除しますか？\nこの操作は取り消せません。\n(カテゴリや場所のマスタは保持されます)')) {
@@ -144,32 +98,6 @@ const handleReset = async () => {
         </div>
       </div>
 
-      <div class="divider"></div>
-
-      <div class="data-section">
-        <h3>簡易データ操作 (CSV/Excel)</h3>
-        <p>他のツールとの連携用です。画像ファイルは含まれません。</p>
-        
-        <div class="import-actions">
-           <button class="btn btn-sm btn-outline" @click="downloadCsv">CSV Export</button>
-           
-            <label class="btn btn-sm btn-outline">
-              CSV Import
-              <input type="file" accept=".csv" class="hidden-input" @change="e => handleImport(e, 'csv')" :disabled="importing">
-            </label>
-            
-            <label class="btn btn-sm btn-outline">
-              Excel Import
-              <input type="file" accept=".xlsx, .xls" class="hidden-input" @change="e => handleImport(e, 'excel')" :disabled="importing">
-            </label>
-        </div>
-        
-        <div v-if="importing" class="status-msg">処理中...</div>
-        <div v-if="importMessage" class="status-msg success">{{ importMessage }}</div>
-        <div v-if="importError" class="status-msg error">{{ importError }}</div>
-      </div>
-
-      <div class="divider"></div>
       
       <div class="data-section danger-zone">
         <h3>🗑️ 危険な操作</h3>
