@@ -305,6 +305,8 @@ const onEnter = (e, callback) => {
 const vFocus = {
   mounted: (el) => el.focus()
 };
+
+defineExpose({ fetchParts });
 </script>
 
 <template>

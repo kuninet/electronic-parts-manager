@@ -13,19 +13,61 @@ const startScan = async () => {
   await new Promise(r => setTimeout(r, 100)); // DOMレンダリング待ち
 
   try {
+    if (html5Qr) {
+        try { await html5Qr.stop(); } catch(e) {}
+        html5Qr = null;
+    }
+    const readerEl = document.getElementById('mini-qr-reader');
+    if (readerEl) readerEl.innerHTML = '';
+
     html5Qr = new Html5Qrcode('mini-qr-reader');
-    await html5Qr.start(
-      { facingMode: 'environment' },
-      { fps: 10, qrbox: { width: 200, height: 200 } },
-      (decodedText) => {
-        emit('scanned', decodedText);
-        stopScan();
-      },
-      () => {} // エラー（読み取り中の無視）
-    );
+    
+    const config = { fps: 10, qrbox: { width: 200, height: 200 } };
+    
+    try {
+        await html5Qr.start(
+          { facingMode: 'environment' },
+          config,
+          (decodedText) => {
+            emit('scanned', decodedText);
+            stopScan();
+          },
+          () => {} // エラー（読み取り中の無視）
+        );
+    } catch (backCameraErr) {
+        console.warn('背面カメラ直接起動失敗、カメラ一覧から取得を試行:', backCameraErr);
+        try {
+            const cameras = await Html5Qrcode.getCameras();
+            if (cameras && cameras.length > 0) {
+                const backCamera = cameras.find(c => 
+                    /back|rear|environment/i.test(c.label)
+                ) || cameras[cameras.length - 1]; // 見つからなければ最後のカメラ
+
+                await html5Qr.start(
+                    backCamera.id,
+                    config,
+                    (decodedText) => {
+                        emit('scanned', decodedText);
+                        stopScan();
+                    },
+                    () => {}
+                );
+            } else {
+                throw new Error('利用可能なカメラが見つかりません');
+            }
+        } catch (retryErr) {
+            throw retryErr;
+        }
+    }
   } catch (err) {
     console.error('カメラ起動エラー:', err);
-    alert('カメラを起動できません。HTTPS環境が必要です。');
+    let msg = 'カメラを起動できません。';
+    if (String(err).includes('NotAllowedError') || String(err).includes('Permission')) {
+        msg += 'ブラウザのプレビュー権限を確認してください。';
+    } else {
+         msg += 'HTTPS環境が必要です。';
+    }
+    alert(msg);
     scanning.value = false;
   }
 };
