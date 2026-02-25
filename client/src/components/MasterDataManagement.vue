@@ -4,6 +4,13 @@ import api from '../api';
 import draggable from 'vuedraggable';
 import MiniQrScanner from './MiniQrScanner.vue';
 
+const props = defineProps({
+    initialLocationEditId: {
+        type: [Number, String],
+        default: null
+    }
+});
+
 const emit = defineEmits(['close']);
 
 const categories = ref([]);
@@ -33,6 +40,14 @@ const fetchData = async () => {
     categories.value = catsRes.data;
     locations.value = locsRes.data;
     tags.value = tagsRes.data;
+
+    if (props.initialLocationEditId && !editingId.value) {
+        const loc = locations.value.find(l => l.id == props.initialLocationEditId);
+        if (loc) {
+            activeTab.value = 'locations';
+            startEdit('location', loc);
+        }
+    }
   } catch (err) {
     console.error('Failed to load data', err);
   }
