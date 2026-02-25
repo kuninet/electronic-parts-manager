@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onBeforeUnmount } from 'vue';
+import { ref, onBeforeUnmount, onMounted, nextTick } from 'vue';
 import { Html5Qrcode } from 'html5-qrcode';
 
 const emit = defineEmits(['scanned', 'close']);
@@ -10,7 +10,6 @@ let html5Qr = null;
 
 const startScan = async () => {
   scanning.value = true;
-  await new Promise(r => setTimeout(r, 100)); // DOMレンダリング待ち
 
   try {
     if (html5Qr) {
@@ -29,9 +28,10 @@ const startScan = async () => {
           { facingMode: 'environment' },
           config,
           (decodedText) => {
+            console.log('QR読み取り成功(environment):', decodedText);
             isSuccessfulScan = true;
             emit('scanned', decodedText);
-            stopScan();
+            setTimeout(() => stopScan(), 300);
           },
           () => {} // エラー（読み取り中の無視）
         );
@@ -48,9 +48,10 @@ const startScan = async () => {
                     backCamera.id,
                     config,
                     (decodedText) => {
+                        console.log('QR読み取り成功(fallback):', decodedText);
                         isSuccessfulScan = true;
                         emit('scanned', decodedText);
-                        stopScan();
+                        setTimeout(() => stopScan(), 300);
                     },
                     () => {}
                 );
@@ -62,13 +63,16 @@ const startScan = async () => {
         }
     }
   } catch (err) {
-    if (isSuccessfulScan) return; // 成功時の破棄などでスローされた場合は無視
+    if (isSuccessfulScan) {
+        console.log('スキャン成功後に発生した例外をスキップ:', err);
+        return;
+    }
     console.error('カメラ起動エラー:', err);
-    let msg = 'カメラを起動できません。';
+    let msg = `カメラを起動できません。\n[詳細] ${String(err)}\n\n`;
     if (String(err).includes('NotAllowedError') || String(err).includes('Permission')) {
-        msg += 'ブラウザのプレビュー権限を確認してください。';
+        msg += 'ブラウザのプレビュー（カメラ）権限を確認してください。';
     } else {
-         msg += 'HTTPS環境が必要です。';
+         msg += '原因不明の場合はHTTPS環境かどうかもご確認ください。';
     }
     alert(msg);
     scanning.value = false;
@@ -90,8 +94,10 @@ onBeforeUnmount(() => {
   stopScan();
 });
 
-// 初期化時に自動開始
-startScan();
+onMounted(async () => {
+  await nextTick(); // DOMの描画を確実に待つ
+  startScan();
+});
 </script>
 
 <template>
