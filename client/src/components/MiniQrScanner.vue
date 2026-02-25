@@ -23,12 +23,13 @@ const startScan = async () => {
     html5Qr = new Html5Qrcode('mini-qr-reader');
     
     const config = { fps: 10, qrbox: { width: 200, height: 200 } };
-    
+    let isSuccessfulScan = false;
     try {
         await html5Qr.start(
           { facingMode: 'environment' },
           config,
           (decodedText) => {
+            isSuccessfulScan = true;
             emit('scanned', decodedText);
             stopScan();
           },
@@ -47,6 +48,7 @@ const startScan = async () => {
                     backCamera.id,
                     config,
                     (decodedText) => {
+                        isSuccessfulScan = true;
                         emit('scanned', decodedText);
                         stopScan();
                     },
@@ -60,6 +62,7 @@ const startScan = async () => {
         }
     }
   } catch (err) {
+    if (isSuccessfulScan) return; // 成功時の破棄などでスローされた場合は無視
     console.error('カメラ起動エラー:', err);
     let msg = 'カメラを起動できません。';
     if (String(err).includes('NotAllowedError') || String(err).includes('Permission')) {
