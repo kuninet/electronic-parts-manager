@@ -417,7 +417,7 @@ defineExpose({ fetchParts });
 
     <MiniQrScanner 
         v-if="showQrScanner" 
-        @scan="handleQrScan" 
+        @scanned="handleQrScan" 
         @close="showQrScanner = false"
     />
 
