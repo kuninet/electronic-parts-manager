@@ -88,7 +88,10 @@ const handleSubmit = async () => {
 
     Object.keys(formData.value).forEach(key => {
         if (key === 'tags') {
-            data.append('tags', formData.value.tags.join(','));
+            const tagsVal = Array.isArray(formData.value.tags) 
+                ? formData.value.tags.join(',') 
+                : (formData.value.tags || '');
+            data.append('tags', tagsVal);
         } else if (formData.value[key] !== null && formData.value[key] !== undefined) {
              data.append(key, formData.value[key]);
         }
