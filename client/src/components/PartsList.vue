@@ -3,6 +3,7 @@ import { ref, onMounted, watch } from 'vue';
 import api from '../api';
 import TagInput from './TagInput.vue';
 import BulkEditModal from './BulkEditModal.vue';
+import MiniQrScanner from './MiniQrScanner.vue';
 
 const props = defineProps({
   initialLocationId: {
@@ -42,8 +43,16 @@ const editingForm = ref({
     category_id: '',
     location_id: '',
     quantity: 0,
+    qr_code: '',
     tags: []
 });
+
+const showQrScanner = ref(false);
+
+const handleQrScan = (result) => {
+    editingForm.value.qr_code = result;
+    showQrScanner.value = false;
+};
 
 const fetchMetadata = async () => {
   try {
@@ -173,6 +182,7 @@ const startInlineEdit = (part) => {
         category_id: part.category_id || '',
         location_id: part.location_id || '',
         quantity: part.quantity || 0,
+        qr_code: part.qr_code || '',
         tags: part.tags ? part.tags.split(',').filter(t => t) : []
     };
 };
@@ -190,6 +200,7 @@ const saveInlineEdit = async (part) => {
         formData.append('category_id', editingForm.value.category_id || '');
         formData.append('location_id', editingForm.value.location_id || '');
         formData.append('quantity', editingForm.value.quantity);
+        formData.append('qr_code', editingForm.value.qr_code || '');
         formData.append('tags', editingForm.value.tags.join(','));
         
         // Preserve other fields
@@ -402,6 +413,12 @@ const vFocus = {
         @save="handleBulkUpdate" 
     />
 
+    <MiniQrScanner 
+        v-if="showQrScanner" 
+        @scan="handleQrScan" 
+        @close="showQrScanner = false"
+    />
+
     <div v-if="loading" class="loading">読み込み中...</div>
     <div v-else-if="error" class="error">{{ error }}</div>
     
@@ -440,6 +457,9 @@ const vFocus = {
                 <h3 v-else @click.stop="startNameEdit(part)" class="editable-text" title="クリックで編集">
                     {{ part.name }}
                 </h3>
+                <p v-if="part.qr_code" class="qr-code-badge" title="QRコード">
+                    📱 {{ part.qr_code }}
+                </p>
 
                 <!-- Quick Edit: Tags -->
                 <div class="tags-container" v-if="part.tags">
@@ -504,6 +524,10 @@ const vFocus = {
               </div>
               <div class="card-edit-form">
                   <input v-model="editingForm.name" class="inline-input" placeholder="パーツ名" />
+                  <div class="qr-edit-wrapper" style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
+                      <input v-model="editingForm.qr_code" class="inline-input" placeholder="QRコード" />
+                      <button class="btn-icon" @click.stop="showQrScanner = true" title="カメラでスキャン">📷</button>
+                  </div>
                   <input type="number" v-model="editingForm.quantity" class="inline-input" placeholder="個数" />
                   <select v-model="editingForm.category_id" class="inline-select">
                       <option value="">(未分類)</option>
@@ -531,8 +555,8 @@ const vFocus = {
               </th>
               <th>画像</th>
               <th>パーツ名</th>
-              <th>カテゴリ</th>
-              <th>保管場所</th>
+              <th class="hide-on-mobile">カテゴリ</th>
+              <th class="col-loc-header">保管場所</th>
               <th>個数</th>
               <th>アクション</th>
             </tr>
@@ -550,7 +574,10 @@ const vFocus = {
               </td>
               <td class="col-name">
                 <div class="name-cell" v-if="editingPartId !== part.id">
-                  <span class="part-name">{{ part.name }}</span>
+                  <div class="name-row">
+                    <span class="part-name">{{ part.name }}</span>
+                    <span v-if="part.qr_code" class="qr-code-badge list-qr">📱 {{ part.qr_code }}</span>
+                  </div>
                   <div class="tags-container" v-if="part.tags">
                        <span v-for="tag in part.tags.split(',')" :key="tag" class="small-tag-pill">{{ tag }}</span>
                   </div>
@@ -559,12 +586,16 @@ const vFocus = {
                 <!-- Edit Mode: Name -->
                 <div class="name-cell" v-else @click.stop>
                     <input v-model="editingForm.name" class="inline-input" placeholder="パーツ名" />
+                    <div class="qr-edit-wrapper" style="margin-top: 0.5rem; display: flex; gap: 0.5rem; align-items: center;">
+                        <input v-model="editingForm.qr_code" class="inline-input" placeholder="QRコード" />
+                        <button class="btn-icon" @click.stop="showQrScanner = true" title="カメラでスキャン">📷</button>
+                    </div>
                     <div style="margin-top: 0.5rem;" @click.stop>
                         <TagInput v-model="editingForm.tags" :suggestions="tags" />
                     </div>
                 </div>
               </td>
-              <td>
+              <td class="hide-on-mobile">
                   <template v-if="editingPartId !== part.id">
                       {{ part.category_name || '-' }}
                   </template>
@@ -576,7 +607,7 @@ const vFocus = {
                       </select>
                   </div>
               </td>
-              <td>
+              <td class="col-loc">
                   <template v-if="editingPartId !== part.id">
                       {{ part.location_name || '-' }}
                   </template>
@@ -755,6 +786,34 @@ select option {
   padding-right: 4.5rem; /* Avoid overlap with stock badge */
   word-break: break-all;
 }
+
+.qr-code-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.75rem;
+    font-family: monospace;
+    background: rgba(245, 158, 11, 0.15);
+    color: #fcd34d;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    width: fit-content;
+    white-space: nowrap;
+}
+
+.list-qr {
+  display: inline-flex;
+}
+
+.name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  line-height: 1.2;
+}
+
 
 .category {
   font-size: 0.8rem;
@@ -1122,69 +1181,126 @@ td {
   }
 
   /* Optimize List View */
-  .parts-list table, .parts-list thead, .parts-list tbody, .parts-list th, .parts-list td, .parts-list tr {
+  .parts-list table, .parts-list tbody {
     display: block;
+    width: 100%;
   }
 
-  .parts-list thead tr {
-    position: absolute;
-    top: -9999px;
-    left: -9999px;
-  }
-
-  .parts-list tr {
-    border-bottom: 2px solid rgba(255,255,255,0.1);
-    margin-bottom: 1rem;
-    padding-bottom: 0.5rem;
-  }
-
-  .parts-list td {
-    border: none;
-    position: relative;
-    padding-left: 50%;
-    text-align: right;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .parts-list td:before {
-    position: absolute;
-    left: 6px;
-    width: 45%;
-    padding-right: 10px;
-    white-space: nowrap;
-    text-align: left;
-    font-weight: bold;
-    color: var(--text-secondary);
-  }
-
-  /* Labeling for mobile list view */
-  .parts-list td:nth-of-type(1):before { content: "画像"; }
-  .parts-list td:nth-of-type(2):before { content: "パーツ名"; }
-  .parts-list td:nth-of-type(3):before { content: "カテゴリ"; }
-  .parts-list td:nth-of-type(4):before { content: "保管場所"; }
-  .parts-list td:nth-of-type(5):before { content: "個数"; }
-  .parts-list td:nth-of-type(6):before { content: "アクション"; }
-
-  .parts-list td.col-img, .parts-list td.col-name {
-    padding-left: 0;
-    display: block;
-    text-align: left;
-  }
-  
-  .parts-list td.col-img:before, .parts-list td.col-name:before {
+  .parts-list thead {
     display: none;
   }
 
-  .list-thumb {
-    width: 60px;
-    height: 60px;
-    margin-bottom: 0.5rem;
+  .parts-list tr {
+    display: grid;
+    grid-template-areas:
+      "chk img name qty action"
+      ".   img loc  loc loc";
+    grid-template-columns: 24px 46px 1fr auto 40px;
+    grid-template-rows: auto auto;
+    gap: 0.1rem 0.5rem;
+    align-items: center;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    padding: 0.4rem 0;
+    margin-bottom: 0;
+  }
+
+  .parts-list td {
+    display: block !important;
+    padding: 0 !important;
+    text-align: left !important;
+    border: none !important;
+  }
+
+  .parts-list td:before {
+    display: none !important;
+  }
+
+  .col-checkbox {
+    grid-area: chk;
+    text-align: center;
+  }
+
+  .col-img {
+    grid-area: img;
+    align-self: center;
   }
   
+  .list-thumb {
+    width: 46px;
+    height: 46px;
+    margin-bottom: 0;
+    border-radius: 6px;
+  }
+
+  .col-name {
+    grid-area: name;
+    align-self: end;
+    min-width: 0;
+  }
+
   .name-cell {
     align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  .name-row {
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+
+  .name-cell .part-name {
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tags-container {
+    margin-bottom: 0;
+  }
+
+  .small-tag-pill {
+    padding: 0 0.4rem;
+    font-size: 0.7rem;
+  }
+
+  .part-desc {
+    display: none; /* Hide description on mobile to save vertical space */
+  }
+
+  .col-loc-header {
+    display: none !important;
+  }
+
+  .col-loc {
+    grid-area: loc;
+    align-self: start;
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.4); /* Thin faint text below */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: -0.1rem;
+  }
+
+  .parts-list td:nth-of-type(6) {
+    grid-area: qty;
+    display: flex;
+    align-items: center;
+  }
+  
+  .parts-list td:nth-of-type(7) {
+    grid-area: action;
+    display: flex;
+    justify-content: flex-start;
+  }
+  
+  .hide-on-mobile,
+  .parts-list td.hide-on-mobile,
+  .parts-list th.hide-on-mobile {
+     display: none !important;
   }
 }
 
@@ -1302,7 +1418,7 @@ td {
 .action-cell {
     display: flex;
     gap: 0.5rem;
-    align-items: center;
+    justify-content: center;
 }
 
 .list-action-btn {
