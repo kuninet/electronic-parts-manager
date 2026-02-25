@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue';
 import api from '../api';
 
-const emit = defineEmits(['select']);
+const emit = defineEmits(['select', 'edit-location', 'edit-part']);
 
 const locations = ref([]);
 const loading = ref(true);
@@ -65,6 +65,16 @@ const confirmSelection = () => {
         closePreview();
     }
 };
+
+const handleEditLocation = (loc) => {
+    emit('edit-location', loc);
+    closePreview();
+};
+
+const handleEditPart = (part) => {
+    emit('edit-part', part);
+    closePreview();
+};
 </script>
 
 <template>
@@ -111,9 +121,12 @@ const confirmSelection = () => {
             </div>
             
             <div class="modal-body">
-                <div class="loc-summary">
+                <div class="loc-summary clickable-item" @click="handleEditLocation(previewLocation)" title="保管庫を編集">
                     <img v-if="previewLocation.image_path" :src="`${api.defaults.baseURL.replace('/api', '')}${previewLocation.image_path}`" class="preview-loc-img" />
-                    <p class="description">{{ previewLocation.description || '説明なし' }}</p>
+                    <div class="loc-info-text">
+                        <p class="description">{{ previewLocation.description || '説明なし' }}</p>
+                        <p v-if="previewLocation.qr_code" class="qr-code-badge">📱 {{ previewLocation.qr_code }}</p>
+                    </div>
                 </div>
 
                 <h3>保管されているパーツ ({{ previewParts.length }})</h3>
@@ -122,11 +135,12 @@ const confirmSelection = () => {
                     パーツは登録されていません
                 </div>
                 <div v-else class="preview-list">
-                    <div v-for="part in previewParts" :key="part.id" class="preview-item">
+                    <div v-for="part in previewParts" :key="part.id" class="preview-item clickable-item" @click="handleEditPart(part)" title="パーツを編集">
                         <img v-if="part.image_path" :src="part.image_path" class="part-thumb" />
                         <span v-else class="part-thumb-placeholder">⚡️</span>
                         <div class="part-details">
                             <span class="part-name">{{ part.name }}</span>
+                            <span v-if="part.qr_code" class="qr-code-badge" style="margin-top: 2px;">📱 {{ part.qr_code }}</span>
                             <span class="part-qty">{{ part.quantity }} pcs</span>
                         </div>
                     </div>
@@ -379,5 +393,32 @@ const confirmSelection = () => {
     display: flex;
     justify-content: flex-end;
     gap: 1rem;
+}
+
+.clickable-item {
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.clickable-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+.qr-code-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.75rem;
+    font-family: monospace;
+    background: rgba(245, 158, 11, 0.15);
+    color: #fcd34d;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    margin-top: 0.2rem;
+    width: fit-content;
+}
+.loc-info-text {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 </style>

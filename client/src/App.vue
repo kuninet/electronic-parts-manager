@@ -17,6 +17,7 @@ const showQrGenerator = ref(false);
 const showDropdown = ref(false);
 const editingPart = ref(null);
 const partsListKey = ref(0);
+const partsListRef = ref(null);
 
 // ハッシュルーティング（#/qr でQR画面表示）
 const currentPage = ref(window.location.hash === '#/qr' ? 'qr' : 'main');
@@ -61,8 +62,28 @@ const closeModal = () => {
   editingPart.value = null;
 };
 
+const editingMasterLocationId = ref(null);
+
+const openMasterModal = (location = null) => {
+    if (location && location.id) {
+        editingMasterLocationId.value = location.id;
+    } else {
+        editingMasterLocationId.value = null;
+    }
+    showMasterModal.value = true;
+};
+
+const closeMasterModal = () => {
+    showMasterModal.value = false;
+    editingMasterLocationId.value = null;
+};
+
 const handleSaved = () => {
-  partsListKey.value++; // Force refresh list
+  if (partsListRef.value && partsListRef.value.fetchParts) {
+      partsListRef.value.fetchParts();
+  } else {
+      partsListKey.value++; // Force refresh list fallback
+  }
 };
 
 const handleLocationSelect = (id) => {
@@ -102,7 +123,11 @@ const onCameraFileChange = async (event) => {
         const res = await api.post('/parts', formData);
         
         // Refresh list
-        partsListKey.value++;
+        if (partsListRef.value && partsListRef.value.fetchParts) {
+            partsListRef.value.fetchParts();
+        } else {
+            partsListKey.value++;
+        }
         
         // Open edit modal for the new part
         // We need to fetch the full part data or construct it. The API returns id, name, etc.
@@ -192,7 +217,7 @@ const onCameraFileChange = async (event) => {
             </button>
             <div class="dropdown-menu glass-panel" v-if="showDropdown">
               <button class="dropdown-item" @click="showQrGenerator = true; showDropdown = false">🖨️ QR印刷</button>
-              <button class="dropdown-item" @click="showMasterModal = true; showDropdown = false">⚙️ マスタ管理</button>
+              <button class="dropdown-item" @click="openMasterModal(); showDropdown = false">⚙️ マスタ管理</button>
               <button class="dropdown-item" @click="showDataModal = true; showDropdown = false">📂 データ管理</button>
             </div>
           </div>
@@ -205,6 +230,7 @@ const onCameraFileChange = async (event) => {
     <main class="container main-content">
       <template v-if="currentView === 'parts'">
           <PartsList 
+            ref="partsListRef"
             :key="partsListKey" 
             :initialLocationId="targetLocationId"
             @add="openAddModal" 
@@ -212,7 +238,11 @@ const onCameraFileChange = async (event) => {
           />
       </template>
       <template v-else>
-          <LocationGridView @select="handleLocationSelect" />
+          <LocationGridView 
+            @select="handleLocationSelect" 
+            @edit-location="openMasterModal"
+            @edit-part="openEditModal"
+          />
       </template>
     </main>
 
@@ -230,7 +260,8 @@ const onCameraFileChange = async (event) => {
 
     <MasterDataManagement
       v-if="showMasterModal"
-      @close="showMasterModal = false"
+      :initialLocationEditId="editingMasterLocationId"
+      @close="closeMasterModal"
     />
 
     <QrGenerator
