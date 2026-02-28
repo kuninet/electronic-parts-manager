@@ -151,15 +151,16 @@ if [ "$FUNCTION_EXISTS" == "no" ]; then
         --function-name $LAMBDA_NAME \
         --runtime nodejs20.x \
         --role $ROLE_ARN \
-        --handler index.handler \
+        --handler run.sh \
         --zip-file fileb://deploy-backend.zip \
         --timeout 30 \
         --memory-size 256 \
+        --architectures arm64 \
         --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads}" \
         --vpc-config SubnetIds=$(echo "${SUBNET_ARRAY[*]}" | tr ' ' ','),SecurityGroupIds=$SG_ID \
         --file-system-configs Arn=$AP_ARN,LocalMountPath=/mnt/efs \
-        --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerX86:24 > /dev/null
-        # Assuming x86 for wider dev machine compatibility. Change to Arm64 if lambda architecture is targeted as such
+        --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerArm64:24 > /dev/null
+        # Set to arm64 because the package is likely built on an Apple Silicon Mac, containing native ARM sqlite3 bindings.
 else
     echo "Updating Lambda Function Code..."
     aws lambda update-function-code \
@@ -175,7 +176,7 @@ else
         --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads}" \
         --vpc-config SubnetIds=$(echo "${SUBNET_ARRAY[*]}" | tr ' ' ','),SecurityGroupIds=$SG_ID \
         --file-system-configs Arn=$AP_ARN,LocalMountPath=/mnt/efs \
-        --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerX86:24 > /dev/null
+        --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerArm64:24 > /dev/null
 fi
 
 # 7. Enable Function URL
