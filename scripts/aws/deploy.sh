@@ -125,7 +125,7 @@ if [ "$AP_ID" == "None" ] || [ -z "$AP_ID" ]; then
     AP_ID=$(aws efs create-access-point \
         --file-system-id $EFS_ID \
         --posix-user Uid=1000,Gid=1000 \
-        --root-directory "Path=/,CreationInfo={OwnerUid=1000,OwnerGid=1000,Permissions=777}" \
+        --root-directory "Path=/appdata,CreationInfo={OwnerUid=1000,OwnerGid=1000,Permissions=777}" \
         --tags Key=Name,Value=epm-ap \
         --query 'AccessPointId' --output text)
 else
