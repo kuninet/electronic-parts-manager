@@ -112,6 +112,16 @@ fi
 IMAGES_S3_DOMAIN="${IMAGES_BUCKET_NAME}.s3.${REGION}.amazonaws.com"
 
 # ==========================================
+# Basic Auth 設定の確認
+# ==========================================
+if [ -z "$BASIC_AUTH_USER" ] || [ -z "$BASIC_AUTH_PASS" ]; then
+    echo "  [INFO] BASIC_AUTH_USER/PASS が設定されていません。Basic認証なしで継続します。"
+    echo "         (Basic認証を有効にするには、環境変数をセットして再実行してください)"
+else
+    echo "  [INFO] Basic Auth 連携が有効です (User: $BASIC_AUTH_USER)"
+fi
+
+# ==========================================
 # [3.8/7] Basic Auth 用 KeyValueStore & Function の構築
 # ==========================================
 BASIC_AUTH_ENABLED=false

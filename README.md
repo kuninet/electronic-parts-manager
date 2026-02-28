@@ -114,6 +114,10 @@ QRコードを使って箱（収納ケース）と部品の入出庫を管理す
 ### アクセス方法
 メイン画面のナビゲーションから「📦 QR入出庫」リンクをクリック、またはURLに `#/qr` を付加してアクセスできます。
 
+## AWS へのデプロイ
+本アプリを AWS (CloudFront + Lambda + S3) にデプロイする手順や、Basic認証の設定方法については以下を参照してください。
+- [AWS デプロイ・構築ガイド](docs/AWS/deployment.md)
+
 ## 参考リンク
 - [PlamoScanner](https://github.com/unafi/PlamoScanner) - プラモ余剰パーツ管理 QR/NFCアプリ（QRコードによる入出庫管理の着想元）
 - [PlamoScanner/QRprint](https://github.com/unafi/PlamoScanner/tree/main/QRprint) - QRコード印刷ツール（A4ラベルシール用PDF生成の参考）
