@@ -49,3 +49,4 @@ dist/
 .DS_Store
 .AppleDouble
 .LSOverride
+epm-bastion-key.pem
