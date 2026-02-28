@@ -20,7 +20,8 @@ ViteでビルドしたVue SPAの静的ファイルをS3バケットに配置し�
 ### バックエンド: API Gateway + Lambda + AWS Lambda Web Adapter
 ExpressサーバーをAWS Lambda上で稼働させます。
 * **採用理由**:
-  * ここが**ソースコード無修正の要**です。通常、ExpressをLambdaで動かすにはコードのラップ処理が必要ですが、**[AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)** という公式ツールを「Lambda Layer」として追加することで、現在のExpressコードを1行も書き換えることなくそのままLambda上で動かすことができます。リクエストは標準的なHTTPリクエストとしてExpressアプリに転送されます。
+  * ここが**ソースコード無修正の要**です。通常、ExpressをLambdaで動かすにはコードのラップ処理が必要ですが、**[AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)** という公式ツールを「Lambda Layer」として追加することで、現在のExpressコードを1行も書き換えることなくそのままLambda上で動かすことができます。
+  * **画像処理の最適化**: `sharp` ライブラリを導入し、アップロードされた画像をサーバー側で自動リサイズ（最大幅1000px）します。これにより、ストレージ容量の節約と配信の高速化を実現しました。
   * コンテナ（ECR）を使わず、手元のソースコードを**そのままZIP圧縮してアップロードするだけ**で稼働するため、ECRの維持費も発生せず、デプロイ運用も極めてシンプルになります。
 
 ### データベース: Amazon EFS（Elastic File System）
@@ -82,7 +83,7 @@ WAFは強力ですが月額固定費（最低$5/月〜）が発生するため�
 | **CloudFront** | 約 $0.0 〜 $1 | 毎月1TBの無料枠あり。小規模ならデータ転送料金は無料。 |
 | **Lambda** | 約 $0.0 〜 $0.5 | 每月100万回のリクエスト＆計算時間の無料枠あり。 |
 | **API Gateway** | 約 $0.0 〜 $1.0 | 最初の100万回までは無料枠あり（HTTP API）。 |
-| **EFS** | 約 $0.1 以下 | SQLiteの容量（数MB）ならほぼ0円。 |
+| **EFS** | 約 $0.1 以下 | SQLiteの容量（数MB）ならほぼ0円。画像も自動リサイズにより容量を抑制。 |
 | **合計** | **約 $0 〜 $3 / 月** | 極端にアクセスが跳ねない限り、無料枠で**月額数十円〜数百円**で収まります。 |
 
 ## 6. 移行に向けたステップ概要

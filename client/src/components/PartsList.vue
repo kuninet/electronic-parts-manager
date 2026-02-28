@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue';
+import { ref, reactive, onMounted, onUnmounted, watch } from 'vue';
 import api from '../api';
 import TagInput from './TagInput.vue';
 import BulkEditModal from './BulkEditModal.vue';
@@ -54,6 +54,52 @@ const handleQrScan = (result) => {
     showQrScanner.value = false;
 };
 
+// 画像読み込み失敗時のリトライ（503エラー対策）
+const retryImageLoad = (event) => {
+    const img = event.target;
+    const retryCount = parseInt(img.dataset.retryCount || '0');
+    const maxRetries = 3;
+    if (retryCount < maxRetries) {
+        img.dataset.retryCount = retryCount + 1;
+        const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
+        setTimeout(() => {
+            const originalSrc = img.src;
+            img.src = '';
+            img.src = originalSrc;
+        }, delay);
+    }
+};
+
+// 遅延レンダリング: 画面内に入った部品だけ描画する
+const visibleParts = reactive(new Set());
+let lazyObserver = null;
+
+const initLazyObserver = () => {
+    if (lazyObserver) lazyObserver.disconnect();
+    lazyObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const partId = entry.target.dataset.partId;
+                if (partId) visibleParts.add(Number(partId));
+                lazyObserver.unobserve(entry.target);
+            }
+        });
+    }, { rootMargin: '100px' }); // 100px手前から先読み（以前は200px）
+};
+
+// カスタムディレクティブ: 部品カード/行を監視対象に追加
+const vLazyRender = {
+    mounted(el) {
+        if (lazyObserver) lazyObserver.observe(el);
+    },
+    unmounted(el) {
+        if (lazyObserver) lazyObserver.unobserve(el);
+    }
+};
+
+initLazyObserver();
+onUnmounted(() => { if (lazyObserver) lazyObserver.disconnect(); });
+
 const fetchMetadata = async () => {
   try {
     const [catsRes, locsRes, tagsRes] = await Promise.all([
@@ -87,6 +133,7 @@ const fetchParts = async () => {
     const response = await api.get('/parts', { params });
     parts.value = response.data;
     selectedItems.value.clear(); // Clear selection on reload
+    visibleParts.clear(); // 遅延レンダリング用: 表示済みセットをリセット
   } catch (err) {
     error.value = 'Failed to load parts';
     console.error(err);
@@ -430,6 +477,8 @@ defineExpose({ fetchParts });
         <div 
             v-for="part in parts" 
             :key="part.id" 
+            v-lazy-render
+            :data-part-id="part.id"
             class="part-card glass-panel" 
             :class="{ selected: selectedItems.has(part.id), 'editing': editingPartId === part.id }"
             @click="isSelecting ? toggleSelection(part) : (editingPartId === part.id ? null : $emit('edit', part))"
@@ -440,8 +489,11 @@ defineExpose({ fetchParts });
               </div>
 
               <div class="part-image">
-                <img v-if="part.image_path" :src="part.image_path" :alt="part.name" />
-                <div v-else class="placeholder-image">⚡️</div>
+                <template v-if="visibleParts.has(part.id)">
+                  <img v-if="part.image_path" :src="part.image_path" :alt="part.name" loading="lazy" @error="retryImageLoad($event)" />
+                  <div v-else class="placeholder-image">⚡️</div>
+                </template>
+                <div v-else class="placeholder-image skeleton-pulse"></div>
               </div>
               <div class="part-info">
                 
@@ -564,14 +616,17 @@ defineExpose({ fetchParts });
             </tr>
           </thead>
           <tbody>
-            <tr v-for="part in parts" :key="part.id" @click="$emit('edit', part)" class="list-row" :class="{ selected: selectedItems.has(part.id) }">
+            <tr v-for="part in parts" :key="part.id" v-lazy-render :data-part-id="part.id" @click="$emit('edit', part)" class="list-row" :class="{ selected: selectedItems.has(part.id) }">
               <td class="col-checkbox" @click.stop>
                  <input type="checkbox" :checked="selectedItems.has(part.id)" @change="toggleSelection(part)" />
               </td>
               <td class="col-img">
                 <div class="list-thumb">
-                   <img v-if="part.image_path" :src="part.image_path" :alt="part.name" />
+                  <template v-if="visibleParts.has(part.id)">
+                   <img v-if="part.image_path" :src="part.image_path" :alt="part.name" loading="lazy" @error="retryImageLoad($event)" />
                    <span v-else>⚡️</span>
+                  </template>
+                  <div v-else class="skeleton-pulse" style="width:40px;height:40px;"></div>
                 </div>
               </td>
               <td class="col-name">
@@ -772,6 +827,11 @@ select option {
 }
 
 .placeholder-image {
+  width: 100%;
+  height: 100%;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
   font-size: 3rem;
   opacity: 0.5;
 }
@@ -1438,4 +1498,17 @@ td {
 
 .text-success { color: var(--success); font-size: 1.2rem; }
 .text-danger { color: var(--danger); font-size: 1.2rem; }
+
+/* スケルトンローディングアニメーション */
+.skeleton-pulse {
+  background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0.05) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
 </style>

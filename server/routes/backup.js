@@ -8,13 +8,29 @@ const path = require('path');
 
 const archiver = require('archiver');
 const admZip = require('adm-zip');
+const { S3Client, GetObjectCommand, DeleteObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const { pipeline } = require('stream/promises');
+
+const s3Client = new S3Client({
+    region: process.env.AWS_REGION || 'ap-northeast-1',
+    requestChecksumCalculation: "when_required",
+    responseChecksumValidation: "when_required"
+});
+const UPLOAD_BUCKET = process.env.S3_UPLOAD_BUCKET;
+
+// GET /api/backup/config
+router.get('/config', (req, res) => {
+    res.json({
+        s3Enabled: !!UPLOAD_BUCKET,
+        bucket: UPLOAD_BUCKET
+    });
+});
 
 // GET /api/backup/export/full
 router.get('/export/full', async (req, res) => {
     try {
         const db = getDb();
-
-        // 1. Fetch ALL data
         const parts = await db.all(`
             SELECT p.*, 
             (SELECT GROUP_CONCAT(t.name, ',') FROM tags t JOIN part_tags pt ON t.id = pt.tag_id WHERE pt.part_id = p.id) as tags_list
@@ -25,68 +41,39 @@ router.get('/export/full', async (req, res) => {
         const tags = await db.all('SELECT * FROM tags');
         const partTags = await db.all('SELECT * FROM part_tags');
 
-        const dbDump = {
-            parts,
-            categories,
-            locations,
-            tags,
-            partTags
-        };
-
-        // 2. Setup Archive
+        const dbDump = { parts, categories, locations, tags, partTags };
         const archive = archiver('zip', { zlib: { level: 9 } });
 
         res.attachment(`full_backup_${new Date().toISOString().split('T')[0]}.zip`);
-
         archive.pipe(res);
-
-        // 3. Add DB Dump
         archive.append(JSON.stringify(dbDump, null, 2), { name: 'backup_data.json' });
 
-        // 4. Add Uploads
         const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
         if (fs.existsSync(uploadsDir)) {
             archive.directory(uploadsDir, 'uploads');
         }
-
         archive.finalize();
-
     } catch (err) {
         console.error('Full export failed', err);
-        if (!res.headersSent) {
-            res.status(500).json({ error: err.message });
-        }
+        if (!res.headersSent) res.status(500).json({ error: err.message });
     }
 });
 
-// POST /api/backup/import/full POI
+// POST /api/backup/import/full (Small files)
 router.post('/import/full', upload.single('file'), async (req, res) => {
     let tempZipPath = null;
     const db = getDb();
-
     try {
         if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
         tempZipPath = req.file.path;
-
         const zip = new admZip(tempZipPath);
         const zipEntries = zip.getEntries();
-
-        // 1. Validate structure
         const dataEntry = zipEntries.find(entry => entry.entryName === 'backup_data.json');
-        if (!dataEntry) {
-            throw new Error('Invalid backup file: backup_data.json not found');
-        }
-
-        // 2. Read DB Dump
+        if (!dataEntry) throw new Error('Invalid backup file: backup_data.json not found');
         const dbDump = JSON.parse(dataEntry.getData().toString('utf8'));
 
-        // Disable foreign key constraints temporarily for safe restore
         await db.run('PRAGMA foreign_keys = OFF');
         await db.run('BEGIN TRANSACTION');
-
-        // 3. Clear existing data (FULL RESTORE)
-        // Note: For full restore, we might want to clear master data too if it's in the dump.
-        // The plan says "Truncate current tables".
         await db.run('DELETE FROM storage_logs');
         await db.run('DELETE FROM part_tags');
         await db.run('DELETE FROM parts');
@@ -94,16 +81,19 @@ router.post('/import/full', upload.single('file'), async (req, res) => {
         await db.run('DELETE FROM locations');
         await db.run('DELETE FROM tags');
 
-        // 4. Restore Master Data
-        // Helper to insert with ID preservation
         const restoreTable = async (table, rows) => {
             if (!rows || rows.length === 0) return;
-            const cols = Object.keys(rows[0]);
-            const placeholders = cols.map(() => '?').join(',');
-            const sql = `INSERT INTO ${table} (${cols.join(',')}) VALUES (${placeholders})`;
+            const tableInfo = await db.all(`PRAGMA table_info(${table})`);
+            const validCols = tableInfo.map(c => c.name);
+            const sourceCols = Object.keys(rows[0]);
+            const intersectionCols = sourceCols.filter(c => validCols.includes(c));
+            if (intersectionCols.length === 0) return;
+            const placeholders = intersectionCols.map(() => '?').join(',');
+            const sql = `INSERT INTO ${table} (${intersectionCols.join(',')}) VALUES (${placeholders})`;
             const stmt = await db.prepare(sql);
             for (const row of rows) {
-                await stmt.run(Object.values(row));
+                const values = intersectionCols.map(c => row[c]);
+                await stmt.run(values);
             }
             await stmt.finalize();
         };
@@ -111,89 +101,167 @@ router.post('/import/full', upload.single('file'), async (req, res) => {
         if (dbDump.categories) await restoreTable('categories', dbDump.categories);
         if (dbDump.locations) await restoreTable('locations', dbDump.locations);
         if (dbDump.tags) await restoreTable('tags', dbDump.tags);
-
-        // 5. Restore Parts
-        // Need to be careful: dbDump.parts might contain derived columns like 'tags' or 'category_name' if we used SELECT *.
-        // The export query was: SELECT p.*, ... as tags_list.
-        // We should select only actual columns for insertion.
-        // Actually, restoreTable logic uses Object.keys(rows[0]). If export included extra columns, this will fail.
-        // Export query: SELECT p.*, (SELECT ...) as tags_list FROM parts p
-        // So parts rows HAVE 'tags_list'. We must remove it before inserting.
-
         if (dbDump.parts && dbDump.parts.length > 0) {
-            const cleanParts = dbDump.parts.map(p => {
-                const { tags_list, category_name, location_name, ...rest } = p; // Remove derived cols
-                return rest;
-            });
+            const cleanParts = dbDump.parts.map(({ tags_list, category_name, location_name, ...rest }) => rest);
             await restoreTable('parts', cleanParts);
         }
-
-        // 6. Restore PartTags
         if (dbDump.partTags) await restoreTable('part_tags', dbDump.partTags);
-
         await db.run('COMMIT');
 
-        // 7. Restore Upload Files
         const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
-        // We can use zip.extractAllTo
-        // But we need to extract ONLY the 'uploads/' folder from zip to the uploadsDir.
-        // adm-zip extracts preserving paths. If zip has 'uploads/file.jpg', extracting to ../../ will put it in ../../uploads/file.jpg.
-        // That matches our structure!
-        // First, optional: clear existing uploads?
-        // Plan said: "restore to server's upload directory (overwrite)".
-        // Let's unzip to the parent of uploadsDir to match the structure 'uploads/...'
-        const parentDir = path.join(__dirname, '../../');
-        zip.extractAllTo(parentDir, true); // true = overwrite
-
+        const parentDir = path.join(uploadsDir, '../');
+        zip.extractAllTo(parentDir, true);
         res.json({ message: 'Full restore successful' });
-
     } catch (err) {
-        await db.run('ROLLBACK');
-        console.error('Full restore failed', err);
+        if (db) await db.run('ROLLBACK');
         res.status(500).json({ error: err.message });
     } finally {
-        // Always re-enable foreign keys
-        await db.run('PRAGMA foreign_keys = ON');
-        if (tempZipPath && fs.existsSync(tempZipPath)) {
-            fs.unlinkSync(tempZipPath);
-        }
+        if (db) await db.run('PRAGMA foreign_keys = ON');
+        if (tempZipPath && fs.existsSync(tempZipPath)) fs.unlinkSync(tempZipPath);
     }
 });
 
+// GET /api/backup/import/presigned-url
+router.get('/import/presigned-url', async (req, res) => {
+    try {
+        const bucket = UPLOAD_BUCKET;
+        if (!bucket) return res.status(500).json({ error: 'S3_UPLOAD_BUCKET not set' });
+        const fileName = req.query.fileName || `import_${Date.now()}.zip`;
+        const key = `imports/${fileName}`;
+        const command = new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: 'application/zip' });
+        const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+        res.json({ url, key });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
-// POST /api/backup/reset - Delete ALL data (Danger!)
+// POST /api/backup/import/download (Step 1)
+router.post('/import/download', async (req, res) => {
+    const { key } = req.body;
+    if (!key) return res.status(400).json({ error: 'S3 key is required' });
+    const bucket = UPLOAD_BUCKET;
+    if (!bucket) return res.status(500).json({ error: 'S3_UPLOAD_BUCKET not set' });
+
+    const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
+    const tempZipPath = path.join(uploadsDir, 'import_temp.zip');
+
+    try {
+        if (!fs.existsSync(uploadsDir)) {
+            console.log(`Creating directory: ${uploadsDir}`);
+            fs.mkdirSync(uploadsDir, { recursive: true });
+        }
+        console.log(`Downloading from S3: ${bucket}/${key} to ${tempZipPath}`);
+        const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+        const response = await s3Client.send(command);
+        await pipeline(response.Body, fs.createWriteStream(tempZipPath));
+        res.json({ message: 'Download to EFS successful' });
+    } catch (err) {
+        console.error('S3 download failed', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/backup/import/restore (Step 2)
+router.post('/import/restore', async (req, res) => {
+    const { s3Key } = req.body;
+    const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
+    const tempZipPath = path.join(uploadsDir, 'import_temp.zip');
+    const db = getDb();
+
+    if (!fs.existsSync(tempZipPath)) return res.status(404).json({ error: 'Temp file not found' });
+
+    try {
+        console.log('Starting restore from', tempZipPath);
+        const zip = new admZip(tempZipPath);
+        const zipEntries = zip.getEntries();
+        const dataEntry = zipEntries.find(entry => entry.entryName === 'backup_data.json');
+        if (!dataEntry) throw new Error('backup_data.json not found');
+        const dbDump = JSON.parse(dataEntry.getData().toString('utf8'));
+
+        await db.run('PRAGMA foreign_keys = OFF');
+        await db.run('BEGIN TRANSACTION');
+        await db.run('DELETE FROM storage_logs');
+        await db.run('DELETE FROM part_tags');
+        await db.run('DELETE FROM parts');
+        await db.run('DELETE FROM categories');
+        await db.run('DELETE FROM locations');
+        await db.run('DELETE FROM tags');
+
+        const restoreTable = async (table, rows) => {
+            if (!rows || rows.length === 0) return;
+            const tableInfo = await db.all(`PRAGMA table_info(${table})`);
+            const validCols = tableInfo.map(c => c.name);
+            const sourceCols = Object.keys(rows[0]);
+            const intersectionCols = sourceCols.filter(c => validCols.includes(c));
+            if (intersectionCols.length === 0) return;
+            const placeholders = intersectionCols.map(() => '?').join(',');
+            const sql = `INSERT INTO ${table} (${intersectionCols.join(',')}) VALUES (${placeholders})`;
+            const stmt = await db.prepare(sql);
+            for (const row of rows) {
+                const values = intersectionCols.map(c => row[c]);
+                await stmt.run(values);
+            }
+            await stmt.finalize();
+        };
+
+        if (dbDump.categories) await restoreTable('categories', dbDump.categories);
+        if (dbDump.locations) await restoreTable('locations', dbDump.locations);
+        if (dbDump.tags) await restoreTable('tags', dbDump.tags);
+        if (dbDump.parts) {
+            const cleanParts = dbDump.parts.map(({ tags_list, category_name, location_name, ...rest }) => rest);
+            await restoreTable('parts', cleanParts);
+        }
+        if (dbDump.partTags) await restoreTable('part_tags', dbDump.partTags);
+        await db.run('COMMIT');
+
+        // Restore Upload Files
+        const parentDir = path.join(uploadsDir, '../');
+        console.log(`Extracting ZIP contents to parent directory: ${parentDir}`);
+        if (!fs.existsSync(uploadsDir)) {
+            fs.mkdirSync(uploadsDir, { recursive: true });
+        }
+        zip.extractAllTo(parentDir, true);
+        console.log('Extraction complete.');
+
+        if (s3Key) {
+            const delCmd = new DeleteObjectCommand({ Bucket: UPLOAD_BUCKET, Key: s3Key });
+            await s3Client.send(delCmd).catch(e => console.warn('S3 cleanup failed', e));
+        }
+        if (fs.existsSync(tempZipPath)) fs.unlinkSync(tempZipPath);
+
+        res.json({ message: 'Restore successful' });
+    } catch (err) {
+        if (db) await db.run('ROLLBACK');
+        console.error('Restore failed', err);
+        res.status(500).json({ error: err.message });
+    } finally {
+        if (db) await db.run('PRAGMA foreign_keys = ON');
+    }
+});
+
+// POST /api/backup/reset
 router.post('/reset', async (req, res) => {
     const db = getDb();
     try {
         await db.run('PRAGMA foreign_keys = OFF');
         await db.run('BEGIN TRANSACTION');
-
-        // Delete all parts and links
         await db.run('DELETE FROM storage_logs');
         await db.run('DELETE FROM parts');
         await db.run('DELETE FROM part_tags');
-        // Note: Keeping categories, locations, and tags master data for now as requested.
-
         await db.run('COMMIT');
 
-        // Clean uploads directory
         const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
         if (fs.existsSync(uploadsDir)) {
             const files = fs.readdirSync(uploadsDir);
-            for (const file of files) {
-                if (file !== '.gitkeep') {
-                    fs.unlinkSync(path.join(uploadsDir, file));
-                }
-            }
+            for (const file of files) if (file !== '.gitkeep') fs.unlinkSync(path.join(uploadsDir, file));
         }
-
-        res.json({ message: 'All parts data and files have been deleted.' });
+        res.json({ message: 'Reset successful' });
     } catch (err) {
-        await db.run('ROLLBACK');
-        console.error(err);
+        if (db) await db.run('ROLLBACK');
         res.status(500).json({ error: err.message });
     } finally {
-        await db.run('PRAGMA foreign_keys = ON');
+        if (db) await db.run('PRAGMA foreign_keys = ON');
     }
 });
 

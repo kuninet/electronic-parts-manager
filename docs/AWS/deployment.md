@@ -37,8 +37,8 @@
    ./scripts/aws/deploy.sh
    ```
    スクリプトは以下を自動化します。
-   - Linux ARM64向けのティブンコンパイル（`npm ci` でネイティブモジュールをリビルド）
-   - Lambda 関数の作成または更新
+   - **ネイティブモジュールのクロスインストール**: `sharp` や `sqlite3` を Lambda (Linux ARM64) 環境で動作させるため、`npm_config_platform=linux` などの環境変数を指定してインストールをリビルドします。
+   - Lambda 関数の作成または更新（メモリは **512MB** に最適化済み）
    - Lambda Layer（Web Adapter）のアタッチ
    - VPC・ EFS・環境変数の設定
 
