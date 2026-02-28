@@ -1,12 +1,13 @@
-# AWS サーバーレス インフラ構築・デプロイ手順
+# AWS サーバーレス インフラ構築・デプロイ手順 (ZIPアップロード方式)
 
 このドキュメントでは、電子パーツ管理アプリをAWS環境（サーバーレス環境）に構築し、デプロイするための具体的な手順を解説します。
+バックエンドはDockerコンテナ（ECR）を使わず、**ソースコードのZIPアップロードとLambda Layer**を利用する方式です。
 
 ## 0. 事前準備
 1. **AWS CLIの設定**
    - `aws configure` コマンドで対象AWSアカウントのアクセス情報を設定済みであること。
-2. **Dockerの設定**
-   - バックエンドのコンテナビルドを行うため、手元のMacにDocker Desktop等のコンテナ環境がインストールされていること。
+2. **Node.js 環境**
+   - バックエンドの依存関係(`node_modules`)をインストールしてZIP化するため、ローカルにNode.jsがインストールされていること。
 
 ---
 
@@ -21,41 +22,52 @@
    - マネジメントコンソールからEFSを作成します。
    - 作成後、**「アクセスポイント」** を一つ作成します。
      - *ユーザID/グループID*: `1000`
-     - *権限*: `0777` （Lambdaコンテナから書き込めるように適宜緩めにしておきます）
+     - *権限*: `0777` （Lambda環境から書き込めるように適宜緩めにしておきます）
      - *パス*: `/`
 
 ---
 
-## 2. バックエンド層（AWS Lambda + ECR）のデプロイ
+## 2. バックエンド層（AWS Lambda + Layer）のデプロイ
 
-**目的**: Expressで作られた既存のAPIを、コンテナ化してAWS Lambda上で稼働させます。
+**目的**: Expressで作られた既存のAPIを、ZIPファイルとしてAWS Lambda上で稼働させます。
 
-1. **Amazon ECR リポジトリの作成**
-   - `epm-backend` という名前でプライベートリポジトリを作成します。
-2. **イメージのビルドとPush（手元のMacで実行）**
+1. **デプロイパッケージ（ZIP）の作成**
+   手元のMacで以下のコマンドを実行し、ファイル一式をZIPにまとめます。
    ```bash
-   # ECRへログイン (ACCOUNT_ID と REGION をご自身のものに置き換えてください)
-   aws ecr get-login-password --region ap-northeast-1 | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com
-   
-   # ビルド (Apple Silicon Macの場合は --platform linux/arm64 などを指定してアーキテクチャを合わせる)
-   docker build --platform linux/arm64 -t epm-backend ./server
-   
-   # タグ付けとPush
-   docker tag epm-backend:latest <ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/epm-backend:latest
-   docker push <ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/epm-backend:latest
+   cd server
+   # プロダクション用の依存パッケージのみインストール
+   npm ci --omit=dev
+   # ソースコードをZIP圧縮（不要なファイルを除外）
+   zip -r ../deploy-backend.zip . -x "*.git*" "*test*"
+   cd ..
    ```
-3. **Lambda 関数の作成**
-   - 「コンテナイメージ」から関数を作成し、先ほどPushしたイメージとアーキテクチャ(arm64等)を選択します。
+
+2. **Lambda 関数の作成**
+   - AWSコンソールから「一から作成」を選択し、関数名（`epm-backend`等）、ランタイム（`Node.js 20.x`等）、アーキテクチャ（`arm64`推奨）を指定して作成。
+   - **コードソース** の「アップロード元 > .zip ファイル」を選択し、先ほど作成した `deploy-backend.zip` をアップロードします。
+
+3. **Lambda Layer（Web Adapter）の追加**
+   - Lambda関数の画面の一番下にある「レイヤー」カテゴリから「レイヤーの追加」をクリック。
+   - **「ARN を指定」** を選択し、以下のARNを入力して追加します（例は東京リージョン ap-northeast-1 / arm64 の場合）。
+     - `arn:aws:lambda:ap-northeast-1:753240598075:layer:LambdaAdapterLayerArm64:24`
+     - ※ x86アーキテクチャを選んだ場合は `arn:aws:lambda:ap-northeast-1:753240598075:layer:LambdaAdapterLayerX86:24` です。
+
 4. **Lambda の設定**
-   - **VPC**: EFSを作成したVPC・サブネットを指定。
-   - **ファイルシステム**: 作成したEFSアクセスポイントを設定（ローカルマウントパス: `/mnt/efs`）。
+   - **一般設定**: 
+     - ハンドラの設定を `run.sh` などのカスタム起動コマンドにする**必要はありません**（Node.jsランタイムのままでLayerが通信をフックします）。
+     - ただし環境変数 `AWS_LAMBDA_EXEC_WRAPPER` に `/opt/bootstrap` を設定します。
+   - **VPC / ファイルシステム**: 
+     - EFSを作成したVPC・サブネットを指定。
+     - 作成したEFSアクセスポイントを設定（ローカルマウントパス: `/mnt/efs`）。
    - **環境変数**:
+     - `AWS_LAMBDA_EXEC_WRAPPER` = `/opt/bootstrap`  ← **必須** (Web Adapterを有効化)
+     - `PORT` = `8080` (AWS Lambda Web Adapterのデフォルト受け口ポート)
      - `DB_PATH` = `/mnt/efs/database.sqlite`
      - `UPLOAD_DIR` = `/mnt/efs/uploads`
-     - `PORT` = `3000` (または3001)
    - **実行ロール**: EFSアクセス権限(`AmazonElasticFileSystemClientFullAccess`等)とVPCアクセス権限(`AWSLambdaVPCAccessExecutionRole`)を追加。
+
 5. **Lambda 関数 URL の有効化**
-   - API Gatewayは使わず、関数URLを「NONE (認証なし)」でパブリックに有効化し、CORSを許可しておくと素早くAPIが稼働します。（CloudFront経由に限定する場合はIAM認証をかけることも可能です）
+   - API Gatewayは使わず、関数URLを「NONE (認証なし)」でパブリックに有効化し、CORSを許可しておくと素早くAPIが稼働します。
 
 ---
 
@@ -64,15 +76,14 @@
 **目的**: ViteベースのVueアプリをビルドしてCDN経由で世界中に高速・セキュアに配信します。
 
 1. **環境変数の用意**
-   - `client/.env.production` などのファイルを作成し、先ほどのLambda関数URLを向くように設定します（任意）。
+   - `client/.env.production` を作成し、先ほどのLambda関数URLを向くように設定します。
      ```text
      VITE_API_BASE_URL=https://<あなたのLambda関数URLID>.lambda-url.ap-northeast-1.on.aws/api
      ```
-   - ※ CloudFrontで `/api` をLambda関数URLに直接ルーティングする構成にする場合は、この設定は不要です。
 2. **ビルド**
    - `npm run build --prefix client`
 3. **S3バケットの作成とアップロード**
-   - `epm-frontend-hosting` 等の名前でバケットを作成（パブリックアクセスはすべてブロックのままでOK）。
+   - `epm-frontend-hosting` 等の名前でバケットを作成。
    - `client/dist` ディレクトリの中身をS3バケットのルートへアップロード。
 4. **CloudFront の設定**
    - Originとして作成したS3バケットを指定し、Origin Access Control (OAC) を有効化します。
