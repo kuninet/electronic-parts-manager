@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../database');
+const { resizeImage } = require('../utils/image');
 
 const multer = require('multer');
 const path = require('path');
@@ -36,6 +37,9 @@ router.post('/', upload.single('image'), async (req, res) => {
     try {
         const db = getDb();
         const { name, description } = req.body;
+        if (req.file) {
+            await resizeImage(req.file.path);
+        }
         const image_path = req.file ? '/uploads/' + req.file.filename : null;
 
         const result = await db.run('INSERT INTO locations (name, description, image_path) VALUES (?, ?, ?)', [name, description, image_path]);
@@ -64,6 +68,7 @@ router.put('/:id', upload.single('image'), async (req, res) => {
         const params = [name, description || '', qr_code || null];
 
         if (req.file) {
+            await resizeImage(req.file.path);
             query += ', image_path = ?';
             params.push('/uploads/' + req.file.filename);
 

@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { getDb } = require('../database');
+const { resizeImage } = require('../utils/image');
 
 // Configure Multer for file uploads
 const storage = multer.diskStorage({
@@ -114,6 +115,9 @@ router.post('/', upload, async (req, res) => {
         const tags = req.body.tags ? req.body.tags.split(',').map(t => t.trim()).filter(t => t) : [];
 
         const image_path = req.files['image'] ? '/uploads/' + req.files['image'][0].filename : null;
+        if (req.files['image']) {
+            await resizeImage(req.files['image'][0].path);
+        }
         const datasheet_path = req.files['datasheet'] ? '/uploads/' + req.files['datasheet'][0].filename : null;
 
         const result = await db.run(`
@@ -166,6 +170,7 @@ router.put('/:id', upload, async (req, res) => {
         const currentPart = await db.get('SELECT image_path, datasheet_path FROM parts WHERE id = ?', [id]);
 
         if (req.files['image']) {
+            await resizeImage(req.files['image'][0].path);
             query += `, image_path = ?`;
             params.push('/uploads/' + req.files['image'][0].filename);
 

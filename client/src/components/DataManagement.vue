@@ -1,5 +1,6 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
+import axios from 'axios';
 import api from '../api';
 
 const emit = defineEmits(['close']);
@@ -7,6 +8,17 @@ const emit = defineEmits(['close']);
 const importing = ref(false);
 const importMessage = ref('');
 const importError = ref('');
+const s3Enabled = ref(false);
+
+onMounted(async () => {
+    try {
+        const { data } = await api.get('/backup/config');
+        s3Enabled.value = data.s3Enabled;
+    } catch (err) {
+        console.error('Failed to fetch backup config', err);
+        s3Enabled.value = false;
+    }
+});
 
 const downloadFull = async () => {
   try {
@@ -35,20 +47,52 @@ const handleFullImport = async (event) => {
 
     importing.value = true;
     importError.value = '';
+    importMessage.value = '準備中...';
     
-    const formData = new FormData();
-    formData.append('file', file);
-
     try {
-        await api.post('/backup/import/full', formData);
+        // S3が有効かつファイルが5MB以上の場合のみS3経由
+        if (s3Enabled.value && file.size > 5 * 1024 * 1024) { 
+            importMessage.value = 'アップロード用URLを取得中...';
+            const { data: { url, key } } = await api.get('/backup/import/presigned-url', {
+                params: { fileName: file.name }
+            });
+            
+            importMessage.value = `AWS S3へアップロード中... (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+            await axios.put(url, file, {
+                headers: { 'Content-Type': 'application/zip' }
+            });
+            
+            // Step 1: Download to EFS
+            importMessage.value = 'サーバー(EFS)への転送を開始します...';
+            await api.post('/backup/import/download', { key });
+            
+            // Step 2: Restore from EFS
+            importMessage.value = 'DBリストアを実行中です。150MBを超える場合は1分程度かかることがあります...';
+            await api.post('/backup/import/restore', { s3Key: key }, {
+                timeout: 300000 // 5分 (API Gateway側で30秒で一旦切れる可能性はありますが、Lambda側は300秒動きます)
+            });
+        } else {
+            // ローカル環境、または小規模ファイルの場合
+            importMessage.value = file.size > 10 * 1024 * 1024 
+                ? `サーバーへ直接アップロード中... (${(file.size / 1024 / 1024).toFixed(1)} MB)`
+                : 'アップロード中...';
+                
+            const formData = new FormData();
+            formData.append('file', file);
+            await api.post('/backup/import/full', formData, {
+                timeout: 300000 // 5分
+            });
+        }
+        
         alert('復元が完了しました。ページをリロードします。');
         window.location.reload();
     } catch (err) {
         console.error('Full import failed', err);
         importError.value = err.response?.data?.error || 'Restore failed';
-        alert('復元に失敗しました');
+        alert('復元に失敗しました: ' + importError.value);
     } finally {
         importing.value = false;
+        importMessage.value = '';
         event.target.value = '';
     }
 };
@@ -95,6 +139,13 @@ const handleReset = async () => {
               📥 バックアップから復元
               <input type="file" accept=".zip" class="hidden-input" @change="e => handleFullImport(e)" :disabled="importing">
             </label>
+        </div>
+
+        <div v-if="importing" class="status-msg info">
+          ⏳ {{ importMessage }}
+        </div>
+        <div v-if="importError" class="status-msg error">
+          ❌ {{ importError }}
         </div>
       </div>
 
@@ -212,6 +263,10 @@ h3 {
 
 .status-msg.success { color: var(--success); }
 .status-msg.error { color: var(--danger); }
+.status-msg.info { 
+    color: var(--accent-color); 
+    border-left: 3px solid var(--accent-color);
+}
 
 .footer {
   display: flex;

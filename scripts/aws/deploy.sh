@@ -34,6 +34,50 @@ fi
 
 ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
 
+# 1.1 S3 Upload Bucket and Policy
+UPLOAD_BUCKET="epm-upload-$ACCOUNT_ID"
+echo "Checking S3 Upload Bucket: $UPLOAD_BUCKET"
+if ! aws s3api head-bucket --bucket $UPLOAD_BUCKET > /dev/null 2>&1; then
+    echo "Creating S3 Upload Bucket..."
+    aws s3api create-bucket --bucket $UPLOAD_BUCKET --region $REGION --create-bucket-configuration LocationConstraint=$REGION > /dev/null
+    
+    # Configure CORS
+    aws s3api put-bucket-cors --bucket $UPLOAD_BUCKET --cors-configuration '{
+        "CORSRules": [
+            {
+                "AllowedOrigins": ["*"],
+                "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+                "AllowedHeaders": ["*"],
+                "ExposeHeaders": ["ETag"]
+            }
+        ]
+    }'
+    
+    # Configure Lifecycle (Auto-delete after 1 day)
+    aws s3api put-bucket-lifecycle-configuration --bucket $UPLOAD_BUCKET --lifecycle-configuration '{
+        "Rules": [
+            {
+                "ID": "DeleteOldImports",
+                "Prefix": "imports/",
+                "Status": "Enabled",
+                "Expiration": { "Days": 1 }
+            }
+        ]
+    }'
+fi
+
+echo "Ensuring S3 IAM Policy for Lambda..."
+aws iam put-role-policy --role-name $ROLE_NAME --policy-name EPM-S3-Upload-Policy --policy-document "{
+    \"Version\": \"2012-10-17\",
+    \"Statement\": [
+        {
+            \"Effect\": \"Allow\",
+            \"Action\": [\"s3:PutObject\", \"s3:GetObject\", \"s3:DeleteObject\", \"s3:ListBucket\"],
+            \"Resource\": [\"arn:aws:s3:::$UPLOAD_BUCKET\", \"arn:aws:s3:::$UPLOAD_BUCKET/*\"]
+        }
+    ]
+}"
+
 # 2. Get Default VPC and Subnets
 echo "Getting Default VPC details..."
 VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
@@ -138,7 +182,7 @@ AP_ARN="arn:aws:elasticfilesystem:${REGION}:${ACCOUNT_ID}:access-point/${AP_ID}"
 LAMBDA_NAME="epm-backend"
 echo "Packaging Backend Code..."
 cd server
-npm_config_arch=arm64 npm_config_platform=linux npm_config_libc=glibc npm ci --omit=dev > /dev/null 2>&1
+npm install --omit=dev > /dev/null 2>&1
 zip -q -r ../deploy-backend.zip . -x "*.git*" "*test*"
 cd ..
 
@@ -153,10 +197,10 @@ if [ "$FUNCTION_EXISTS" == "no" ]; then
         --role $ROLE_ARN \
         --handler run.sh \
         --zip-file fileb://deploy-backend.zip \
-        --timeout 30 \
-        --memory-size 256 \
+        --timeout 300 \
+        --memory-size 512 \
         --architectures arm64 \
-        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads}" \
+        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID}" \
         --vpc-config SubnetIds=$(echo "${SUBNET_ARRAY[*]}" | tr ' ' ','),SecurityGroupIds=$SG_ID \
         --file-system-configs Arn=$AP_ARN,LocalMountPath=/mnt/efs \
         --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerArm64:24 > /dev/null
@@ -174,7 +218,9 @@ else
     aws lambda update-function-configuration \
         --function-name $LAMBDA_NAME \
         --handler run.sh \
-        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads}" \
+        --timeout 300 \
+        --memory-size 512 \
+        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID}" \
         --vpc-config SubnetIds=$(echo "${SUBNET_ARRAY[*]}" | tr ' ' ','),SecurityGroupIds=$SG_ID \
         --file-system-configs Arn=$AP_ARN,LocalMountPath=/mnt/efs \
         --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerArm64:24 > /dev/null

@@ -116,7 +116,7 @@ if [ -z "$DIST_ID" ] || [ "$DIST_ID" == "None" ]; then
                 "S3OriginConfig": { "OriginAccessIdentity": "" }
             },
             {
-                "Id": "APIGateway-Backend",
+                "Id": "Lambda-Backend",
                 "DomainName": "$APIGW_DOMAIN",
                 "CustomOriginConfig": {
                     "HTTPPort": 80,
@@ -145,11 +145,11 @@ if [ -z "$DIST_ID" ] || [ "$DIST_ID" == "None" ]; then
         "MaxTTL": 31536000
     },
     "CacheBehaviors": {
-        "Quantity": 1,
+        "Quantity": 2,
         "Items": [
             {
                 "PathPattern": "/api/*",
-                "TargetOriginId": "APIGateway-Backend",
+                "TargetOriginId": "Lambda-Backend",
                 "ViewerProtocolPolicy": "https-only",
                 "AllowedMethods": {
                     "Quantity": 7,
@@ -158,11 +158,29 @@ if [ -z "$DIST_ID" ] || [ "$DIST_ID" == "None" ]; then
                 "ForwardedValues": {
                     "QueryString": true,
                     "Cookies": { "Forward": "all" },
-                    "Headers": { "Quantity": 0, "Items": [] }
+                    "Headers": { "Quantity": 1, "Items": ["Authorization"] }
                 },
                 "MinTTL": 0,
                 "DefaultTTL": 0,
                 "MaxTTL": 0
+            },
+            {
+                "PathPattern": "/uploads/*",
+                "TargetOriginId": "Lambda-Backend",
+                "ViewerProtocolPolicy": "https-only",
+                "AllowedMethods": {
+                    "Quantity": 2,
+                    "Items": ["GET", "HEAD"]
+                },
+                "Compress": true,
+                "ForwardedValues": {
+                    "QueryString": false,
+                    "Cookies": { "Forward": "none" },
+                    "Headers": { "Quantity": 0, "Items": [] }
+                },
+                "MinTTL": 0,
+                "DefaultTTL": 86400,
+                "MaxTTL": 31536000
             }
         ]
     },
@@ -201,17 +219,33 @@ else
     # API Gatewayドメインを更新する
     aws cloudfront get-distribution-config --id $DIST_ID > /tmp/cf-cur.json
     ETAG=$(jq -r '.ETag' /tmp/cf-cur.json)
+
+    # /api/* ビヘイビアをベースに /uploads/* ビヘイビアを作成し、キャッシュ設定を最適化
     jq '.DistributionConfig' /tmp/cf-cur.json \
       | jq --arg domain "$APIGW_DOMAIN" \
-        '(.Origins.Items[] | select(.Id == "APIGateway-Backend") | .DomainName) = $domain
-         | (.Origins.Items[] | select(.Id == "APIGateway-Backend") | .OriginAccessControlId) = ""
-         | (.CustomErrorResponses) = {"Quantity": 2, "Items": [{"ErrorCode": 403, "ResponsePagePath": "/index.html", "ResponseCode": "200", "ErrorCachingMinTTL": 10}, {"ErrorCode": 404, "ResponsePagePath": "/index.html", "ResponseCode": "200", "ErrorCachingMinTTL": 10}]}' \
+        '(.Origins.Items[] | select(.Id == "Lambda-Backend") | .DomainName) = $domain
+         | (.Origins.Items[] | select(.Id == "Lambda-Backend") | .OriginAccessControlId) = ""
+         | .CacheBehaviors.Quantity = 2
+         | .CacheBehaviors.Items = [
+             (.CacheBehaviors.Items[] | select(.PathPattern == "/api/*")),
+             ((.CacheBehaviors.Items[] | select(.PathPattern == "/api/*")) 
+              | .PathPattern = "/uploads/*"
+              | .Compress = true
+              | .DefaultTTL = 86400
+              | .MaxTTL = 31536000
+              | .ForwardedValues.QueryString = false
+              | .ForwardedValues.Cookies.Forward = "none"
+              | .ForwardedValues.Headers = {"Quantity": 0, "Items": []}
+             )
+           ]
+         | .CustomErrorResponses = {"Quantity": 2, "Items": [{"ErrorCode": 403, "ResponsePagePath": "/index.html", "ResponseCode": "200", "ErrorCachingMinTTL": 10}, {"ErrorCode": 404, "ResponsePagePath": "/index.html", "ResponseCode": "200", "ErrorCachingMinTTL": 10}]}' \
       > /tmp/cf-upd.json
+
     aws cloudfront update-distribution \
         --id $DIST_ID \
         --distribution-config file:///tmp/cf-upd.json \
         --if-match $ETAG > /dev/null
-    echo "  -> API Gatewayドメインに更新完了"
+    echo "  -> CloudFrontの設定を更新完了"
 fi
 
 echo "  CloudFront URL: https://$DIST_DOMAIN"
