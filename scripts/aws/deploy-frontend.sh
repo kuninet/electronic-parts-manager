@@ -259,6 +259,7 @@ else
              | .Origins.Items += [{
                  "Id": "S3-Images",
                  "DomainName": $imagesDomain,
+                 "OriginPath": "",
                  "OriginAccessControlId": $imagesOacId,
                  "S3OriginConfig": {"OriginAccessIdentity": ""},
                  "ConnectionAttempts": 3,

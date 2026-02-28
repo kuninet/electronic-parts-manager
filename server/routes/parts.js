@@ -104,7 +104,9 @@ router.get('/:id', async (req, res) => {
 router.post('/', upload, async (req, res) => {
     try {
         const db = getDb();
-        const { name, description, category_id, location_id, quantity, datasheet_url } = req.body;
+        const { name, description, quantity, datasheet_url } = req.body;
+        const category_id = (req.body.category_id === '' || req.body.category_id === 'null' || req.body.category_id === undefined) ? null : req.body.category_id;
+        const location_id = (req.body.location_id === '' || req.body.location_id === 'null' || req.body.location_id === undefined) ? null : req.body.location_id;
         const tags = req.body.tags ? req.body.tags.split(',').map(t => t.trim()).filter(t => t) : [];
 
         let image_path = null;
