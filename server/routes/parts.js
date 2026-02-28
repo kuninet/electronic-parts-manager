@@ -4,26 +4,19 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { getDb } = require('../database');
-const { resizeImage } = require('../utils/image');
+const { resizeImageBuffer } = require('../utils/image');
+const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 
-// Configure Multer for file uploads
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
-        cb(null, uploadsDir);
-    },
-    filename: function (req, file, cb) {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, uniqueSuffix + path.extname(file.originalname));
-    }
-});
-
+// Configure Multer for file uploads (memoryStorage for S3 support)
+const storage = multer.memoryStorage();
 const uploadMiddleware = multer({ storage: storage });
-
 const upload = uploadMiddleware.fields([
     { name: 'image', maxCount: 1 },
     { name: 'datasheet', maxCount: 1 }
 ]);
+
+const s3Images = new S3Client({ region: process.env.AWS_REGION || 'ap-northeast-1' });
+const IMAGES_BUCKET = process.env.S3_IMAGES_BUCKET;
 
 // GET /api/parts - List parts with filters
 router.get('/', async (req, res) => {
@@ -111,14 +104,37 @@ router.get('/:id', async (req, res) => {
 router.post('/', upload, async (req, res) => {
     try {
         const db = getDb();
-        const { name, description, category_id, location_id, quantity, datasheet_url } = req.body;
+        const { name, description, quantity, datasheet_url } = req.body;
+        const category_id = (req.body.category_id === '' || req.body.category_id === 'null' || req.body.category_id === undefined) ? null : req.body.category_id;
+        const location_id = (req.body.location_id === '' || req.body.location_id === 'null' || req.body.location_id === undefined) ? null : req.body.location_id;
         const tags = req.body.tags ? req.body.tags.split(',').map(t => t.trim()).filter(t => t) : [];
 
-        const image_path = req.files['image'] ? '/uploads/' + req.files['image'][0].filename : null;
+        let image_path = null;
         if (req.files['image']) {
-            await resizeImage(req.files['image'][0].path);
+            const file = req.files['image'][0];
+            const filename = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
+            const resizedBuffer = await resizeImageBuffer(file.buffer);
+            if (IMAGES_BUCKET) {
+                await s3Images.send(new PutObjectCommand({
+                    Bucket: IMAGES_BUCKET,
+                    Key: 'uploads/' + filename,
+                    Body: resizedBuffer,
+                    ContentType: file.mimetype
+                }));
+            } else {
+                const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
+                await fs.promises.writeFile(path.join(uploadsDir, filename), resizedBuffer);
+            }
+            image_path = '/uploads/' + filename;
         }
-        const datasheet_path = req.files['datasheet'] ? '/uploads/' + req.files['datasheet'][0].filename : null;
+        let datasheet_path = null;
+        if (req.files['datasheet']) {
+            const dsFile = req.files['datasheet'][0];
+            const dsFilename = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(dsFile.originalname);
+            const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
+            await fs.promises.writeFile(path.join(uploadsDir, dsFilename), dsFile.buffer);
+            datasheet_path = '/uploads/' + dsFilename;
+        }
 
         const result = await db.run(`
       INSERT INTO parts (name, description, category_id, location_id, quantity, image_path, datasheet_url, datasheet_path)
@@ -170,22 +186,40 @@ router.put('/:id', upload, async (req, res) => {
         const currentPart = await db.get('SELECT image_path, datasheet_path FROM parts WHERE id = ?', [id]);
 
         if (req.files['image']) {
-            await resizeImage(req.files['image'][0].path);
-            query += `, image_path = ?`;
-            params.push('/uploads/' + req.files['image'][0].filename);
-
-            // Delete old image
-            if (currentPart && currentPart.image_path) {
-                const oldPath = path.join(__dirname, '../../', currentPart.image_path);
-                fs.unlink(oldPath, (err) => {
-                    if (err) console.error('Failed to delete old image:', err);
-                });
+            const file = req.files['image'][0];
+            const filename = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
+            const resizedBuffer = await resizeImageBuffer(file.buffer);
+            if (IMAGES_BUCKET) {
+                await s3Images.send(new PutObjectCommand({
+                    Bucket: IMAGES_BUCKET,
+                    Key: 'uploads/' + filename,
+                    Body: resizedBuffer,
+                    ContentType: file.mimetype
+                }));
+                // Delete old image from S3
+                if (currentPart && currentPart.image_path) {
+                    const oldKey = currentPart.image_path.replace(/^\//, '');
+                    await s3Images.send(new DeleteObjectCommand({ Bucket: IMAGES_BUCKET, Key: oldKey })).catch(e => console.error('Failed to delete old image from S3:', e));
+                }
+            } else {
+                const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
+                await fs.promises.writeFile(path.join(uploadsDir, filename), resizedBuffer);
+                if (currentPart && currentPart.image_path) {
+                    const oldPath = path.join(__dirname, '../../', currentPart.image_path);
+                    fs.unlink(oldPath, (err) => { if (err) console.error('Failed to delete old image:', err); });
+                }
             }
+            query += `, image_path = ?`;
+            params.push('/uploads/' + filename);
         }
 
         if (req.files['datasheet']) {
+            const dsFile = req.files['datasheet'][0];
+            const dsFilename = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(dsFile.originalname);
+            const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
+            await fs.promises.writeFile(path.join(uploadsDir, dsFilename), dsFile.buffer);
             query += `, datasheet_path = ?`;
-            params.push('/uploads/' + req.files['datasheet'][0].filename);
+            params.push('/uploads/' + dsFilename);
 
             // Delete old datasheet
             if (currentPart && currentPart.datasheet_path) {
@@ -247,8 +281,13 @@ router.delete('/:id/permanent', async (req, res) => {
 
         if (currentPart) {
             if (currentPart.image_path) {
-                const oldPath = path.join(__dirname, '../../', currentPart.image_path);
-                fs.unlink(oldPath, (err) => { if (err) console.error('Failed to delete image:', err); });
+                if (IMAGES_BUCKET) {
+                    const key = currentPart.image_path.replace(/^\//, '');
+                    s3Images.send(new DeleteObjectCommand({ Bucket: IMAGES_BUCKET, Key: key })).catch(e => console.error('Failed to delete image from S3:', e));
+                } else {
+                    const oldPath = path.join(__dirname, '../../', currentPart.image_path);
+                    fs.unlink(oldPath, (err) => { if (err) console.error('Failed to delete image:', err); });
+                }
             }
             if (currentPart.datasheet_path) {
                 const oldPath = path.join(__dirname, '../../', currentPart.datasheet_path);
@@ -298,7 +337,12 @@ router.post('/bulk/action', async (req, res) => {
             const parts = await db.all(`SELECT image_path, datasheet_path FROM parts WHERE id IN (${placeholders})`, ids);
             parts.forEach(part => {
                 if (part.image_path) {
-                    fs.unlink(path.join(__dirname, '../../', part.image_path), () => { });
+                    if (IMAGES_BUCKET) {
+                        const key = part.image_path.replace(/^\//, '');
+                        s3Images.send(new DeleteObjectCommand({ Bucket: IMAGES_BUCKET, Key: key })).catch(() => {});
+                    } else {
+                        fs.unlink(path.join(__dirname, '../../', part.image_path), () => { });
+                    }
                 }
                 if (part.datasheet_path) {
                     fs.unlink(path.join(__dirname, '../../', part.datasheet_path), () => { });

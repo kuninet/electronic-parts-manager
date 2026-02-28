@@ -91,6 +91,27 @@ else
 fi
 
 # ==========================================
+# [3.5/7] S3 Images バケットのOAC作成/取得
+# ==========================================
+echo ""
+echo "[3.5/7] S3 Images OAC の確認..."
+IMAGES_BUCKET_NAME="epm-images-${ACCOUNT_ID}"
+IMAGES_OAC_NAME="epm-images-oac"
+
+IMAGES_OAC_ID=$(aws cloudfront list-origin-access-controls \
+    --query "OriginAccessControlList.Items[?Name=='$IMAGES_OAC_NAME'].Id" --output text)
+if [ -z "$IMAGES_OAC_ID" ] || [ "$IMAGES_OAC_ID" == "None" ]; then
+    echo "  -> 新規作成: $IMAGES_OAC_NAME"
+    IMAGES_OAC_ID=$(aws cloudfront create-origin-access-control \
+        --origin-access-control-config \
+        "Name=$IMAGES_OAC_NAME,Description=OAC for EPM Images S3,SigningProtocol=sigv4,SigningBehavior=always,OriginAccessControlOriginType=s3" \
+        --query 'OriginAccessControl.Id' --output text)
+else
+    echo "  -> 既存を使用: $IMAGES_OAC_ID"
+fi
+IMAGES_S3_DOMAIN="${IMAGES_BUCKET_NAME}.s3.${REGION}.amazonaws.com"
+
+# ==========================================
 # 4. CloudFront ディストリビューションの作成 or 更新
 # ==========================================
 echo ""
@@ -107,7 +128,7 @@ if [ -z "$DIST_ID" ] || [ "$DIST_ID" == "None" ]; then
     "Enabled": true,
     "DefaultRootObject": "index.html",
     "Origins": {
-        "Quantity": 2,
+        "Quantity": 3,
         "Items": [
             {
                 "Id": "S3-Frontend",
@@ -124,6 +145,12 @@ if [ -z "$DIST_ID" ] || [ "$DIST_ID" == "None" ]; then
                     "OriginProtocolPolicy": "https-only",
                     "OriginSslProtocols": { "Quantity": 1, "Items": ["TLSv1.2"] }
                 }
+            },
+            {
+                "Id": "S3-Images",
+                "DomainName": "$IMAGES_S3_DOMAIN",
+                "OriginAccessControlId": "$IMAGES_OAC_ID",
+                "S3OriginConfig": { "OriginAccessIdentity": "" }
             }
         ]
     },
@@ -166,7 +193,7 @@ if [ -z "$DIST_ID" ] || [ "$DIST_ID" == "None" ]; then
             },
             {
                 "PathPattern": "/uploads/*",
-                "TargetOriginId": "Lambda-Backend",
+                "TargetOriginId": "S3-Images",
                 "ViewerProtocolPolicy": "https-only",
                 "AllowedMethods": {
                     "Quantity": 2,
@@ -223,19 +250,36 @@ else
     # /api/* ビヘイビアをベースに /uploads/* ビヘイビアを作成し、キャッシュ設定を最適化
     jq '.DistributionConfig' /tmp/cf-cur.json \
       | jq --arg domain "$APIGW_DOMAIN" \
+           --arg imagesDomain "$IMAGES_S3_DOMAIN" \
+           --arg imagesOacId "$IMAGES_OAC_ID" \
         '(.Origins.Items[] | select(.Id == "Lambda-Backend") | .DomainName) = $domain
          | (.Origins.Items[] | select(.Id == "Lambda-Backend") | .OriginAccessControlId) = ""
+         | if (.Origins.Items | map(.Id) | contains(["S3-Images"])) then . else
+             .Origins.Quantity += 1
+             | .Origins.Items += [{
+                 "Id": "S3-Images",
+                 "DomainName": $imagesDomain,
+                 "OriginPath": "",
+                 "OriginAccessControlId": $imagesOacId,
+                 "S3OriginConfig": {"OriginAccessIdentity": ""},
+                 "ConnectionAttempts": 3,
+                 "ConnectionTimeout": 10,
+                 "CustomHeaders": {"Quantity": 0, "Items": []}
+               }]
+           end
          | .CacheBehaviors.Quantity = 2
          | .CacheBehaviors.Items = [
              (.CacheBehaviors.Items[] | select(.PathPattern == "/api/*")),
-             ((.CacheBehaviors.Items[] | select(.PathPattern == "/api/*")) 
+             ((.CacheBehaviors.Items[] | select(.PathPattern == "/api/*"))
               | .PathPattern = "/uploads/*"
+              | .TargetOriginId = "S3-Images"
               | .Compress = true
               | .DefaultTTL = 86400
               | .MaxTTL = 31536000
               | .ForwardedValues.QueryString = false
               | .ForwardedValues.Cookies.Forward = "none"
               | .ForwardedValues.Headers = {"Quantity": 0, "Items": []}
+              | .AllowedMethods = {"Quantity": 2, "Items": ["GET", "HEAD"], "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}}
              )
            ]
          | .CustomErrorResponses = {"Quantity": 2, "Items": [{"ErrorCode": 403, "ResponsePagePath": "/index.html", "ResponseCode": "200", "ErrorCachingMinTTL": 10}, {"ErrorCode": 404, "ResponsePagePath": "/index.html", "ResponseCode": "200", "ErrorCachingMinTTL": 10}]}' \
@@ -273,6 +317,26 @@ EOF
 aws s3api put-bucket-policy --bucket $BUCKET_NAME --policy file:///tmp/s3-policy.json
 rm /tmp/s3-policy.json
 echo "  -> 設定完了"
+
+# S3 Images バケットポリシー（CloudFrontからのGetObjectのみ許可）
+cat <<EOF > /tmp/s3-images-policy.json
+{
+    "Version": "2012-10-17",
+    "Statement": {
+        "Sid": "AllowCloudFrontServicePrincipalReadOnly",
+        "Effect": "Allow",
+        "Principal": { "Service": "cloudfront.amazonaws.com" },
+        "Action": "s3:GetObject",
+        "Resource": "arn:aws:s3:::$IMAGES_BUCKET_NAME/*",
+        "Condition": {
+            "StringEquals": { "AWS:SourceArn": "$DIST_ARN" }
+        }
+    }
+}
+EOF
+aws s3api put-bucket-policy --bucket $IMAGES_BUCKET_NAME --policy file:///tmp/s3-images-policy.json
+rm /tmp/s3-images-policy.json
+echo "  -> S3 Images バケットポリシー設定完了"
 
 # ==========================================
 # 6. フロントエンドをビルド（CloudFront URLで）
