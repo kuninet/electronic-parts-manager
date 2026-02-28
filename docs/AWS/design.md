@@ -13,6 +13,7 @@
 *   **バックエンド (API)**
     *   **Node.js (Express)** で実装されたAPIサーバーを **AWS Lambda** で実行します。
     *   HTTPリクエストとLambdaイベントの変換には、AWS公式の **AWS Lambda Web Adapter** レイヤーを利用し、ソースコードの修正なしに透過的な実行を実現しています。
+    *   フロントエンドからのリクエストは **CloudFront → API Gateway HTTP API → Lambda** の経路で届きます。
 *   **データベース / ストレージ**
     *   **SQLite** データファイルおよびアップロード画像群は、Lambdaにマウントされた **Amazon EFS** (Elastic File System) 上に保存され、状態を永続化しています。
 
@@ -33,25 +34,40 @@ Lambda関数とEFSを安全に連携させるため、システムはVPC内部�
 
 ## 3. コンポーネント別 詳細設計
 
-### 3.1. CloudFront + S3 (フロントエンド層)
+### 3.1. CloudFront (配信・ルーティング層)
+
+CloudFront はフロントエンドとバックエンドへの **統合エントリポイント** として機能します。
+
+| パスパターン | 転送先 | 用途 |
+|---|---|---|
+| `/api/*` | API Gateway HTTP API | バックエンドAPIリクエスト |
+| `/*`（デフォルト） | S3 | 静的ファイル配信 |
+
 *   **S3バケットポリシー**: パブリックアクセスは全てブロックし、CloudFrontの Origin Access Control (OAC) を通じた読み取り(`s3:GetObject`)のみを許可します。
-*   **カスタムエラードキュメント**: CloudFrontからS3へのアクセス時にファイルが見つからない（404）場合、Vue.jsのクライアントサイドルーティングを成立させるため、強制的に `index.html` (HTTP 200) を返すように設定します。
-*   **キャッシュビヘイビア**: 静的アセット（JS, CSS, 画像）はキャッシュさせ、`index.html` はキャッシュ期間を極力短くするか、キャッシュ無効化（Cache-Control: no-cache）とすることで最新バージョンへの移行を促します。
+*   **カスタムエラードキュメント**: S3へのアクセス時に 403/404 が返った場合、Vue.jsのクライアントサイドルーティングを成立させるため、強制的に `index.html` (HTTP 200) を返すように設定します。
+*   **フロントエンドの `VITE_API_BASE_URL`**: `https://<CloudFrontドメイン>/api` を指定します。これによりAPIリクエストも常にCloudFront経由になります。
 
 ### 3.2. IAM 認証と CloudFront Functions (セキュリティ・アクセス保護)
 *   パブリックアクセスを防ぐための **Basic認証** を採用しています。
 *   **CloudFront KeyValueStore**: パスワード情報（ユーザー名とSHA-256ハッシュのペア）をグローバルで高速に読み取れるKVSに保存します。
 *   **CloudFront Functions (Viewer Request)**: リクエストヘッダの `Authorization` を抽出し、KVS内のハッシュ値と照合。不一致時は 401 Unauthorized を返却し、バックエンドやS3への到達前に不正アクセスを遮断します。
 
-### 3.3. AWS Lambda (バックエンド計算処理層)
+### 3.3. API Gateway HTTP API (APIルーティング層)
+
+*   **プロトコル**: HTTP API（REST APIより低コスト・低レイテンシー）
+*   **統合方式**: Lambda プロキシ統合（`$default` ルートで全リクエストをLambdaに転送）
+*   **CORS設定**: API Gateway 側で `AllowOrigins: *` を設定。
+*   **採用理由**: AWS Organizations の SCP（サービスコントロールポリシー）が Lambda Function URL への直接 HTTP アクセスをブロックするため、API Gateway を経由する構成に切り替えました。
+
+### 3.4. AWS Lambda (バックエンド計算処理層)
 *   **デプロイ形式**: .zipファイルアップロード方式。依存モジュール(`node_modules`)を含めた全コードをパッケージ化します。
 *   **AWS Lambda Web Adapter**: `arn:aws:lambda:<region>:753240598075:layer:LambdaAdapterLayerArm64:<version>` のLayerを追加することで、ポート8080等でリッスンするExpressアプリにHTTPリクエストをルーティングします。
     *   *必須環境変数*: `AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap`
     *   *ポート指定*: `PORT=8080` （Express側で受け取るポート）
-*   **関数URL**: API Gatewayを利用せず、Lambda Function UUID由来のURLを公開することで構成をシンプル化しています。CORS設定はLambda関数URLの設定側、またはExpress側のいずれかで一元管理します。
 *   **タイムアウト**: Express側でのファイル処理やSQLiteのスキャンがある程度発生することを想定し、デフォルトの3秒から **30秒〜1分程度** に引き上げておくことを推奨します。
+*   **トリガー**: Lambda Function URL は使用しません。API Gateway HTTP API からのみ呼び出されます。
 
-### 3.4. Amazon EFS (データベース・ストレージ層)
+### 3.5. Amazon EFS (データベース・ストレージ層)
 *   **マウント**: Lambda設定画面より、EFSアクセスポイントを `/mnt/efs` にマウントします。
 *   **環境変数によるパス注入**: Expressアプリケーションは、以下の環境変数を読み込んでファイルの入出力先を決定します。
     *   `DB_PATH=/mnt/efs/database.sqlite`

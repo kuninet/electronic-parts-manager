@@ -32,63 +32,88 @@
 **目的**: Expressで作られた既存のAPIを、ZIPファイルとしてAWS Lambda上で稼働させます。
 
 1. **デプロイパッケージ（ZIP）の作成**
-   手元のMacで以下のコマンドを実行し、ファイル一式をZIPにまとめます。
+   手元のMacで以下のコマンドを実行します。
    ```bash
-   cd server
-   # プロダクション用の依存パッケージのみインストール
-   npm ci --omit=dev
-   # ソースコードをZIP圧縮（不要なファイルを除外）
-   zip -r ../deploy-backend.zip . -x "*.git*" "*test*"
-   cd ..
+   ./scripts/aws/deploy.sh
    ```
+   スクリプトは以下を自動化します。
+   - Linux ARM64向けのティブンコンパイル（`npm ci` でネイティブモジュールをリビルド）
+   - Lambda 関数の作成または更新
+   - Lambda Layer（Web Adapter）のアタッチ
+   - VPC・ EFS・環境変数の設定
 
-2. **Lambda 関数の作成**
-   - AWSコンソールから「一から作成」を選択し、関数名（`epm-backend`等）、ランタイム（`Node.js 20.x`等）、アーキテクチャ（`arm64`推奨）を指定して作成。
-   - **コードソース** の「アップロード元 > .zip ファイル」を選択し、先ほど作成した `deploy-backend.zip` をアップロードします。
-
-3. **Lambda Layer（Web Adapter）の追加**
-   - Lambda関数の画面の一番下にある「レイヤー」カテゴリから「レイヤーの追加」をクリック。
-   - **「ARN を指定」** を選択し、以下のARNを入力して追加します（例は東京リージョン ap-northeast-1 / arm64 の場合）。
-     - `arn:aws:lambda:ap-northeast-1:753240598075:layer:LambdaAdapterLayerArm64:24`
-     - ※ x86アーキテクチャを選んだ場合は `arn:aws:lambda:ap-northeast-1:753240598075:layer:LambdaAdapterLayerX86:24` です。
-
-4. **Lambda の設定**
-   - **一般設定**: 
-     - ハンドラの設定を `run.sh` などのカスタム起動コマンドにする**必要はありません**（Node.jsランタイムのままでLayerが通信をフックします）。
-     - ただし環境変数 `AWS_LAMBDA_EXEC_WRAPPER` に `/opt/bootstrap` を設定します。
-   - **VPC / ファイルシステム**: 
-     - EFSを作成したVPC・サブネットを指定。
-     - 作成したEFSアクセスポイントを設定（ローカルマウントパス: `/mnt/efs`）。
-   - **環境変数**:
-     - `AWS_LAMBDA_EXEC_WRAPPER` = `/opt/bootstrap`  ← **必須** (Web Adapterを有効化)
-     - `PORT` = `8080` (AWS Lambda Web Adapterのデフォルト受け口ポート)
+2. **Lambda 関数の設定**
+   - **アーキテクチャ**: `arm64`
+   - **ランタイム**: `Node.js 20.x`
+   - **ハンドラ**: `run.sh`（Lambda Web Adapter用）
+   - **層（Layer）**: `arn:aws:lambda:ap-northeast-1:753240598075:layer:LambdaAdapterLayerArm64:22`
+   - **必須環境変数**:
+     - `AWS_LAMBDA_EXEC_WRAPPER` = `/opt/bootstrap`
+     - `PORT` = `8080`
      - `DB_PATH` = `/mnt/efs/database.sqlite`
      - `UPLOAD_DIR` = `/mnt/efs/uploads`
-   - **実行ロール**: EFSアクセス権限(`AmazonElasticFileSystemClientFullAccess`等)とVPCアクセス権限(`AWSLambdaVPCAccessExecutionRole`)を追加。
+   - **トリガー**: Lambda Function URL は**使用しません**。API Gateway HTTP APIから呼び出されます。
 
-5. **Lambda 関数 URL の有効化**
-   - API Gatewayは使わず、関数URLを「NONE (認証なし)」でパブリックに有効化し、CORSを許可しておくと素早くAPIが稼働します。
+> **注意**: AWS Organizations の SCP（サービスコントロールポリシー）により、Lambda Function URL への直接 HTTP アクセスはブロックされます。そのため、バックエンドエンドポイントには **API Gateway HTTP API** を採用しています。
+
+## 3. API Gateway HTTP API の構築
+
+**目的**: CloudFrontからLambdaへのルーティングを API Gateway 経由で安定させます。
+
+> **重要**: AWS Organizations の SCP により、Lambda Function URL への直接 HTTP アクセスがブロックされるため、**API Gateway HTTP API** をバックエンドのエントリポイントとし〆6ます。
+
+```bash
+# デプロイスクリプトで自動実行されます。手動で行う場合のコマンド例:
+
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+LAMBDA_ARN="arn:aws:lambda:ap-northeast-1:${ACCOUNT_ID}:function:epm-backend"
+
+# API Gateway HTTP API を作成
+ aws apigatewayv2 create-api \
+    --name epm-api \
+    --protocol-type HTTP \
+    --target $LAMBDA_ARN \
+    --cors-configuration AllowOrigins='["*"]',AllowMethods='["GET","POST","PUT","DELETE","PATCH","OPTIONS"]',AllowHeaders='["*"]'
+
+# Lambda 呼び出し権限付与
+aws lambda add-permission \
+    --function-name epm-backend \
+    --statement-id AllowAPIGatewayInvoke \
+    --action lambda:InvokeFunction \
+    --principal apigateway.amazonaws.com \
+    --source-arn "arn:aws:execute-api:ap-northeast-1:${ACCOUNT_ID}:<API_ID>/*/*"
+```
 
 ---
 
-## 3. フロントエンド（SPA）のホスティング（S3 + CloudFront）
+## 4. フロントエンド（SPA）のホスティング（S3 + CloudFront）
 
 **目的**: ViteベースのVueアプリをビルドしてCDN経由で世界中に高速・セキュアに配信します。
 
-1. **環境変数の用意**
-   - `client/.env.production` を作成し、先ほどのLambda関数URLを向くように設定します。
-     ```text
-     VITE_API_BASE_URL=https://<あなたのLambda関数URLID>.lambda-url.ap-northeast-1.on.aws/api
-     ```
-2. **ビルド**
-   - `npm run build --prefix client`
-3. **S3バケットの作成とアップロード**
-   - `epm-frontend-hosting` 等の名前でバケットを作成。
-   - `client/dist` ディレクトリの中身をS3バケットのルートへアップロード。
-4. **CloudFront の設定**
-   - Originとして作成したS3バケットを指定し、Origin Access Control (OAC) を有効化します。
-   - ※ OAC設定後、提示されるバケットポリシーをS3側に適用するのを忘れないようにしてください。
-   - エラーページ設定で、HTTP 403 / 404 エラー発生時に `/index.html` (HTTP 200) を返すように設定すると、SPAのページルーティングが正常に動作します。
+1. **デプロイスクリプトで一括実行**
+   以下の **1コマンド** で、ビルドからS3アップロード、CloudFront構築、キャッシュ削除まで全自動化されます。
+   ```bash
+   ./scripts/aws/deploy-frontend.sh
+   ```
+   スクリプトは以下を自動実行します。
+   1. API Gateway URLの取得
+   2. S3バケットの作成（未作成の場合）
+   3. CloudFront S3 OACの作成（未作成の場合）
+   4. CloudFrontディストリビューションの作成（未作成の場合）または API Gatewayドメインの更新
+   5. S3バケットポリシーの適用（CloudFront OACのみアクセス容認）
+   6. `VITE_API_BASE_URL=https://<CloudFrontドメイン>/api` でViteフロントエンドをビルドしS3にアップロード
+   7. CloudFrontキャッシュ削除
+
+   > **重要**: `VITE_API_BASE_URL` を Lambda の Function URL ではなく、**CloudFrontの URL** (`https://<CFドメイン>/api`) に設定すること。これにより、全てのリクエストが CloudFront 経由となり SCP 制約を回避できます。
+
+4. **CloudFront のルーティング構成**
+   ```
+   https://<CloudFrontドメイン>
+     ├── /api/*  → API Gateway HTTP API → Lambda (Express)
+     └── /*      → S3 (index.html, 静的アセット)
+   ```
+   - S3の403/404 → `index.html` (HTTP 200) にリダイレクト（SPAルーティング用）
+   - APIリクエストはキャッシュ無効（MinTTL=0, DefaultTTL=0）
 
 ---
 
