@@ -44,7 +44,7 @@ router.get('/export/full', async (req, res) => {
         archive.append(JSON.stringify(dbDump, null, 2), { name: 'backup_data.json' });
 
         // 4. Add Uploads
-        const uploadsDir = path.join(__dirname, '../../uploads');
+        const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
         if (fs.existsSync(uploadsDir)) {
             archive.directory(uploadsDir, 'uploads');
         }
@@ -134,7 +134,7 @@ router.post('/import/full', upload.single('file'), async (req, res) => {
         await db.run('COMMIT');
 
         // 7. Restore Upload Files
-        const uploadsDir = path.join(__dirname, '../../uploads');
+        const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
         // We can use zip.extractAllTo
         // But we need to extract ONLY the 'uploads/' folder from zip to the uploadsDir.
         // adm-zip extracts preserving paths. If zip has 'uploads/file.jpg', extracting to ../../ will put it in ../../uploads/file.jpg.
@@ -177,7 +177,7 @@ router.post('/reset', async (req, res) => {
         await db.run('COMMIT');
 
         // Clean uploads directory
-        const uploadsDir = path.join(__dirname, '../../uploads');
+        const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
         if (fs.existsSync(uploadsDir)) {
             const files = fs.readdirSync(uploadsDir);
             for (const file of files) {

@@ -1,6 +1,51 @@
 node_modules
 .DS_Store
 uploads
-.env
 dist
 server/database.sqlite
+
+# ==========================
+# 環境変数・シークレット
+# ==========================
+# ローカル環境変数（DB接続情報など）
+.env
+.env.local
+.env.*.local
+
+# 本番ビルド用の環境変数（CloudFrontのURL・APIエンドポイントなど）
+# ※ deploy-frontend.sh が自動生成するため、コミット不要
+.env.production
+.env.staging
+client/.env.production
+client/.env.staging
+
+# ==========================
+# AWS 関連の一時ファイル
+# ==========================
+# CLIで生成されるCloudFront・IAMポリシーのJSONファイル
+cb.json
+cf-conf.json
+cf-config.json
+cf-current.json
+cf-upd.json
+cf-*.json
+full-cf-config.json
+updated-config.json
+dist-config.json
+s3-policy.json
+policy.json
+lambda-invoke-output.json
+/tmp/
+
+# ==========================
+# ビルド成果物
+# ==========================
+dist/
+*.zip
+
+# ==========================
+# macOS
+# ==========================
+.DS_Store
+.AppleDouble
+.LSOverride
