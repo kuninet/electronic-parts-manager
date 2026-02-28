@@ -78,6 +78,32 @@ aws iam put-role-policy --role-name $ROLE_NAME --policy-name EPM-S3-Upload-Polic
     ]
 }"
 
+# 1.2 S3 Images Bucket and Policy
+IMAGES_BUCKET="epm-images-$ACCOUNT_ID"
+echo "Checking S3 Images Bucket: $IMAGES_BUCKET"
+if ! aws s3api head-bucket --bucket $IMAGES_BUCKET > /dev/null 2>&1; then
+    echo "Creating S3 Images Bucket..."
+    aws s3api create-bucket --bucket $IMAGES_BUCKET --region $REGION --create-bucket-configuration LocationConstraint=$REGION > /dev/null
+    aws s3api put-public-access-block \
+        --bucket $IMAGES_BUCKET \
+        --public-access-block-configuration \
+        "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+else
+    echo "S3 Images Bucket already exists."
+fi
+
+echo "Ensuring S3 IAM Policy for Images Bucket..."
+aws iam put-role-policy --role-name $ROLE_NAME --policy-name EPM-S3-Images-Policy --policy-document "{
+    \"Version\": \"2012-10-17\",
+    \"Statement\": [
+        {
+            \"Effect\": \"Allow\",
+            \"Action\": [\"s3:PutObject\", \"s3:GetObject\", \"s3:DeleteObject\", \"s3:ListBucket\"],
+            \"Resource\": [\"arn:aws:s3:::$IMAGES_BUCKET\", \"arn:aws:s3:::$IMAGES_BUCKET/*\"]
+        }
+    ]
+}"
+
 # 2. Get Default VPC and Subnets
 echo "Getting Default VPC details..."
 VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
@@ -200,7 +226,7 @@ if [ "$FUNCTION_EXISTS" == "no" ]; then
         --timeout 300 \
         --memory-size 512 \
         --architectures arm64 \
-        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID}" \
+        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID,S3_IMAGES_BUCKET=epm-images-$ACCOUNT_ID}" \
         --vpc-config SubnetIds=$(echo "${SUBNET_ARRAY[*]}" | tr ' ' ','),SecurityGroupIds=$SG_ID \
         --file-system-configs Arn=$AP_ARN,LocalMountPath=/mnt/efs \
         --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerArm64:24 > /dev/null
@@ -220,7 +246,7 @@ else
         --handler run.sh \
         --timeout 300 \
         --memory-size 512 \
-        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID}" \
+        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID,S3_IMAGES_BUCKET=epm-images-$ACCOUNT_ID}" \
         --vpc-config SubnetIds=$(echo "${SUBNET_ARRAY[*]}" | tr ' ' ','),SecurityGroupIds=$SG_ID \
         --file-system-configs Arn=$AP_ARN,LocalMountPath=/mnt/efs \
         --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerArm64:24 > /dev/null

@@ -8,7 +8,7 @@ const path = require('path');
 
 const archiver = require('archiver');
 const admZip = require('adm-zip');
-const { S3Client, GetObjectCommand, DeleteObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, GetObjectCommand, DeleteObjectCommand, PutObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { pipeline } = require('stream/promises');
 
@@ -18,6 +18,13 @@ const s3Client = new S3Client({
     responseChecksumValidation: "when_required"
 });
 const UPLOAD_BUCKET = process.env.S3_UPLOAD_BUCKET;
+
+const s3Images = process.env.S3_IMAGES_BUCKET ? new S3Client({
+    region: process.env.AWS_REGION || 'ap-northeast-1',
+    requestChecksumCalculation: "when_required",
+    responseChecksumValidation: "when_required"
+}) : null;
+const IMAGES_BUCKET = process.env.S3_IMAGES_BUCKET;
 
 // GET /api/backup/config
 router.get('/config', (req, res) => {
@@ -49,8 +56,16 @@ router.get('/export/full', async (req, res) => {
         archive.append(JSON.stringify(dbDump, null, 2), { name: 'backup_data.json' });
 
         const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
-        if (fs.existsSync(uploadsDir)) {
-            archive.directory(uploadsDir, 'uploads');
+        if (IMAGES_BUCKET) {
+            const objects = await s3Images.send(new ListObjectsV2Command({ Bucket: IMAGES_BUCKET, Prefix: 'uploads/' }));
+            if (objects.Contents && objects.Contents.length > 0) {
+                for (const obj of objects.Contents) {
+                    const data = await s3Images.send(new GetObjectCommand({ Bucket: IMAGES_BUCKET, Key: obj.Key }));
+                    archive.append(data.Body, { name: obj.Key });
+                }
+            }
+        } else {
+            if (fs.existsSync(uploadsDir)) archive.directory(uploadsDir, 'uploads');
         }
         archive.finalize();
     } catch (err) {
@@ -144,12 +159,15 @@ router.post('/import/download', async (req, res) => {
     if (!bucket) return res.status(500).json({ error: 'S3_UPLOAD_BUCKET not set' });
 
     const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
-    const tempZipPath = path.join(uploadsDir, 'import_temp.zip');
+    const tempZipPath = IMAGES_BUCKET
+        ? path.join(path.dirname(uploadsDir), 'tmp', 'import_temp.zip')
+        : path.join(uploadsDir, 'import_temp.zip');
 
     try {
-        if (!fs.existsSync(uploadsDir)) {
-            console.log(`Creating directory: ${uploadsDir}`);
-            fs.mkdirSync(uploadsDir, { recursive: true });
+        const tempDir = path.dirname(tempZipPath);
+        if (!fs.existsSync(tempDir)) {
+            console.log(`Creating directory: ${tempDir}`);
+            fs.mkdirSync(tempDir, { recursive: true });
         }
         console.log(`Downloading from S3: ${bucket}/${key} to ${tempZipPath}`);
         const command = new GetObjectCommand({ Bucket: bucket, Key: key });
@@ -166,7 +184,9 @@ router.post('/import/download', async (req, res) => {
 router.post('/import/restore', async (req, res) => {
     const { s3Key } = req.body;
     const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
-    const tempZipPath = path.join(uploadsDir, 'import_temp.zip');
+    const tempZipPath = IMAGES_BUCKET
+        ? path.join(path.dirname(uploadsDir), 'tmp', 'import_temp.zip')
+        : path.join(uploadsDir, 'import_temp.zip');
     const db = getDb();
 
     if (!fs.existsSync(tempZipPath)) return res.status(404).json({ error: 'Temp file not found' });
@@ -216,13 +236,32 @@ router.post('/import/restore', async (req, res) => {
         await db.run('COMMIT');
 
         // Restore Upload Files
-        const parentDir = path.join(uploadsDir, '../');
-        console.log(`Extracting ZIP contents to parent directory: ${parentDir}`);
-        if (!fs.existsSync(uploadsDir)) {
-            fs.mkdirSync(uploadsDir, { recursive: true });
+        if (IMAGES_BUCKET) {
+            const tmpDir = `/tmp/restore_${Date.now()}`;
+            fs.mkdirSync(tmpDir, { recursive: true });
+            zip.extractAllTo(tmpDir, true);
+            const extractedUploads = path.join(tmpDir, 'uploads');
+            if (fs.existsSync(extractedUploads)) {
+                for (const file of fs.readdirSync(extractedUploads)) {
+                    const filePath = path.join(extractedUploads, file);
+                    await s3Images.send(new PutObjectCommand({
+                        Bucket: IMAGES_BUCKET,
+                        Key: 'uploads/' + file,
+                        Body: fs.readFileSync(filePath)
+                    }));
+                }
+            }
+            fs.rmSync(tmpDir, { recursive: true });
+            console.log('S3 restore complete.');
+        } else {
+            const parentDir = path.join(uploadsDir, '../');
+            console.log(`Extracting ZIP contents to parent directory: ${parentDir}`);
+            if (!fs.existsSync(uploadsDir)) {
+                fs.mkdirSync(uploadsDir, { recursive: true });
+            }
+            zip.extractAllTo(parentDir, true);
+            console.log('Extraction complete.');
         }
-        zip.extractAllTo(parentDir, true);
-        console.log('Extraction complete.');
 
         if (s3Key) {
             const delCmd = new DeleteObjectCommand({ Bucket: UPLOAD_BUCKET, Key: s3Key });

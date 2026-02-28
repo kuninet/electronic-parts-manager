@@ -13,7 +13,7 @@
 
 ## 1. データベース・ストレージ層（Amazon EFS）の構築
 
-**目的**: バックエンドAPI（Lambda）が状態を永続化できるように、SQLiteの保存先および画像アップロード先となるEFSを用意します。
+**目的**: バックエンドAPI（Lambda）が状態を永続化できるように、SQLiteデータベースの保存先となるEFSを用意します。画像ファイルはS3に保存されるため、EFSはDB専用です。
 
 1. **VPC・セキュリティグループの確認**
    - 今回はデフォルトVPCを利用するか、専用のVPCを作成します。
@@ -51,7 +51,9 @@
      - `AWS_LAMBDA_EXEC_WRAPPER` = `/opt/bootstrap`
      - `PORT` = `8080`
      - `DB_PATH` = `/mnt/efs/database.sqlite`
-     - `UPLOAD_DIR` = `/mnt/efs/uploads`
+     - `UPLOAD_DIR` = `/mnt/efs/uploads` — ローカル開発用。AWS環境では画像保存にはS3が使用されます。
+     - `S3_IMAGES_BUCKET` = `epm-images-<アカウントID>` — 画像保存先のS3バケット。設定されている場合、画像のアップロード・削除はすべてS3に対して行われます。
+     - `S3_UPLOAD_BUCKET` = `epm-upload-<アカウントID>` — バックアップインポート用のS3バケット。
    - **トリガー**: Lambda Function URL は**使用しません**。API Gateway HTTP APIから呼び出されます。
 
 > **注意**: AWS Organizations の SCP（サービスコントロールポリシー）により、Lambda Function URL への直接 HTTP アクセスはブロックされます。そのため、バックエンドエンドポイントには **API Gateway HTTP API** を採用しています。
@@ -109,11 +111,16 @@ aws lambda add-permission \
 4. **CloudFront のルーティング構成**
    ```
    https://<CloudFrontドメイン>
-     ├── /api/*  → API Gateway HTTP API → Lambda (Express)
-     └── /*      → S3 (index.html, 静的アセット)
+     ├── /api/*      → API Gateway HTTP API → Lambda (Express)
+     ├── /uploads/*  → S3-Images (epm-images-*) ※画像直接配信
+     └── /*          → S3-Frontend (index.html, 静的アセット)
    ```
+   - `/uploads/*` はS3-Imagesオリジンから直接配信（Lambdaを経由しない）
    - S3の403/404 → `index.html` (HTTP 200) にリダイレクト（SPAルーティング用）
    - APIリクエストはキャッシュ無効（MinTTL=0, DefaultTTL=0）
+   - 画像リクエストはキャッシュ有効（長期キャッシュ）
+
+> **既存環境からの移行**: EFSに既存の画像がある場合は、`scripts/aws/migrate-images-to-s3.sh` を実行してS3に移行できます。
 
 ---
 
