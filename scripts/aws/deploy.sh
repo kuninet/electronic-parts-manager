@@ -68,8 +68,20 @@ if [ "$EFS_ID" == "None" ]; then
     echo "Creating Amazon EFS..."
     EFS_ID=$(aws efs create-file-system --creation-token $EFS_TOKEN --performance-mode generalPurpose --throughput-mode bursting --query 'FileSystemId' --output text)
     
-    echo "Waiting for EFS to be available..."
-    aws efs wait file-system-available --file-system-id $EFS_ID
+    echo "Waiting for EFS to be available (this may take a few minutes)..."
+    while true; do
+        STATUS=$(aws efs describe-file-systems --file-system-id $EFS_ID --query 'FileSystems[0].LifeCycleState' --output text 2>/dev/null || echo "creating")
+        if [ "$STATUS" == "available" ]; then
+            echo "EFS is available!"
+            break
+        elif [ "$STATUS" == "deleted" ] || [ "$STATUS" == "error" ]; then
+            echo "EFS creation failed (Status: $STATUS)."
+            exit 1
+        fi
+        echo -n "."
+        sleep 5
+    done
+    echo ""
     
     # Create Mount Targets in subnets
     for SUBNET in "${SUBNET_ARRAY[@]}"; do
