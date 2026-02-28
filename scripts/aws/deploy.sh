@@ -82,15 +82,41 @@ if [ "$EFS_ID" == "None" ]; then
         sleep 5
     done
     echo ""
-    
-    # Create Mount Targets in subnets
-    for SUBNET in "${SUBNET_ARRAY[@]}"; do
-        echo "Creating Mount Target in Subnet: $SUBNET"
-        aws efs create-mount-target --file-system-id $EFS_ID --subnet-id $SUBNET --security-groups $SG_ID > /dev/null || true
-    done
 else
     echo "Amazon EFS already exists: $EFS_ID"
 fi
+
+# Ensure Mount Targets exist for all subnets (even if EFS was already there)
+echo "Checking and creating EFS Mount Targets..."
+for SUBNET in "${SUBNET_ARRAY[@]}"; do
+    TARGET_EXISTS=$(aws efs describe-mount-targets --file-system-id $EFS_ID --query "MountTargets[?SubnetId=='$SUBNET'].MountTargetId" --output text 2>/dev/null || echo "")
+    if [ -z "$TARGET_EXISTS" ] || [ "$TARGET_EXISTS" == "None" ]; then
+        echo "Creating Mount Target in Subnet: $SUBNET"
+        aws efs create-mount-target --file-system-id $EFS_ID --subnet-id $SUBNET --security-groups $SG_ID > /dev/null || true
+    else
+        echo "Mount target already exists in Subnet: $SUBNET"
+    fi
+done
+
+echo "Waiting for all EFS Mount Targets to be available..."
+while true; do
+    MT_STATUSES=$(aws efs describe-mount-targets --file-system-id $EFS_ID --query 'MountTargets[*].LifeCycleState' --output text 2>/dev/null || echo "creating")
+    ALL_AVAILABLE=true
+    for STATUS in $MT_STATUSES; do
+        if [ "$STATUS" != "available" ]; then
+            ALL_AVAILABLE=false
+            break
+        fi
+    done
+    
+    if [ "$ALL_AVAILABLE" = true ] && [ -n "$MT_STATUSES" ]; then
+        echo "All Mount Targets are available!"
+        break
+    fi
+    echo -n "."
+    sleep 5
+done
+echo ""
 
 # 5. EFS Access Point
 AP_ID=$(aws efs describe-access-points --file-system-id $EFS_ID --query "AccessPoints[?Name=='epm-ap'].AccessPointId" --output text || echo "None")
