@@ -126,15 +126,30 @@ aws lambda add-permission \
 
 ## 4. Basic認証の設定 (オプション)
 
-**目的**: 全体がパブリックにならないよう、CloudFrontにBasic認証をかけます。
+**目的**: 全体がパブリックにならないよう、CloudFrontにBasic認証をかけます。本プロジェクトのデプロイスクリプトは、**デプロイ実行時に環境変数が指定されている場合のみ**、自動的にBasic認証の設定（KeyValueStoreの作成、認証関数の更新、ディストリビューションへのアタッチ）を行います。
 
-1. **CloudFront KeyValueStoreの作成**
-2. **ユーザーとパスワードの登録**
-   - ローカル（Mac）で以下のコマンドを実行し、ハッシュ値を取得します。
-     ```bash
-     npm run aws-auth あなたの使いたいID パスワード
-     ```
-   - マネジメントコンソールから、KeyValueStoreに「Key: ID」「Value: 取得したハッシュ値」を登録します。
-3. **CloudFront Functions の作成**
-   - Request（ビューワーリクエスト）でトリガーされる関数を作成し、発行済みのKeyValueStoreと紐づけ、Authorizationヘッダを検証するコードを記述してデプロイします。
-   - これにより、アプリケーションアクセス時のID/PW保護が完了します。
+> [!IMPORTANT]
+> **デプロイ前**に必ず以下の環境変数を設定してください。これらが設定されていない場合、Basic認証なしでデプロイされます。
+
+1. **環境変数の準備**
+   以下の環境変数をセットします。
+   - `BASIC_AUTH_USER`: 認証に使用するユーザー名
+   - `BASIC_AUTH_PASS`: 認証に使用するパスワード
+
+2. **デプロイの実行**
+   ターミナルで以下のように一度に指定して実行するのが確実です。
+   ```bash
+   BASIC_AUTH_USER=admin BASIC_AUTH_PASS=yourpassword ./scripts/aws/deploy-frontend.sh
+   ```
+   
+   > [!NOTE]
+   > すでにBasic認証が有効な環境で、環境変数を指定せずに `deploy-frontend.sh` を再実行した場合、**既存のBasic認証設定は維持されます**（解除されません）。認証を解除したい場合は AWS コンソールから関数アソシエーションを削除してください。
+   
+3. **ユーザーの追加・変更**
+   デプロイ後、さらにユーザーを追加したりパスワードを変更したりする場合は、専用の管理スクリプトを使用できます。
+   ```bash
+   ./scripts/aws/manage-auth-users.sh new_user_name new_password
+   ```
+   このコマンドは既存のユーザーを削除せず、新しいユーザー情報を KeyValueStore に追加（または上書き更新）します。
+
+> **仕組み**: CloudFront Functions (Runtime: cloudfront-js-2.0) を利用し、リクエストヘッダの Authorization を検証します。パスワードは SHA256 でハッシュ化され、セキュアに KeyValueStore に保存されます。
