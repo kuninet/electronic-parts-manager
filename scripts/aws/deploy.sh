@@ -173,6 +173,7 @@ else
     echo "Updating Lambda Function Configuration..."
     aws lambda update-function-configuration \
         --function-name $LAMBDA_NAME \
+        --handler run.sh \
         --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads}" \
         --vpc-config SubnetIds=$(echo "${SUBNET_ARRAY[*]}" | tr ' ' ','),SecurityGroupIds=$SG_ID \
         --file-system-configs Arn=$AP_ARN,LocalMountPath=/mnt/efs \
