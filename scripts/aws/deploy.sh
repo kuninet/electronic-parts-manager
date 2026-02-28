@@ -138,7 +138,7 @@ AP_ARN="arn:aws:elasticfilesystem:${REGION}:${ACCOUNT_ID}:access-point/${AP_ID}"
 LAMBDA_NAME="epm-backend"
 echo "Packaging Backend Code..."
 cd server
-npm ci --omit=dev  > /dev/null 2>&1
+npm_config_arch=arm64 npm_config_platform=linux npm_config_libc=glibc npm ci --omit=dev > /dev/null 2>&1
 zip -q -r ../deploy-backend.zip . -x "*.git*" "*test*"
 cd ..
 
