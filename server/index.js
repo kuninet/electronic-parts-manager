@@ -18,6 +18,11 @@ if (isLambda && !originSecret) {
 }
 if (originSecret) {
     app.use((req, res, next) => {
+        // Lambda Web Adapterからの内部リクエスト（非同期Invoke）はスキップ
+        const ip = req.ip || '';
+        if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') {
+            return next();
+        }
         const receivedSecret = req.headers['x-origin-verify'];
         if (receivedSecret !== originSecret) {
             console.warn(`Unauthorized access attempt blocked. IP: ${req.ip}`);

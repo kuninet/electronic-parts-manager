@@ -11,6 +11,8 @@ const admZip = require('adm-zip');
 const { S3Client, GetObjectCommand, DeleteObjectCommand, PutObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { pipeline } = require('stream/promises');
+const { Upload } = require('@aws-sdk/lib-storage');
+const { PassThrough } = require('stream');
 
 function safeExtract(zip, targetDir) {
     const resolvedBase = path.resolve(targetDir);
@@ -39,6 +41,100 @@ const s3Images = process.env.S3_IMAGES_BUCKET ? new S3Client({
 }) : null;
 const IMAGES_BUCKET = process.env.S3_IMAGES_BUCKET;
 
+async function updateJobStatus(jobId, status) {
+    if (!UPLOAD_BUCKET) return;
+    await s3Client.send(new PutObjectCommand({
+        Bucket: UPLOAD_BUCKET,
+        Key: `exports/jobs/${jobId}.json`,
+        Body: JSON.stringify(status),
+        ContentType: 'application/json'
+    }));
+}
+
+async function runExportWorker(jobId) {
+    try {
+        // 既に実行中/完了の場合はスキップ
+        try {
+            const existing = await s3Client.send(new GetObjectCommand({
+                Bucket: UPLOAD_BUCKET,
+                Key: `exports/jobs/${jobId}.json`
+            }));
+            const chunks = [];
+            for await (const chunk of existing.Body) chunks.push(chunk);
+            const existingStatus = JSON.parse(Buffer.concat(chunks).toString());
+            if (existingStatus.status === 'done' || existingStatus.status === 'running') {
+                console.log(`Export job ${jobId} already ${existingStatus.status}, skipping.`);
+                return;
+            }
+        } catch (e) {
+            if (e.name !== 'NoSuchKey') throw e;
+            // NoSuchKey = まだ開始していない、続行
+        }
+
+        await updateJobStatus(jobId, { status: 'running', progress: 5, message: 'DBデータ取得中...' });
+
+        const db = getDb();
+        const parts = await db.all(`
+            SELECT p.*,
+            (SELECT GROUP_CONCAT(t.name, ',') FROM tags t JOIN part_tags pt ON t.id = pt.tag_id WHERE pt.part_id = p.id) as tags_list
+            FROM parts p
+        `);
+        const categories = await db.all('SELECT * FROM categories');
+        const locations = await db.all('SELECT * FROM locations');
+        const tags = await db.all('SELECT * FROM tags');
+        const partTags = await db.all('SELECT * FROM part_tags');
+        const dbDump = { parts, categories, locations, tags, partTags };
+
+        await updateJobStatus(jobId, { status: 'running', progress: 20, message: 'S3画像一覧取得中...' });
+
+        const fileName = `full_backup_${new Date().toISOString().split('T')[0]}.zip`;
+        const passThrough = new PassThrough();
+        const archive = archiver('zip', { zlib: { level: 9 } });
+        archive.pipe(passThrough);
+
+        const upload = new Upload({
+            client: s3Client,
+            params: {
+                Bucket: UPLOAD_BUCKET,
+                Key: `exports/${fileName}`,
+                Body: passThrough,
+                ContentType: 'application/zip',
+            },
+        });
+
+        archive.append(JSON.stringify(dbDump, null, 2), { name: 'backup_data.json' });
+
+        if (IMAGES_BUCKET) {
+            const objects = await s3Images.send(new ListObjectsV2Command({ Bucket: IMAGES_BUCKET, Prefix: 'uploads/' }));
+            if (objects.Contents && objects.Contents.length > 0) {
+                const total = objects.Contents.length;
+                for (let i = 0; i < total; i++) {
+                    const obj = objects.Contents[i];
+                    const data = await s3Images.send(new GetObjectCommand({ Bucket: IMAGES_BUCKET, Key: obj.Key }));
+                    const imgChunks = [];
+                    for await (const chunk of data.Body) imgChunks.push(chunk);
+                    archive.append(Buffer.concat(imgChunks), { name: obj.Key });
+                    const progress = 20 + Math.floor((i + 1) / total * 60);
+                    await updateJobStatus(jobId, { status: 'running', progress, message: `画像取得中 ${i + 1}/${total}...` });
+                }
+            }
+        }
+
+        await updateJobStatus(jobId, { status: 'running', progress: 85, message: 'ZIP作成・S3アップロード中...' });
+
+        archive.finalize();
+        await upload.done();
+
+        const command = new GetObjectCommand({ Bucket: UPLOAD_BUCKET, Key: `exports/${fileName}` });
+        const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+
+        await updateJobStatus(jobId, { status: 'done', progress: 100, message: '完了', url, fileName });
+    } catch (err) {
+        console.error('Export worker failed', err);
+        await updateJobStatus(jobId, { status: 'error', progress: 0, message: err.message }).catch(() => {});
+    }
+}
+
 // GET /api/backup/config
 router.get('/config', (req, res) => {
     res.json({
@@ -47,12 +143,81 @@ router.get('/config', (req, res) => {
     });
 });
 
+// POST /api/backup/export/start
+router.post('/export/start', async (req, res) => {
+    try {
+        const jobId = `export_${Date.now()}`;
+        await updateJobStatus(jobId, { status: 'pending', progress: 0, message: 'エクスポート開始...' });
+
+        // バックグラウンド実行をやめてS3トリガーに変更
+        await s3Client.send(new PutObjectCommand({
+            Bucket: UPLOAD_BUCKET,
+            Key: `exports/triggers/${jobId}.json`,
+            Body: JSON.stringify({ jobId }),
+            ContentType: 'application/json',
+        }));
+        res.status(202).json({ jobId });
+    } catch (err) {
+        console.error('Export start failed', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/backup/export/status
+router.get('/export/status', async (req, res) => {
+    try {
+        const { jobId } = req.query;
+        if (!jobId) return res.status(400).json({ error: 'jobId is required' });
+        if (!UPLOAD_BUCKET) return res.status(500).json({ error: 'S3_UPLOAD_BUCKET not set' });
+
+        const command = new GetObjectCommand({
+            Bucket: UPLOAD_BUCKET,
+            Key: `exports/jobs/${jobId}.json`
+        });
+        const response = await s3Client.send(command);
+        const chunks = [];
+        for await (const chunk of response.Body) chunks.push(chunk);
+        const statusData = JSON.parse(Buffer.concat(chunks).toString());
+        res.json(statusData);
+    } catch (err) {
+        if (err.name === 'NoSuchKey') {
+            return res.status(404).json({ error: 'Job not found' });
+        }
+        console.error('Export status check failed', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/backup/export/worker
+router.post('/export/worker', async (req, res) => {
+    let jobId;
+
+    // S3イベント形式から jobId を取得
+    if (req.body && req.body.Records && req.body.Records[0] && req.body.Records[0].s3) {
+        const key = decodeURIComponent(req.body.Records[0].s3.object.key.replace(/\+/g, ' '));
+        jobId = path.basename(key, '.json');
+    } else {
+        jobId = req.body && req.body.jobId;
+    }
+
+    if (!jobId) return res.status(400).json({ error: 'jobId is required' });
+
+    // 完了まで待機（Lambda呼び出しをアクティブに保つ）
+    try {
+        await runExportWorker(jobId);
+        res.status(200).json({ done: true });
+    } catch (err) {
+        console.error('Export worker failed:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // GET /api/backup/export/full
 router.get('/export/full', async (req, res) => {
     try {
         const db = getDb();
         const parts = await db.all(`
-            SELECT p.*, 
+            SELECT p.*,
             (SELECT GROUP_CONCAT(t.name, ',') FROM tags t JOIN part_tags pt ON t.id = pt.tag_id WHERE pt.part_id = p.id) as tags_list
             FROM parts p
         `);
@@ -63,24 +228,53 @@ router.get('/export/full', async (req, res) => {
 
         const dbDump = { parts, categories, locations, tags, partTags };
         const archive = archiver('zip', { zlib: { level: 9 } });
+        const fileName = `full_backup_${new Date().toISOString().split('T')[0]}.zip`;
 
-        res.attachment(`full_backup_${new Date().toISOString().split('T')[0]}.zip`);
-        archive.pipe(res);
-        archive.append(JSON.stringify(dbDump, null, 2), { name: 'backup_data.json' });
+        if (UPLOAD_BUCKET) {
+            // S3へストリーミングアップロードしてpresigned URLを返す
+            const passThrough = new PassThrough();
+            archive.pipe(passThrough);
 
-        const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
-        if (IMAGES_BUCKET) {
-            const objects = await s3Images.send(new ListObjectsV2Command({ Bucket: IMAGES_BUCKET, Prefix: 'uploads/' }));
-            if (objects.Contents && objects.Contents.length > 0) {
-                for (const obj of objects.Contents) {
-                    const data = await s3Images.send(new GetObjectCommand({ Bucket: IMAGES_BUCKET, Key: obj.Key }));
-                    archive.append(data.Body, { name: obj.Key });
+            const upload = new Upload({
+                client: s3Client,
+                params: {
+                    Bucket: UPLOAD_BUCKET,
+                    Key: `exports/${fileName}`,
+                    Body: passThrough,
+                    ContentType: 'application/zip',
+                },
+            });
+
+            archive.append(JSON.stringify(dbDump, null, 2), { name: 'backup_data.json' });
+
+            const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
+            if (IMAGES_BUCKET) {
+                const objects = await s3Images.send(new ListObjectsV2Command({ Bucket: IMAGES_BUCKET, Prefix: 'uploads/' }));
+                if (objects.Contents && objects.Contents.length > 0) {
+                    for (const obj of objects.Contents) {
+                        const data = await s3Images.send(new GetObjectCommand({ Bucket: IMAGES_BUCKET, Key: obj.Key }));
+                        archive.append(data.Body, { name: obj.Key });
+                    }
                 }
+            } else {
+                if (fs.existsSync(uploadsDir)) archive.directory(uploadsDir, 'uploads');
             }
+
+            archive.finalize();
+            await upload.done();
+
+            const command = new GetObjectCommand({ Bucket: UPLOAD_BUCKET, Key: `exports/${fileName}` });
+            const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+            res.json({ url, fileName });
         } else {
+            // ローカル環境: HTTPレスポンスに直接ストリーム
+            res.attachment(fileName);
+            archive.pipe(res);
+            archive.append(JSON.stringify(dbDump, null, 2), { name: 'backup_data.json' });
+            const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
             if (fs.existsSync(uploadsDir)) archive.directory(uploadsDir, 'uploads');
+            archive.finalize();
         }
-        archive.finalize();
     } catch (err) {
         console.error('Full export failed', err);
         if (!res.headersSent) res.status(500).json({ error: err.message });
@@ -154,8 +348,8 @@ router.get('/import/presigned-url', async (req, res) => {
     try {
         const bucket = UPLOAD_BUCKET;
         if (!bucket) return res.status(500).json({ error: 'S3_UPLOAD_BUCKET not set' });
-        const fileName = req.query.fileName || `import_${Date.now()}.zip`;
-        const key = `imports/${fileName}`;
+        const safeFileName = (req.query.fileName || `import_${Date.now()}.zip`).replace(/[^a-zA-Z0-9._-]/g, '_');
+        const key = `imports/${safeFileName}`;
         const command = new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: 'application/zip' });
         const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
         res.json({ url, key });
@@ -167,7 +361,9 @@ router.get('/import/presigned-url', async (req, res) => {
 // POST /api/backup/import/download (Step 1)
 router.post('/import/download', async (req, res) => {
     const { key } = req.body;
-    if (!key) return res.status(400).json({ error: 'S3 key is required' });
+    if (!key || !key.startsWith('imports/') || key.includes('..')) {
+        return res.status(400).json({ error: '無効なS3キーです' });
+    }
     const bucket = UPLOAD_BUCKET;
     if (!bucket) return res.status(500).json({ error: 'S3_UPLOAD_BUCKET not set' });
 
@@ -196,6 +392,9 @@ router.post('/import/download', async (req, res) => {
 // POST /api/backup/import/restore (Step 2)
 router.post('/import/restore', async (req, res) => {
     const { s3Key } = req.body;
+    if (s3Key && (!s3Key.startsWith('imports/') || s3Key.includes('..'))) {
+        return res.status(400).json({ error: '無効なS3キーです' });
+    }
     const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
     const tempZipPath = IMAGES_BUCKET
         ? path.join(path.dirname(uploadsDir), 'tmp', 'import_temp.zip')
