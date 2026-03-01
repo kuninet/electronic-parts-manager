@@ -4,7 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { getDb } = require('../database');
-const { resizeImageBuffer } = require('../utils/image');
+const { resizeImageBuffer, validateImage } = require('../utils/image');
 const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 
 // Configure Multer for file uploads (memoryStorage for S3 support)
@@ -112,7 +112,19 @@ router.post('/', upload, async (req, res) => {
         let image_path = null;
         if (req.files['image']) {
             const file = req.files['image'][0];
-            const filename = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
+            const ext = path.extname(file.originalname).toLowerCase();
+            const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+            const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+
+            if (!ALLOWED_MIME_TYPES.includes(file.mimetype) || !ALLOWED_EXTENSIONS.includes(ext)) {
+                return res.status(400).json({ error: '許可されていない画像ファイル形式です (対応: JPG, PNG, GIF, WEBP)' });
+            }
+
+            if (!(await validateImage(file.buffer))) {
+                return res.status(400).json({ error: '画像データが破損しているか、不正なファイルです' });
+            }
+
+            const filename = Date.now() + '-' + Math.round(Math.random() * 1E9) + ext;
             const resizedBuffer = await resizeImageBuffer(file.buffer);
             if (IMAGES_BUCKET) {
                 await s3Images.send(new PutObjectCommand({
@@ -187,7 +199,19 @@ router.put('/:id', upload, async (req, res) => {
 
         if (req.files['image']) {
             const file = req.files['image'][0];
-            const filename = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
+            const ext = path.extname(file.originalname).toLowerCase();
+            const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+            const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+
+            if (!ALLOWED_MIME_TYPES.includes(file.mimetype) || !ALLOWED_EXTENSIONS.includes(ext)) {
+                return res.status(400).json({ error: '許可されていない画像ファイル形式です (対応: JPG, PNG, GIF, WEBP)' });
+            }
+
+            if (!(await validateImage(file.buffer))) {
+                return res.status(400).json({ error: '画像データが破損しているか、不正なファイルです' });
+            }
+
+            const filename = Date.now() + '-' + Math.round(Math.random() * 1E9) + ext;
             const resizedBuffer = await resizeImageBuffer(file.buffer);
             if (IMAGES_BUCKET) {
                 await s3Images.send(new PutObjectCommand({
@@ -339,7 +363,7 @@ router.post('/bulk/action', async (req, res) => {
                 if (part.image_path) {
                     if (IMAGES_BUCKET) {
                         const key = part.image_path.replace(/^\//, '');
-                        s3Images.send(new DeleteObjectCommand({ Bucket: IMAGES_BUCKET, Key: key })).catch(() => {});
+                        s3Images.send(new DeleteObjectCommand({ Bucket: IMAGES_BUCKET, Key: key })).catch(() => { });
                     } else {
                         fs.unlink(path.join(__dirname, '../../', part.image_path), () => { });
                     }
