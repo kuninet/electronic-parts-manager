@@ -110,7 +110,11 @@ const handleSubmit = async () => {
     emit('close');
   } catch (err) {
     console.error('Failed to save part', err);
-    alert('Failed to save part');
+    if (err.response && err.response.data && err.response.data.error) {
+        alert('保存に失敗しました: ' + err.response.data.error);
+    } else {
+        alert('保存に失敗しました');
+    }
   } finally {
     loading.value = false;
   }

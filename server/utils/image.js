@@ -18,8 +18,17 @@ async function resizeImageBuffer(buffer, maxWidth = 1000) {
         return await pipeline.toBuffer();
     } catch (err) {
         console.error('Failed to resize image:', err);
-        return buffer;
+        throw new Error('INVALID_IMAGE');
     }
 }
 
-module.exports = { resizeImageBuffer };
+async function validateImage(buffer) {
+    try {
+        await sharp(buffer).metadata();
+        return true;
+    } catch (err) {
+        return false;
+    }
+}
+
+module.exports = { resizeImageBuffer, validateImage };
