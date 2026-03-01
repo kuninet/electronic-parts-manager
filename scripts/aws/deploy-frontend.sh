@@ -112,106 +112,8 @@ fi
 IMAGES_S3_DOMAIN="${IMAGES_BUCKET_NAME}.s3.${REGION}.amazonaws.com"
 
 # ==========================================
-# Basic Auth 設定の確認
+# (Basic Auth 設定は deploy-basic-auth.sh へ分離されました)
 # ==========================================
-if [ -z "$BASIC_AUTH_USER" ] || [ -z "$BASIC_AUTH_PASS" ]; then
-    echo "  [INFO] BASIC_AUTH_USER/PASS が設定されていません。Basic認証なしで継続します。"
-    echo "         (Basic認証を有効にするには、環境変数をセットして再実行してください)"
-else
-    echo "  [INFO] Basic Auth 連携が有効です (User: $BASIC_AUTH_USER)"
-fi
-
-# ==========================================
-# [3.8/7] Basic Auth 用 KeyValueStore & Function の構築
-# ==========================================
-BASIC_AUTH_ENABLED=false
-FUNC_ARN=""
-
-if [ -n "$BASIC_AUTH_USER" ] && [ -n "$BASIC_AUTH_PASS" ]; then
-    echo ""
-    echo "[3.8/7] Basic Auth 用 KeyValueStore & Function の構築..."
-    KVS_NAME="epm-basic-auth-kvs"
-    FUNC_NAME="epm-basic-auth-func"
-    
-    # 1. KVS の作成/取得
-    echo "  -> KeyValueStore の確認: $KVS_NAME"
-    KVS_ARN=$(aws cloudfront describe-key-value-store --name $KVS_NAME --query "KeyValueStore.ARN" --output text 2>/dev/null || true)
-    
-    if [ -z "$KVS_ARN" ] || [ "$KVS_ARN" == "None" ]; then
-        echo "  -> 新規作成: $KVS_NAME"
-        KVS_RES=$(aws cloudfront create-key-value-store --name $KVS_NAME --comment "For EPM Basic Auth")
-        KVS_ARN=$(echo $KVS_RES | jq -r '.KeyValueStore.ARN')
-    else
-        echo "  -> 既存を使用: $KVS_ARN"
-    fi
-    
-    # 2. データ操作用の ETag を取得 (cloudfront-keyvaluestore ネームスペースを使用)
-    KVS_DATA=$(aws cloudfront-keyvaluestore describe-key-value-store --kvs-arn "$KVS_ARN")
-    KVS_ETAG=$(echo $KVS_DATA | jq -r '.ETag')
-    
-    # 3. ハッシュ化とKVSへの登録
-    HASH=$(node scripts/aws-auth.js "$BASIC_AUTH_USER" "$BASIC_AUTH_PASS" | grep "値 (Value)" | awk -F': ' '{print $2}' | tr -d ' ')
-    echo "  -> パスワードハッシュ登録: ユーザー $BASIC_AUTH_USER"
-    
-    aws cloudfront-keyvaluestore put-key \
-        --kvs-arn "$KVS_ARN" \
-        --if-match "$KVS_ETAG" \
-        --key "$BASIC_AUTH_USER" \
-        --value "$HASH" > /dev/null
-    echo "  -> 登録完了"
-    
-    # 3. CloudFront Function の作成/更新
-    echo "  -> CloudFront Function の確認: $FUNC_NAME"
-    FUNC_EXISTS=$(aws cloudfront describe-function --name $FUNC_NAME --query "FunctionSummary.Name" --output text 2>/dev/null || true)
-    
-    cat <<FUNC_CONF > /tmp/cf-func-config.json
-{
-    "Comment": "EPM Basic Auth",
-    "Runtime": "cloudfront-js-2.0",
-    "KeyValueStoreAssociations": {
-        "Quantity": 1,
-        "Items": [
-            { "KeyValueStoreARN": "$KVS_ARN" }
-        ]
-    }
-}
-FUNC_CONF
-
-    if [ -z "$FUNC_EXISTS" ] || [ "$FUNC_EXISTS" == "None" ]; then
-        echo "  -> 関数を新規作成"
-        aws cloudfront create-function \
-            --name $FUNC_NAME \
-            --function-config file:///tmp/cf-func-config.json \
-            --function-code fileb://scripts/aws/cloudfront-basic-auth.js > /dev/null
-    else
-        echo "  -> 関数を更新"
-        DESCRIBE_FUNC=$(aws cloudfront describe-function --name $FUNC_NAME)
-        FUNC_ETAG=$(echo $DESCRIBE_FUNC | jq -r '.ETag')
-        aws cloudfront update-function \
-            --name $FUNC_NAME \
-            --if-match $FUNC_ETAG \
-            --function-config file:///tmp/cf-func-config.json \
-            --function-code fileb://scripts/aws/cloudfront-basic-auth.js > /dev/null
-    fi
-    rm /tmp/cf-func-config.json
-
-    # 関数のPublish
-    echo "  -> 関数をPublish"
-    DESCRIBE_FUNC=$(aws cloudfront describe-function --name $FUNC_NAME)
-    FUNC_ETAG=$(echo $DESCRIBE_FUNC | jq -r '.ETag')
-    PUBLISH_RES=$(aws cloudfront publish-function --name $FUNC_NAME --if-match $FUNC_ETAG)
-    FUNC_ARN=$(echo $PUBLISH_RES | jq -r '.FunctionSummary.FunctionMetadata.FunctionARN')
-    
-    BASIC_AUTH_ENABLED=true
-    echo "  -> Basic Auth 設定準備完了 ($FUNC_ARN)"
-fi
-
-# Function アソシエーション設定の生成
-if [ "$BASIC_AUTH_ENABLED" = true ]; then
-    FUNC_ASSOC='{"Quantity": 1, "Items": [{"FunctionARN": "'$FUNC_ARN'", "EventType": "viewer-request"}]}'
-else
-    FUNC_ASSOC='{"Quantity": 0, "Items": []}'
-fi
 
 # ==========================================
 # 4. CloudFront ディストリビューションの作成 or 更新
@@ -269,7 +171,7 @@ if [ -z "$DIST_ID" ] || [ "$DIST_ID" == "None" ]; then
             "QueryString": false,
             "Cookies": { "Forward": "none" }
         },
-        "FunctionAssociations": $FUNC_ASSOC,
+        "FunctionAssociations": {"Quantity": 0, "Items": []},
         "MinTTL": 0,
         "DefaultTTL": 86400,
         "MaxTTL": 31536000
@@ -290,7 +192,7 @@ if [ -z "$DIST_ID" ] || [ "$DIST_ID" == "None" ]; then
                     "Cookies": { "Forward": "all" },
                     "Headers": { "Quantity": 1, "Items": ["Authorization"] }
                 },
-                "FunctionAssociations": $FUNC_ASSOC,
+                "FunctionAssociations": {"Quantity": 0, "Items": []},
                 "MinTTL": 0,
                 "DefaultTTL": 0,
                 "MaxTTL": 0
@@ -309,7 +211,7 @@ if [ -z "$DIST_ID" ] || [ "$DIST_ID" == "None" ]; then
                     "Cookies": { "Forward": "none" },
                     "Headers": { "Quantity": 0, "Items": [] }
                 },
-                "FunctionAssociations": $FUNC_ASSOC,
+                "FunctionAssociations": {"Quantity": 0, "Items": []},
                 "MinTTL": 0,
                 "DefaultTTL": 86400,
                 "MaxTTL": 31536000
@@ -355,11 +257,9 @@ else
     # /api/* ビヘイビアをベースに /uploads/* ビヘイビアを作成し、キャッシュ設定を最適化
     jq '.DistributionConfig' /tmp/cf-cur.json \
       | jq --arg domain "$APIGW_DOMAIN" \
-           --argjson funcAssoc "$FUNC_ASSOC" \
-           --arg imagesDomain "$IMAGES_S3_DOMAIN" \
+                      --arg imagesDomain "$IMAGES_S3_DOMAIN" \
            --arg imagesOacId "$IMAGES_OAC_ID" \
-        '(.DefaultCacheBehavior.FunctionAssociations) = $funcAssoc
-         | (.Origins.Items[] | select(.Id == "Lambda-Backend") | .DomainName) = $domain
+        '(.Origins.Items[] | select(.Id == "Lambda-Backend") | .DomainName) = $domain
          | (.Origins.Items[] | select(.Id == "Lambda-Backend") | .OriginAccessControlId) = ""
          | if (.Origins.Items | map(.Id) | contains(["S3-Images"])) then . else
              .Origins.Quantity += 1
@@ -376,8 +276,7 @@ else
            end
          | .CacheBehaviors.Quantity = 2
          | .CacheBehaviors.Items = [
-             ((.CacheBehaviors.Items[] | select(.PathPattern == "/api/*"))
-              | .FunctionAssociations = $funcAssoc),
+             (.CacheBehaviors.Items[] | select(.PathPattern == "/api/*")),
              ((.CacheBehaviors.Items[] | select(.PathPattern == "/api/*"))
               | .PathPattern = "/uploads/*"
               | .TargetOriginId = "S3-Images"
@@ -388,7 +287,6 @@ else
               | .ForwardedValues.Cookies.Forward = "none"
               | .ForwardedValues.Headers = {"Quantity": 0, "Items": []}
               | .AllowedMethods = {"Quantity": 2, "Items": ["GET", "HEAD"], "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}}
-              | .FunctionAssociations = $funcAssoc
              )
            ]
          | .CustomErrorResponses = {"Quantity": 2, "Items": [{"ErrorCode": 403, "ResponsePagePath": "/index.html", "ResponseCode": "200", "ErrorCachingMinTTL": 10}, {"ErrorCode": 404, "ResponsePagePath": "/index.html", "ResponseCode": "200", "ErrorCachingMinTTL": 10}]}' \
