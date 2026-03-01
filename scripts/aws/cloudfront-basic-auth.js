@@ -20,7 +20,8 @@ async function handler(event) {
                 var expectedHash = await kvsHandle.get(username);
                 if (expectedHash) {
                     var crypto = require('crypto');
-                    var providedHash = crypto.createHash('sha256').update(password).digest('hex');
+                    // USERNAME をソルトとして追加し、脆弱なハッシュ化を軽減 (Issue #26)
+                    var providedHash = crypto.createHash('sha256').update(username + ':' + password).digest('hex');
 
                     if (providedHash === expectedHash) {
                         return request;
