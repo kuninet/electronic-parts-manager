@@ -12,6 +12,19 @@ const { S3Client, GetObjectCommand, DeleteObjectCommand, PutObjectCommand, ListO
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { pipeline } = require('stream/promises');
 
+function safeExtract(zip, targetDir) {
+    const resolvedBase = path.resolve(targetDir);
+    for (const entry of zip.getEntries()) {
+        if (entry.isDirectory) continue;
+        const entryPath = path.resolve(targetDir, entry.entryName);
+        if (!entryPath.startsWith(resolvedBase + path.sep)) {
+            throw new Error('Zip Slip検出: 不正なエントリパスが含まれています');
+        }
+        fs.mkdirSync(path.dirname(entryPath), { recursive: true });
+        fs.writeFileSync(entryPath, entry.getData());
+    }
+}
+
 const s3Client = new S3Client({
     region: process.env.AWS_REGION || 'ap-northeast-1',
     requestChecksumCalculation: "when_required",
@@ -125,7 +138,7 @@ router.post('/import/full', upload.single('file'), async (req, res) => {
 
         const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
         const parentDir = path.join(uploadsDir, '../');
-        zip.extractAllTo(parentDir, true);
+        safeExtract(zip, parentDir);
         res.json({ message: 'Full restore successful' });
     } catch (err) {
         if (db) await db.run('ROLLBACK');
@@ -239,7 +252,7 @@ router.post('/import/restore', async (req, res) => {
         if (IMAGES_BUCKET) {
             const tmpDir = `/tmp/restore_${Date.now()}`;
             fs.mkdirSync(tmpDir, { recursive: true });
-            zip.extractAllTo(tmpDir, true);
+            safeExtract(zip, tmpDir);
             const extractedUploads = path.join(tmpDir, 'uploads');
             if (fs.existsSync(extractedUploads)) {
                 for (const file of fs.readdirSync(extractedUploads)) {
@@ -259,7 +272,7 @@ router.post('/import/restore', async (req, res) => {
             if (!fs.existsSync(uploadsDir)) {
                 fs.mkdirSync(uploadsDir, { recursive: true });
             }
-            zip.extractAllTo(parentDir, true);
+            safeExtract(zip, parentDir);
             console.log('Extraction complete.');
         }
 
