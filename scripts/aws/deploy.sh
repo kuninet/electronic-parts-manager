@@ -10,6 +10,14 @@ export AWS_DEFAULT_REGION=$REGION
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 echo "Deploying to AWS Account: $ACCOUNT_ID"
 
+# 0. Configuration & Secrets (Issue #21)
+ORIGIN_VERIFY_SECRET=$(aws ssm get-parameter --name "/epm/origin-verify-secret" --with-decryption --query "Parameter.Value" --output text 2>/dev/null || echo "")
+if [ -z "$ORIGIN_VERIFY_SECRET" ]; then
+    echo "Generating new ORIGIN_VERIFY_SECRET..."
+    ORIGIN_VERIFY_SECRET=$(openssl rand -hex 16)
+    aws ssm put-parameter --name "/epm/origin-verify-secret" --value "$ORIGIN_VERIFY_SECRET" --type "SecureString" --overwrite > /dev/null
+fi
+
 # 1. IAM Role for Lambda
 ROLE_NAME="epm-lambda-execution-role"
 echo "Checking IAM Role: $ROLE_NAME"
@@ -208,7 +216,11 @@ AP_ARN="arn:aws:elasticfilesystem:${REGION}:${ACCOUNT_ID}:access-point/${AP_ID}"
 LAMBDA_NAME="epm-backend"
 echo "Packaging Backend Code..."
 cd server
-npm install --omit=dev > /dev/null 2>&1
+# npm_config_platform/arch を環境変数で指定することで、Windows/Mac/Linux どのホストからでも
+# Linux arm64用のプリビルドバイナリ(ELF)をダウンロードできる
+# (--platform/--arch フラグでは prebuild-install に正しく伝わらない場合があるため環境変数を使用)
+rm -rf node_modules/sqlite3
+npm_config_platform=linux npm_config_arch=arm64 npm install --omit=dev > /dev/null 2>&1
 zip -q -r ../deploy-backend.zip . -x "*.git*" "*test*"
 cd ..
 
@@ -226,11 +238,10 @@ if [ "$FUNCTION_EXISTS" == "no" ]; then
         --timeout 300 \
         --memory-size 512 \
         --architectures arm64 \
-        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID,S3_IMAGES_BUCKET=epm-images-$ACCOUNT_ID}" \
+        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID,S3_IMAGES_BUCKET=epm-images-$ACCOUNT_ID,ORIGIN_VERIFY_SECRET=$ORIGIN_VERIFY_SECRET}" \
         --vpc-config SubnetIds=$(echo "${SUBNET_ARRAY[*]}" | tr ' ' ','),SecurityGroupIds=$SG_ID \
         --file-system-configs Arn=$AP_ARN,LocalMountPath=/mnt/efs \
         --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerArm64:24 > /dev/null
-        # Set to arm64 because the package is likely built on an Apple Silicon Mac, containing native ARM sqlite3 bindings.
 else
     echo "Updating Lambda Function Code..."
     aws lambda update-function-code \
@@ -246,7 +257,7 @@ else
         --handler run.sh \
         --timeout 300 \
         --memory-size 512 \
-        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID,S3_IMAGES_BUCKET=epm-images-$ACCOUNT_ID}" \
+        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID,S3_IMAGES_BUCKET=epm-images-$ACCOUNT_ID,ORIGIN_VERIFY_SECRET=$ORIGIN_VERIFY_SECRET}" \
         --vpc-config SubnetIds=$(echo "${SUBNET_ARRAY[*]}" | tr ' ' ','),SecurityGroupIds=$SG_ID \
         --file-system-configs Arn=$AP_ARN,LocalMountPath=/mnt/efs \
         --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerArm64:24 > /dev/null
@@ -262,15 +273,40 @@ if [ "$URL_EXISTS" == "no" ]; then
         --cors "AllowOrigins=*,AllowMethods=*,AllowHeaders=*" \
         --query 'FunctionUrl' --output text)
     
-    # Add public invocation permission
+    # Add public invocation permission (ensure statement exists and matches the policy)
     aws lambda add-permission \
         --function-name $LAMBDA_NAME \
         --statement-id FunctionURLAllowPublicAccess \
         --action lambda:InvokeFunctionUrl \
         --principal "*" \
-        --function-url-auth-type NONE > /dev/null
+        --function-url-auth-type NONE > /dev/null 2>&1 || true
 else
     FUNCTION_URL=$(aws lambda get-function-url-config --function-name $LAMBDA_NAME --query 'FunctionUrl' --output text)
+    # 既存のURL設定であっても、権限が不足している場合があるので再設定
+    aws lambda add-permission \
+        --function-name $LAMBDA_NAME \
+        --statement-id FunctionURLAllowPublicAccess \
+        --action lambda:InvokeFunctionUrl \
+        --principal "*" \
+        --function-url-auth-type NONE > /dev/null 2>&1 || true
+fi
+
+# 8. Update CloudFront Origin Custom Headers (Issue #21)
+DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='EPM Application CF'].Id" --output text)
+if [ -n "$DIST_ID" ] && [ "$DIST_ID" != "None" ]; then
+    echo "Updating CloudFront Origin Custom Headers for $DIST_ID..."
+    aws cloudfront get-distribution-config --id "$DIST_ID" --output json > cf-config.json
+    ETAG=$(jq -r '.ETag' cf-config.json)
+    jq --arg secret "$ORIGIN_VERIFY_SECRET" \
+        '.DistributionConfig.Origins.Items[] |= if .Id == "Lambda-Backend" then .CustomHeaders = {"Quantity": 1, "Items": [{"HeaderName": "x-origin-verify", "HeaderValue": $secret}]} else . end' \
+        cf-config.json > cf-updated.json
+    
+    # Remove ETag and set it back to just DistributionConfig
+    jq '.DistributionConfig' cf-updated.json > cf-final.json
+    
+    aws cloudfront update-distribution --id "$DIST_ID" --if-match "$ETAG" --distribution-config file://cf-final.json > /dev/null
+    rm cf-config.json cf-updated.json cf-final.json
+    echo "CloudFront update triggered. It may take a few minutes to propagate."
 fi
 
 echo ""
