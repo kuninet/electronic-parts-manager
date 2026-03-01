@@ -69,6 +69,12 @@ if ! aws s3api head-bucket --bucket $UPLOAD_BUCKET > /dev/null 2>&1; then
                 "Prefix": "imports/",
                 "Status": "Enabled",
                 "Expiration": { "Days": 1 }
+            },
+            {
+                "ID": "DeleteOldExports",
+                "Prefix": "exports/",
+                "Status": "Enabled",
+                "Expiration": { "Days": 1 }
             }
         ]
     }'
@@ -85,6 +91,19 @@ aws iam put-role-policy --role-name $ROLE_NAME --policy-name EPM-S3-Upload-Polic
         }
     ]
 }"
+
+# Lambda自己呼び出し用IAMインラインポリシー
+echo "Ensuring Lambda self-invoke IAM Policy..."
+aws iam put-role-policy --role-name $ROLE_NAME \
+    --policy-name epm-lambda-invoke-self \
+    --policy-document "{
+        \"Version\": \"2012-10-17\",
+        \"Statement\": [{
+            \"Effect\": \"Allow\",
+            \"Action\": [\"lambda:InvokeFunction\"],
+            \"Resource\": \"arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:epm-backend\"
+        }]
+    }"
 
 # 1.2 S3 Images Bucket and Policy
 IMAGES_BUCKET="epm-images-$ACCOUNT_ID"
@@ -245,10 +264,10 @@ if [ "$FUNCTION_EXISTS" == "no" ]; then
         --role $ROLE_ARN \
         --handler run.sh \
         --zip-file fileb://deploy-backend.zip \
-        --timeout 300 \
+        --timeout 900 \
         --memory-size 512 \
         --architectures arm64 \
-        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID,S3_IMAGES_BUCKET=epm-images-$ACCOUNT_ID,ORIGIN_VERIFY_SECRET=$ORIGIN_VERIFY_SECRET,CORS_ALLOW_ORIGIN=$CORS_ORIGINS}" \
+        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID,S3_IMAGES_BUCKET=epm-images-$ACCOUNT_ID,ORIGIN_VERIFY_SECRET=$ORIGIN_VERIFY_SECRET,CORS_ALLOW_ORIGIN=$CORS_ORIGINS,AWS_LWA_PASS_THROUGH_PATH=/api/backup/export/worker}" \
         --vpc-config SubnetIds=$(echo "${SUBNET_ARRAY[*]}" | tr ' ' ','),SecurityGroupIds=$SG_ID \
         --file-system-configs Arn=$AP_ARN,LocalMountPath=/mnt/efs \
         --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerArm64:24 > /dev/null
@@ -265,9 +284,9 @@ else
     aws lambda update-function-configuration \
         --function-name $LAMBDA_NAME \
         --handler run.sh \
-        --timeout 300 \
+        --timeout 900 \
         --memory-size 512 \
-        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID,S3_IMAGES_BUCKET=epm-images-$ACCOUNT_ID,ORIGIN_VERIFY_SECRET=$ORIGIN_VERIFY_SECRET,CORS_ALLOW_ORIGIN=$CORS_ORIGINS}" \
+        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID,S3_IMAGES_BUCKET=epm-images-$ACCOUNT_ID,ORIGIN_VERIFY_SECRET=$ORIGIN_VERIFY_SECRET,CORS_ALLOW_ORIGIN=$CORS_ORIGINS,AWS_LWA_PASS_THROUGH_PATH=/api/backup/export/worker}" \
         --vpc-config SubnetIds=$(echo "${SUBNET_ARRAY[*]}" | tr ' ' ','),SecurityGroupIds=$SG_ID \
         --file-system-configs Arn=$AP_ARN,LocalMountPath=/mnt/efs \
         --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerArm64:24 > /dev/null
@@ -304,6 +323,42 @@ else
         --principal "*" \
         --function-url-auth-type NONE > /dev/null 2>&1 || true
 fi
+
+# 9. 非同期Invokeのリトライ無効化（二重実行防止）
+echo "Disabling async invoke retries..."
+aws lambda put-function-event-invoke-config \
+    --function-name $LAMBDA_NAME \
+    --maximum-retry-attempts 0 > /dev/null
+
+# Configure S3 export trigger
+echo "Configuring S3 export trigger..."
+LAMBDA_ARN=$(aws lambda get-function --function-name $LAMBDA_NAME --query 'Configuration.FunctionArn' --output text)
+aws lambda add-permission \
+    --function-name $LAMBDA_NAME \
+    --statement-id S3ExportTriggerPermission \
+    --action lambda:InvokeFunction \
+    --principal s3.amazonaws.com \
+    --source-arn arn:aws:s3:::$UPLOAD_BUCKET > /dev/null 2>&1 || true
+
+NOTIFICATION_CONFIG=$(cat <<NOTIFICATION_EOF
+{
+  "LambdaFunctionConfigurations": [{
+    "Id": "ExportTrigger",
+    "LambdaFunctionArn": "$LAMBDA_ARN",
+    "Events": ["s3:ObjectCreated:*"],
+    "Filter": {
+      "Key": {
+        "FilterRules": [{"Name": "prefix", "Value": "exports/triggers/"}]
+      }
+    }
+  }]
+}
+NOTIFICATION_EOF
+)
+aws s3api put-bucket-notification-configuration \
+    --bucket $UPLOAD_BUCKET \
+    --notification-configuration "$NOTIFICATION_CONFIG"
+echo "S3 export trigger configured."
 
 # 8. Update CloudFront Origin Custom Headers (Issue #21)
 # DIST_ID はセクション6前に取得済みのため再取得不要

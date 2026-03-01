@@ -10,6 +10,11 @@ const importMessage = ref('');
 const importError = ref('');
 const s3Enabled = ref(false);
 
+const exporting = ref(false);
+const exportProgress = ref(0);
+const exportMessage = ref('');
+let exportPollTimer = null;
+
 onMounted(async () => {
     try {
         const { data } = await api.get('/backup/config');
@@ -21,19 +26,58 @@ onMounted(async () => {
 });
 
 const downloadFull = async () => {
-  try {
-    const response = await api.get('/backup/export/full', { responseType: 'blob' });
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `full_backup_${new Date().toISOString().split('T')[0]}.zip`);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  } catch (err) {
-    console.error('Export failed', err);
-    alert('Export failed');
-  }
+    try {
+        const { data: config } = await api.get('/backup/config');
+        if (config.s3Enabled) {
+            exporting.value = true;
+            exportProgress.value = 0;
+            exportMessage.value = 'エクスポート開始中...';
+            const { data } = await api.post('/backup/export/start');
+            pollExportStatus(data.jobId);
+        } else {
+            // ローカル環境: blob方式
+            const response = await api.get('/backup/export/full', { responseType: 'blob' });
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `full_backup_${new Date().toISOString().split('T')[0]}.zip`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    } catch (err) {
+        console.error('Export failed', err);
+        exporting.value = false;
+        alert('エクスポートに失敗しました');
+    }
+};
+
+const pollExportStatus = (jobId) => {
+    exportPollTimer = setInterval(async () => {
+        try {
+            const { data } = await api.get(`/backup/export/status?jobId=${jobId}`);
+            exportProgress.value = data.progress || 0;
+            exportMessage.value = data.message || '';
+            if (data.status === 'done') {
+                clearInterval(exportPollTimer);
+                exporting.value = false;
+                const link = document.createElement('a');
+                link.href = data.url;
+                link.setAttribute('download', data.fileName);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            } else if (data.status === 'error') {
+                clearInterval(exportPollTimer);
+                exporting.value = false;
+                alert('エクスポートに失敗しました: ' + data.message);
+            }
+        } catch (err) {
+            clearInterval(exportPollTimer);
+            exporting.value = false;
+            alert('エクスポートステータスの取得に失敗しました');
+        }
+    }, 2000);
 };
 
 const handleFullImport = async (event) => {
@@ -131,7 +175,7 @@ const handleReset = async () => {
         <p>画像・PDF・すべてのデータをまとめて保存・復元します。基本はこちらを使用してください。</p>
         
         <div class="backup-actions">
-             <button class="btn btn-primary" @click="downloadFull">
+             <button class="btn btn-primary" @click="downloadFull" :disabled="exporting">
               📦 フルバックアップをダウンロード
             </button>
             
@@ -146,6 +190,13 @@ const handleReset = async () => {
         </div>
         <div v-if="importError" class="status-msg error">
           ❌ {{ importError }}
+        </div>
+        <div v-if="exporting" class="export-progress">
+          <div class="status-msg info">⏳ {{ exportMessage }}</div>
+          <div class="progress-bar-container">
+            <div class="progress-bar" :style="{ width: exportProgress + '%' }"></div>
+          </div>
+          <div class="progress-label">{{ exportProgress }}%</div>
         </div>
       </div>
 
@@ -272,5 +323,31 @@ h3 {
   display: flex;
   justify-content: flex-end;
   margin-top: 2rem;
+}
+
+.export-progress {
+  margin-top: 1rem;
+}
+
+.progress-bar-container {
+  margin-top: 0.5rem;
+  background: rgba(255,255,255,0.1);
+  border-radius: 4px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--accent-color);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-label {
+  text-align: right;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 0.25rem;
 }
 </style>
