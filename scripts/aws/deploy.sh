@@ -211,6 +211,16 @@ else
 fi
 AP_ARN="arn:aws:elasticfilesystem:${REGION}:${ACCOUNT_ID}:access-point/${AP_ID}"
 
+# Pre-fetch CloudFront domain for CORS settings (used in Lambda env and Function URL)
+echo "Fetching CloudFront distribution info for CORS configuration..."
+DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='EPM Application CF'].Id" --output text 2>/dev/null || echo "")
+CF_DOMAIN=""
+if [ -n "$DIST_ID" ] && [ "$DIST_ID" != "None" ]; then
+    CF_DOMAIN=$(aws cloudfront get-distribution --id "$DIST_ID" --query 'Distribution.DomainName' --output text 2>/dev/null || echo "")
+fi
+CF_ORIGIN=${CF_DOMAIN:+"https://$CF_DOMAIN"}
+CORS_ORIGINS=${CF_ORIGIN:-"*"}
+echo "CORS Allow Origin: $CORS_ORIGINS"
 
 # 6. Lambda Function Deployment
 LAMBDA_NAME="epm-backend"
@@ -238,7 +248,7 @@ if [ "$FUNCTION_EXISTS" == "no" ]; then
         --timeout 300 \
         --memory-size 512 \
         --architectures arm64 \
-        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID,S3_IMAGES_BUCKET=epm-images-$ACCOUNT_ID,ORIGIN_VERIFY_SECRET=$ORIGIN_VERIFY_SECRET}" \
+        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID,S3_IMAGES_BUCKET=epm-images-$ACCOUNT_ID,ORIGIN_VERIFY_SECRET=$ORIGIN_VERIFY_SECRET,CORS_ALLOW_ORIGIN=$CORS_ORIGINS}" \
         --vpc-config SubnetIds=$(echo "${SUBNET_ARRAY[*]}" | tr ' ' ','),SecurityGroupIds=$SG_ID \
         --file-system-configs Arn=$AP_ARN,LocalMountPath=/mnt/efs \
         --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerArm64:24 > /dev/null
@@ -257,7 +267,7 @@ else
         --handler run.sh \
         --timeout 300 \
         --memory-size 512 \
-        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID,S3_IMAGES_BUCKET=epm-images-$ACCOUNT_ID,ORIGIN_VERIFY_SECRET=$ORIGIN_VERIFY_SECRET}" \
+        --environment "Variables={AWS_LAMBDA_EXEC_WRAPPER=/opt/bootstrap,PORT=8080,DB_PATH=/mnt/efs/database.sqlite,UPLOAD_DIR=/mnt/efs/uploads,S3_UPLOAD_BUCKET=epm-upload-$ACCOUNT_ID,S3_IMAGES_BUCKET=epm-images-$ACCOUNT_ID,ORIGIN_VERIFY_SECRET=$ORIGIN_VERIFY_SECRET,CORS_ALLOW_ORIGIN=$CORS_ORIGINS}" \
         --vpc-config SubnetIds=$(echo "${SUBNET_ARRAY[*]}" | tr ' ' ','),SecurityGroupIds=$SG_ID \
         --file-system-configs Arn=$AP_ARN,LocalMountPath=/mnt/efs \
         --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerArm64:24 > /dev/null
@@ -270,9 +280,9 @@ if [ "$URL_EXISTS" == "no" ]; then
     FUNCTION_URL=$(aws lambda create-function-url-config \
         --function-name $LAMBDA_NAME \
         --auth-type NONE \
-        --cors "AllowOrigins=*,AllowMethods=*,AllowHeaders=*" \
+        --cors "AllowOrigins=$CORS_ORIGINS,AllowMethods=*,AllowHeaders=Content-Type,Authorization" \
         --query 'FunctionUrl' --output text)
-    
+
     # Add public invocation permission (ensure statement exists and matches the policy)
     aws lambda add-permission \
         --function-name $LAMBDA_NAME \
@@ -282,6 +292,10 @@ if [ "$URL_EXISTS" == "no" ]; then
         --function-url-auth-type NONE > /dev/null 2>&1 || true
 else
     FUNCTION_URL=$(aws lambda get-function-url-config --function-name $LAMBDA_NAME --query 'FunctionUrl' --output text)
+    # CORS設定を更新
+    aws lambda update-function-url-config \
+        --function-name $LAMBDA_NAME \
+        --cors "AllowOrigins=$CORS_ORIGINS,AllowMethods=*,AllowHeaders=Content-Type,Authorization" > /dev/null
     # 既存のURL設定であっても、権限が不足している場合があるので再設定
     aws lambda add-permission \
         --function-name $LAMBDA_NAME \
@@ -292,7 +306,7 @@ else
 fi
 
 # 8. Update CloudFront Origin Custom Headers (Issue #21)
-DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='EPM Application CF'].Id" --output text)
+# DIST_ID はセクション6前に取得済みのため再取得不要
 if [ -n "$DIST_ID" ] && [ "$DIST_ID" != "None" ]; then
     echo "Updating CloudFront Origin Custom Headers for $DIST_ID..."
     aws cloudfront get-distribution-config --id "$DIST_ID" --output json > cf-config.json
