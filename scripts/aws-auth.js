@@ -20,8 +20,8 @@ if (args.length < 2) {
 const username = args[0];
 const password = args[1];
 
-// SHA256でハッシュ化
-const hash = crypto.createHash('sha256').update(password).digest('hex');
+// SHA256でハッシュ化 (ユーザー名をソルトとして追加: Issue #26)
+const hash = crypto.createHash('sha256').update(username + ':' + password).digest('hex');
 
 console.log('----------------------------------------------------');
 console.log(`👤 ユーザー名: ${username}`);
