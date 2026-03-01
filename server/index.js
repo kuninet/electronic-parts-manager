@@ -7,12 +7,15 @@ const { initDb, getDb } = require('./database');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
-app.use(cors());
-
 // Origin verification (Basic Auth bypass prevention)
-// 開発環境以外（Lambda環境）では CloudFront からの特定のヘッダーを必須とする
+// CloudFront からの x-origin-verify ヘッダーを検証し、直接アクセスを遮断する
+// Lambda環境で未設定の場合は起動を拒否（設定漏れによるサイレントバイパスを防ぐ）
 const originSecret = process.env.ORIGIN_VERIFY_SECRET;
+const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+if (isLambda && !originSecret) {
+    console.error('FATAL: ORIGIN_VERIFY_SECRET is not set in Lambda environment');
+    process.exit(1);
+}
 if (originSecret) {
     app.use((req, res, next) => {
         const receivedSecret = req.headers['x-origin-verify'];
@@ -23,6 +26,9 @@ if (originSecret) {
         next();
     });
 }
+
+// Middleware
+app.use(cors());
 
 app.use(express.json({ limit: '200mb' }));
 app.use(express.urlencoded({ limit: '200mb', extended: true }));

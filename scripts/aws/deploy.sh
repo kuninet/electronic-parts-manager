@@ -216,7 +216,11 @@ AP_ARN="arn:aws:elasticfilesystem:${REGION}:${ACCOUNT_ID}:access-point/${AP_ID}"
 LAMBDA_NAME="epm-backend"
 echo "Packaging Backend Code..."
 cd server
-npm install --omit=dev > /dev/null 2>&1
+# npm_config_platform/arch を環境変数で指定することで、Windows/Mac/Linux どのホストからでも
+# Linux arm64用のプリビルドバイナリ(ELF)をダウンロードできる
+# (--platform/--arch フラグでは prebuild-install に正しく伝わらない場合があるため環境変数を使用)
+rm -rf node_modules/sqlite3
+npm_config_platform=linux npm_config_arch=arm64 npm install --omit=dev > /dev/null 2>&1
 zip -q -r ../deploy-backend.zip . -x "*.git*" "*test*"
 cd ..
 
@@ -238,7 +242,6 @@ if [ "$FUNCTION_EXISTS" == "no" ]; then
         --vpc-config SubnetIds=$(echo "${SUBNET_ARRAY[*]}" | tr ' ' ','),SecurityGroupIds=$SG_ID \
         --file-system-configs Arn=$AP_ARN,LocalMountPath=/mnt/efs \
         --layers arn:aws:lambda:${REGION}:753240598075:layer:LambdaAdapterLayerArm64:24 > /dev/null
-        # Set to arm64 because the package is likely built on an Apple Silicon Mac, containing native ARM sqlite3 bindings.
 else
     echo "Updating Lambda Function Code..."
     aws lambda update-function-code \
@@ -270,15 +273,22 @@ if [ "$URL_EXISTS" == "no" ]; then
         --cors "AllowOrigins=*,AllowMethods=*,AllowHeaders=*" \
         --query 'FunctionUrl' --output text)
     
-    # Add public invocation permission
+    # Add public invocation permission (ensure statement exists and matches the policy)
     aws lambda add-permission \
         --function-name $LAMBDA_NAME \
         --statement-id FunctionURLAllowPublicAccess \
         --action lambda:InvokeFunctionUrl \
         --principal "*" \
-        --function-url-auth-type NONE > /dev/null
+        --function-url-auth-type NONE > /dev/null 2>&1 || true
 else
     FUNCTION_URL=$(aws lambda get-function-url-config --function-name $LAMBDA_NAME --query 'FunctionUrl' --output text)
+    # 既存のURL設定であっても、権限が不足している場合があるので再設定
+    aws lambda add-permission \
+        --function-name $LAMBDA_NAME \
+        --statement-id FunctionURLAllowPublicAccess \
+        --action lambda:InvokeFunctionUrl \
+        --principal "*" \
+        --function-url-auth-type NONE > /dev/null 2>&1 || true
 fi
 
 # 8. Update CloudFront Origin Custom Headers (Issue #21)
@@ -287,7 +297,9 @@ if [ -n "$DIST_ID" ] && [ "$DIST_ID" != "None" ]; then
     echo "Updating CloudFront Origin Custom Headers for $DIST_ID..."
     aws cloudfront get-distribution-config --id "$DIST_ID" --output json > cf-config.json
     ETAG=$(jq -r '.ETag' cf-config.json)
-    jq '.DistributionConfig.Origins.Items[] |= if .Id == "Lambda-Backend" then .CustomHeaders = {"Quantity": 1, "Items": [{"HeaderName": "x-origin-verify", "HeaderValue": "'"$ORIGIN_VERIFY_SECRET"'"}]} else . end' cf-config.json > cf-updated.json
+    jq --arg secret "$ORIGIN_VERIFY_SECRET" \
+        '.DistributionConfig.Origins.Items[] |= if .Id == "Lambda-Backend" then .CustomHeaders = {"Quantity": 1, "Items": [{"HeaderName": "x-origin-verify", "HeaderValue": $secret}]} else . end' \
+        cf-config.json > cf-updated.json
     
     # Remove ETag and set it back to just DistributionConfig
     jq '.DistributionConfig' cf-updated.json > cf-final.json
