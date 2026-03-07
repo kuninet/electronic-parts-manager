@@ -22,7 +22,7 @@
 ## セットアップ手順
 
 ### 前提条件
-- Node.js (推奨 v16以上)
+- Node.js 18-22 (推奨 20.x)
 - npm
 
 ### インストール方法
@@ -37,6 +37,8 @@ npm install
 cd ../client
 npm install
 ```
+
+`sqlite3` を利用しているため、Node.js 25 以降ではネイティブモジュール読込に失敗する場合があります。`nvm use` で [.nvmrc](/Users/kuninet/git/電子パーツ管理アプリ/.nvmrc) の Node.js 20 に合わせてから `npm install` をやり直してください。
 
 ## 起動方法
 
@@ -121,4 +123,3 @@ QRコードを使って箱（収納ケース）と部品の入出庫を管理す
 ## 参考リンク
 - [PlamoScanner](https://github.com/unafi/PlamoScanner) - プラモ余剰パーツ管理 QR/NFCアプリ（QRコードによる入出庫管理の着想元）
 - [PlamoScanner/QRprint](https://github.com/unafi/PlamoScanner/tree/main/QRprint) - QRコード印刷ツール（A4ラベルシール用PDF生成の参考）
-

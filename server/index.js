@@ -2,10 +2,20 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { initDb, getDb } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const nodeMajor = Number.parseInt(process.versions.node.split('.')[0], 10);
+
+if (Number.isNaN(nodeMajor) || nodeMajor < 18 || nodeMajor > 22) {
+    console.error(
+        `Unsupported Node.js version: ${process.versions.node}. ` +
+        'Use Node.js 18-22, preferably Node.js 20.x, then reinstall dependencies.'
+    );
+    process.exit(1);
+}
+
+const { initDb } = require('./database');
 
 // Origin verification (Basic Auth bypass prevention)
 // CloudFront からの x-origin-verify ヘッダーを検証し、直接アクセスを遮断する

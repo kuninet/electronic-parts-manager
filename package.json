@@ -2,6 +2,9 @@
     "name": "electronic-parts-manager",
     "version": "1.0.0",
     "description": "Electronic Parts Management App",
+    "engines": {
+        "node": ">=18 <23"
+    },
     "scripts": {
         "start": "concurrently \"npm run server\" \"npm run client\"",
         "server": "cd server && npm start",
