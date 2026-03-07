@@ -19,7 +19,9 @@ const IMAGES_BUCKET = process.env.S3_IMAGES_BUCKET;
 router.get('/', async (req, res) => {
     try {
         const db = getDb();
-        const locations = await db.all('SELECT * FROM locations ORDER BY display_order ASC');
+        const locations = await db.all(
+            'SELECT * FROM locations ORDER BY display_order ASC, name COLLATE NOCASE ASC, id ASC'
+        );
         res.json(locations);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -31,6 +33,9 @@ router.post('/', upload.single('image'), async (req, res) => {
     try {
         const db = getDb();
         const { name, description } = req.body;
+        const { next_display_order } = await db.get(
+            'SELECT COALESCE(MAX(display_order), -1) + 1 AS next_display_order FROM locations'
+        );
         let image_path = null;
         if (req.file) {
             const file = req.file;
@@ -50,8 +55,11 @@ router.post('/', upload.single('image'), async (req, res) => {
             image_path = '/uploads/' + filename;
         }
 
-        const result = await db.run('INSERT INTO locations (name, description, image_path) VALUES (?, ?, ?)', [name, description, image_path]);
-        res.status(201).json({ id: result.lastID, name, description, image_path });
+        const result = await db.run(
+            'INSERT INTO locations (name, description, image_path, display_order) VALUES (?, ?, ?, ?)',
+            [name, description, image_path, next_display_order]
+        );
+        res.status(201).json({ id: result.lastID, name, description, image_path, display_order: next_display_order });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

@@ -6,7 +6,9 @@ const { getDb } = require('../database');
 router.get('/', async (req, res) => {
     try {
         const db = getDb();
-        const tags = await db.all('SELECT * FROM tags ORDER BY display_order ASC');
+        const tags = await db.all(
+            'SELECT * FROM tags ORDER BY display_order ASC, name COLLATE NOCASE ASC, id ASC'
+        );
         res.json(tags);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -21,8 +23,14 @@ router.post('/', async (req, res) => {
     if (!name) return res.status(400).json({ error: 'Name is required' });
     try {
         const db = getDb();
-        const result = await db.run('INSERT INTO tags (name) VALUES (?)', [name]);
-        res.status(201).json({ id: result.lastID, name });
+        const { next_display_order } = await db.get(
+            'SELECT COALESCE(MAX(display_order), -1) + 1 AS next_display_order FROM tags'
+        );
+        const result = await db.run(
+            'INSERT INTO tags (name, display_order) VALUES (?, ?)',
+            [name, next_display_order]
+        );
+        res.status(201).json({ id: result.lastID, name, display_order: next_display_order });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
