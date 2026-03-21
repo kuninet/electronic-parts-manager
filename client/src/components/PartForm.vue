@@ -95,6 +95,17 @@ const handleSubmit = async () => {
       return;
     }
 
+    const wasUsed = !!props.part?.used_at;
+    if (props.part && !wasUsed && isUsed.value) {
+      const confirmed = confirm('この部品を使用済みにします。通常一覧から外れ、保管場所はクリアされます。よろしいですか？');
+      if (!confirmed) return;
+    }
+
+    if (props.part && wasUsed && !isUsed.value) {
+      const confirmed = confirm('この部品を通常在庫に戻します。使用日時・使用先・使用メモはクリアされます。よろしいですか？');
+      if (!confirmed) return;
+    }
+
     const data = new FormData();
     
     // Auto-generate name if empty
