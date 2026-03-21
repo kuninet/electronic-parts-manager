@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import api from '../api';
 
-const HOVER_PREVIEW_DELAY_MS = 2000;
+const HOVER_PREVIEW_DELAY_MS = 1000;
 const HOVER_PREVIEW_WIDTH = 540;
 const HOVER_PREVIEW_HEIGHT = 500;
 const emit = defineEmits(['select', 'edit-location', 'edit-part']);

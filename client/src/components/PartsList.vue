@@ -5,7 +5,7 @@ import TagInput from './TagInput.vue';
 import BulkEditModal from './BulkEditModal.vue';
 import MiniQrScanner from './MiniQrScanner.vue';
 
-const HOVER_PREVIEW_DELAY_MS = 2000;
+const HOVER_PREVIEW_DELAY_MS = 1000;
 const HOVER_PREVIEW_WIDTH = 540;
 const HOVER_PREVIEW_HEIGHT = 500;
 
