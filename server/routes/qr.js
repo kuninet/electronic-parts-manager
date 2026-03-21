@@ -1,21 +1,41 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
+const fs = require('fs');
 const path = require('path');
 const { getDb } = require('../database');
-const { resizeImage } = require('../utils/image');
+const { resizeImageBuffer, validateImage } = require('../utils/image');
 
-// 画像アップロード設定（プロジェクトルート/uploads に保存）
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '..', '..', 'uploads');
-        cb(null, uploadsDir);
-    },
-    filename: function (req, file, cb) {
-        cb(null, Date.now() + '-' + file.originalname);
-    }
-});
+// 画像アップロード設定（メモリ上でリサイズしてから保存）
+const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+
+async function ensureValidImage(file) {
+    const ext = path.extname(file.originalname).toLowerCase();
+
+    if (!ALLOWED_MIME_TYPES.includes(file.mimetype) || !ALLOWED_EXTENSIONS.includes(ext)) {
+        return '許可されていない画像ファイル形式です (対応: JPG, PNG, GIF, WEBP)';
+    }
+
+    if (!(await validateImage(file.buffer))) {
+        return '画像データが破損しているか、不正なファイルです';
+    }
+
+    return null;
+}
+
+async function saveUploadedImage(file) {
+    const filename = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
+    const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
+    const resizedBuffer = await resizeImageBuffer(file.buffer);
+
+    await fs.promises.mkdir(uploadsDir, { recursive: true });
+    await fs.promises.writeFile(path.join(uploadsDir, filename), resizedBuffer);
+
+    return '/uploads/' + filename;
+}
 
 // QRコード重複チェック（locationsとparts横断）
 const checkQrCodeDuplicate = async (db, qrCode, excludeType, excludeId) => {
@@ -117,9 +137,10 @@ router.post('/register-location', upload.single('image'), async (req, res) => {
         const db = getDb();
         const { qr_code, name, description } = req.body;
         if (req.file) {
-            await resizeImage(req.file.path);
+            const validationError = await ensureValidImage(req.file);
+            if (validationError) return res.status(400).json({ error: validationError });
         }
-        const image_path = req.file ? '/uploads/' + req.file.filename : null;
+        const image_path = req.file ? await saveUploadedImage(req.file) : null;
 
         // QRコード重複チェック（locations + parts横断）
         const dup = await checkQrCodeDuplicate(db, qr_code, null, null);
@@ -145,9 +166,10 @@ router.post('/register-part', upload.single('image'), async (req, res) => {
         const db = getDb();
         const { qr_code, name, description, quantity, category_id, location_id } = req.body;
         if (req.file) {
-            await resizeImage(req.file.path);
+            const validationError = await ensureValidImage(req.file);
+            if (validationError) return res.status(400).json({ error: validationError });
         }
-        const image_path = req.file ? '/uploads/' + req.file.filename : null;
+        const image_path = req.file ? await saveUploadedImage(req.file) : null;
 
         // QRコード重複チェック（locations + parts横断）
         const dup = await checkQrCodeDuplicate(db, qr_code, null, null);
