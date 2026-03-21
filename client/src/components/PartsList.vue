@@ -5,6 +5,10 @@ import TagInput from './TagInput.vue';
 import BulkEditModal from './BulkEditModal.vue';
 import MiniQrScanner from './MiniQrScanner.vue';
 
+const HOVER_PREVIEW_DELAY_MS = 1000;
+const HOVER_PREVIEW_WIDTH = 540;
+const HOVER_PREVIEW_HEIGHT = 500;
+
 const props = defineProps({
   initialLocationId: {
     type: [Number, String],
@@ -48,10 +52,66 @@ const editingForm = ref({
 });
 
 const showQrScanner = ref(false);
+const hoverPreview = ref({
+    visible: false,
+    imageSrc: '',
+    name: '',
+    top: 0,
+    left: 0
+});
+let hoverPreviewTimer = null;
 
 const handleQrScan = (result) => {
     editingForm.value.qr_code = result;
     showQrScanner.value = false;
+};
+
+const supportsHoverPreview = () => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+
+const resolveImageUrl = (imagePath) => {
+    if (!imagePath) return '';
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) return imagePath;
+    const baseUrl = import.meta.env.VITE_API_URL || '';
+    return `${baseUrl}${imagePath}`;
+};
+
+const clampHoverPreviewPosition = (rect) => {
+    const margin = 16;
+    const maxLeft = Math.max(margin, window.innerWidth - HOVER_PREVIEW_WIDTH - margin);
+    const maxTop = Math.max(margin, window.innerHeight - HOVER_PREVIEW_HEIGHT - margin);
+    const preferredLeft = rect.right - (HOVER_PREVIEW_WIDTH * 0.72);
+    const preferredTop = rect.top - 36;
+
+    return {
+        left: Math.min(Math.max(preferredLeft, margin), maxLeft),
+        top: Math.min(Math.max(preferredTop, margin), maxTop)
+    };
+};
+
+const hideHoverPreview = () => {
+    if (hoverPreviewTimer) {
+        clearTimeout(hoverPreviewTimer);
+        hoverPreviewTimer = null;
+    }
+    hoverPreview.value.visible = false;
+};
+
+const scheduleHoverPreview = (event, part) => {
+    if (!supportsHoverPreview() || !part.image_path || editingPartId.value === part.id) return;
+
+    hideHoverPreview();
+    const rect = event.currentTarget.getBoundingClientRect();
+    hoverPreviewTimer = setTimeout(() => {
+        const position = clampHoverPreviewPosition(rect);
+        hoverPreview.value = {
+            visible: true,
+            imageSrc: resolveImageUrl(part.image_path),
+            name: part.name,
+            top: position.top,
+            left: position.left
+        };
+        hoverPreviewTimer = null;
+    }, HOVER_PREVIEW_DELAY_MS);
 };
 
 // 画像読み込み失敗時のリトライ（503エラー対策）
@@ -98,7 +158,10 @@ const vLazyRender = {
 };
 
 initLazyObserver();
-onUnmounted(() => { if (lazyObserver) lazyObserver.disconnect(); });
+onUnmounted(() => {
+    if (lazyObserver) lazyObserver.disconnect();
+    hideHoverPreview();
+});
 
 const fetchMetadata = async () => {
   try {
@@ -481,7 +544,9 @@ defineExpose({ fetchParts });
             :data-part-id="part.id"
             class="part-card glass-panel" 
             :class="{ selected: selectedItems.has(part.id), 'editing': editingPartId === part.id }"
-            @click="isSelecting ? toggleSelection(part) : (editingPartId === part.id ? null : $emit('edit', part))"
+            @mouseenter="scheduleHoverPreview($event, part)"
+            @mouseleave="hideHoverPreview"
+            @click="hideHoverPreview(); isSelecting ? toggleSelection(part) : (editingPartId === part.id ? null : $emit('edit', part))"
         >
           <div v-if="editingPartId !== part.id" class="card-view-content">
               <div class="card-selection" @click.stop>
@@ -597,6 +662,15 @@ defineExpose({ fetchParts });
               </div>
           </div>
         </div>
+      </div>
+
+      <div
+        v-if="hoverPreview.visible"
+        class="hover-image-preview"
+        :style="{ top: `${hoverPreview.top}px`, left: `${hoverPreview.left}px` }"
+      >
+        <img :src="hoverPreview.imageSrc" :alt="hoverPreview.name" />
+        <span>{{ hoverPreview.name }}</span>
       </div>
 
       <!-- List View -->
@@ -1430,6 +1504,37 @@ td {
 .part-card.selected {
     border: 2px solid var(--accent-color);
     background: rgba(94, 234, 212, 0.05); /* Accent tint */
+}
+
+.hover-image-preview {
+    position: fixed;
+    z-index: 2500;
+    width: 540px;
+    padding: 0.75rem;
+    border-radius: 14px;
+    background: rgba(15, 23, 42, 0.96);
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    backdrop-filter: blur(8px);
+}
+
+.hover-image-preview img {
+    width: 100%;
+    height: 430px;
+    object-fit: contain;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.hover-image-preview span {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    line-height: 1.35;
+    word-break: break-word;
 }
 
 .list-row.selected {

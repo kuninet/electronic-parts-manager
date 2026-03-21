@@ -1,12 +1,23 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import api from '../api';
 
+const HOVER_PREVIEW_DELAY_MS = 1000;
+const HOVER_PREVIEW_WIDTH = 540;
+const HOVER_PREVIEW_HEIGHT = 500;
 const emit = defineEmits(['select', 'edit-location', 'edit-part']);
 
 const locations = ref([]);
 const loading = ref(true);
 const searchQuery = ref('');
+const hoverPreview = ref({
+    visible: false,
+    imageSrc: '',
+    name: '',
+    top: 0,
+    left: 0
+});
+let hoverPreviewTimer = null;
 
 const filteredLocations = computed(() => {
     if (!searchQuery.value) return locations.value;
@@ -30,9 +41,59 @@ const fetchLocations = async () => {
 };
 
 onMounted(fetchLocations);
+onUnmounted(() => {
+    hideHoverPreview();
+});
 
 const selectLocation = (id) => {
     emit('select', id);
+};
+
+const supportsHoverPreview = () => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+
+const resolveImageUrl = (imagePath) => {
+    if (!imagePath) return '';
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) return imagePath;
+    return `${api.defaults.baseURL.replace('/api', '')}${imagePath}`;
+};
+
+const clampHoverPreviewPosition = (rect) => {
+    const margin = 16;
+    const maxLeft = Math.max(margin, window.innerWidth - HOVER_PREVIEW_WIDTH - margin);
+    const maxTop = Math.max(margin, window.innerHeight - HOVER_PREVIEW_HEIGHT - margin);
+    const preferredLeft = rect.right - (HOVER_PREVIEW_WIDTH * 0.72);
+    const preferredTop = rect.top - 36;
+
+    return {
+        left: Math.min(Math.max(preferredLeft, margin), maxLeft),
+        top: Math.min(Math.max(preferredTop, margin), maxTop)
+    };
+};
+
+const hideHoverPreview = () => {
+    if (hoverPreviewTimer) {
+        clearTimeout(hoverPreviewTimer);
+        hoverPreviewTimer = null;
+    }
+    hoverPreview.value.visible = false;
+};
+
+const scheduleHoverPreview = (event, loc) => {
+    if (!supportsHoverPreview() || !loc.image_path) return;
+
+    hideHoverPreview();
+    const rect = event.currentTarget.getBoundingClientRect();
+    hoverPreviewTimer = setTimeout(() => {
+        const position = clampHoverPreviewPosition(rect);
+        hoverPreview.value = {
+            visible: true,
+            imageSrc: resolveImageUrl(loc.image_path),
+            name: loc.name,
+            top: position.top,
+            left: position.left
+        };
+        hoverPreviewTimer = null;
+    }, HOVER_PREVIEW_DELAY_MS);
 };
 
 // Preview Modal Logic
@@ -41,6 +102,7 @@ const previewParts = ref([]);
 const loadingPreview = ref(false);
 
 const openPreview = async (loc) => {
+    hideHoverPreview();
     previewLocation.value = loc;
     loadingPreview.value = true;
     try {
@@ -94,10 +156,12 @@ const handleEditPart = (part) => {
             v-for="loc in filteredLocations" 
             :key="loc.id" 
             class="card"
+            @mouseenter="scheduleHoverPreview($event, loc)"
+            @mouseleave="hideHoverPreview"
             @click="openPreview(loc)"
         >
             <div class="card-image">
-                <img v-if="loc.image_path" :src="`${api.defaults.baseURL.replace('/api', '')}${loc.image_path}`" />
+                <img v-if="loc.image_path" :src="resolveImageUrl(loc.image_path)" />
                 <div v-else class="placeholder">
                     📦
                 </div>
@@ -110,6 +174,15 @@ const handleEditPart = (part) => {
                 </div>
             </div>
         </div>
+    </div>
+
+    <div
+        v-if="hoverPreview.visible"
+        class="hover-image-preview"
+        :style="{ top: `${hoverPreview.top}px`, left: `${hoverPreview.left}px` }"
+    >
+        <img :src="hoverPreview.imageSrc" :alt="hoverPreview.name" />
+        <span>{{ hoverPreview.name }}</span>
     </div>
 
     <!-- Preview Modal -->
@@ -208,6 +281,37 @@ const handleEditPart = (part) => {
     box-shadow: 0 12px 24px rgba(0,0,0,0.4);
     border-color: var(--accent-color);
     background: rgba(30, 41, 59, 0.9);
+}
+
+.hover-image-preview {
+    position: fixed;
+    z-index: 2500;
+    width: 540px;
+    padding: 0.75rem;
+    border-radius: 14px;
+    background: rgba(15, 23, 42, 0.96);
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    backdrop-filter: blur(8px);
+}
+
+.hover-image-preview img {
+    width: 100%;
+    height: 430px;
+    object-fit: contain;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.hover-image-preview span {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    line-height: 1.35;
+    word-break: break-word;
 }
 
 .card-image {
