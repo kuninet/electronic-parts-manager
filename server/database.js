@@ -38,6 +38,9 @@ async function initDb() {
       category_id INTEGER,
       location_id INTEGER,
       quantity INTEGER DEFAULT 0,
+      used_at DATETIME DEFAULT NULL,
+      used_for TEXT,
+      used_note TEXT,
       image_path TEXT,
       datasheet_url TEXT,
       datasheet_path TEXT,
@@ -118,6 +121,17 @@ async function initDb() {
   } catch (e) { }
   try {
     await db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_parts_qr_code ON parts(qr_code) WHERE qr_code IS NOT NULL');
+  } catch (e) { }
+
+  // Migration: partsテーブルに使用済み管理カラム追加
+  try {
+    await db.run('ALTER TABLE parts ADD COLUMN used_at DATETIME DEFAULT NULL');
+  } catch (e) { }
+  try {
+    await db.run('ALTER TABLE parts ADD COLUMN used_for TEXT');
+  } catch (e) { }
+  try {
+    await db.run('ALTER TABLE parts ADD COLUMN used_note TEXT');
   } catch (e) { }
 
   // Seed some initial data if empty

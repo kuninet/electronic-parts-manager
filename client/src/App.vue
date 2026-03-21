@@ -5,6 +5,7 @@ import PartForm from './components/PartForm.vue';
 import DataManagement from './components/DataManagement.vue';
 import MasterDataManagement from './components/MasterDataManagement.vue';
 import LocationGridView from './components/LocationGridView.vue';
+import UsedPartsView from './components/UsedPartsView.vue';
 import QrScanner from './components/QrScanner.vue';
 import QrGenerator from './components/QrGenerator.vue';
 
@@ -40,7 +41,7 @@ onUnmounted(() => {
   document.removeEventListener('click', closeDropdown);
 });
 
-const currentView = ref('parts'); // 'parts' or 'locations'
+const currentView = ref('parts'); // 'parts' | 'used-parts' | 'locations'
 const targetLocationId = ref('');
 
 // Mobile detection
@@ -190,6 +191,13 @@ const onCameraFileChange = async (event) => {
             </button>
             <button 
                 class="btn-tab" 
+                :class="{ active: currentView === 'used-parts' }" 
+                @click="switchView('used-parts')"
+            >
+                🧩 使用済み
+            </button>
+            <button 
+                class="btn-tab" 
                 :class="{ active: currentView === 'locations' }" 
                 @click="switchView('locations')"
             >
@@ -206,7 +214,7 @@ const onCameraFileChange = async (event) => {
             class="hidden-input" 
             @change="onCameraFileChange"
           />
-          <button class="btn btn-outline btn-sm camera-btn" @click="handleCameraClick">
+          <button v-if="currentView === 'parts'" class="btn btn-outline btn-sm camera-btn" @click="handleCameraClick">
             📷 {{ isMobile ? 'カメラで追加' : '画像から追加' }}
           </button>
           <a href="#/qr" class="btn btn-outline btn-sm qr-link">📦 QR入出庫</a>
@@ -222,7 +230,7 @@ const onCameraFileChange = async (event) => {
             </div>
           </div>
 
-          <button class="btn btn-primary" @click="openAddModal">+ パーツ追加</button>
+          <button v-if="currentView === 'parts'" class="btn btn-primary" @click="openAddModal">+ パーツ追加</button>
         </nav>
       </div>
     </header>
@@ -235,6 +243,12 @@ const onCameraFileChange = async (event) => {
             :initialLocationId="targetLocationId"
             @add="openAddModal" 
             @edit="openEditModal" 
+          />
+      </template>
+      <template v-else-if="currentView === 'used-parts'">
+          <UsedPartsView
+            ref="partsListRef"
+            @edit="openEditModal"
           />
       </template>
       <template v-else>
