@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../database');
-const { resizeImageBuffer } = require('../utils/image');
+const { resizeImageBuffer, validateImage } = require('../utils/image');
 const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 
 const multer = require('multer');
@@ -14,6 +14,22 @@ const upload = multer({ storage: storage });
 
 const s3Images = new S3Client({ region: process.env.AWS_REGION || 'ap-northeast-1' });
 const IMAGES_BUCKET = process.env.S3_IMAGES_BUCKET;
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+
+async function ensureValidImage(file) {
+    const ext = path.extname(file.originalname).toLowerCase();
+
+    if (!ALLOWED_MIME_TYPES.includes(file.mimetype) || !ALLOWED_EXTENSIONS.includes(ext)) {
+        return '許可されていない画像ファイル形式です (対応: JPG, PNG, GIF, WEBP)';
+    }
+
+    if (!(await validateImage(file.buffer))) {
+        return '画像データが破損しているか、不正なファイルです';
+    }
+
+    return null;
+}
 
 // GET /api/locations
 router.get('/', async (req, res) => {
@@ -39,6 +55,8 @@ router.post('/', upload.single('image'), async (req, res) => {
         let image_path = null;
         if (req.file) {
             const file = req.file;
+            const validationError = await ensureValidImage(file);
+            if (validationError) return res.status(400).json({ error: validationError });
             const filename = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
             const resizedBuffer = await resizeImageBuffer(file.buffer);
             if (IMAGES_BUCKET) {
@@ -85,6 +103,8 @@ router.put('/:id', upload.single('image'), async (req, res) => {
 
         if (req.file) {
             const file = req.file;
+            const validationError = await ensureValidImage(file);
+            if (validationError) return res.status(400).json({ error: validationError });
             const filename = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
             const resizedBuffer = await resizeImageBuffer(file.buffer);
 
