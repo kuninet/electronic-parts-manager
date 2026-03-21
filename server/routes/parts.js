@@ -22,7 +22,7 @@ const IMAGES_BUCKET = process.env.S3_IMAGES_BUCKET;
 router.get('/', async (req, res) => {
     try {
         const db = getDb();
-        const { category_id, location_id, tag_id, search, status, sort, order } = req.query;
+        const { category_id, location_id, tag_id, search, status, sort, order, used_for } = req.query;
         let query = `
       SELECT p.*, c.name as category_name, l.name as location_name,
       (SELECT GROUP_CONCAT(t.name, ',') FROM tags t JOIN part_tags pt ON t.id = pt.tag_id WHERE pt.part_id = p.id) as tags
@@ -35,8 +35,10 @@ router.get('/', async (req, res) => {
 
         if (status === 'trash') {
             query += ` AND p.deleted_at IS NOT NULL`;
+        } else if (status === 'used') {
+            query += ` AND p.deleted_at IS NULL AND p.used_at IS NOT NULL`;
         } else {
-            query += ` AND p.deleted_at IS NULL`;
+            query += ` AND p.deleted_at IS NULL AND p.used_at IS NULL`;
         }
 
         if (category_id) {
@@ -59,6 +61,11 @@ router.get('/', async (req, res) => {
             params.push(`%${search}%`, `%${search}%`);
         }
 
+        if (used_for) {
+            query += ` AND p.used_for LIKE ?`;
+            params.push(`%${used_for}%`);
+        }
+
         // Sorting
         let sortColumn = 'p.id';
         let sortOrder = 'DESC';
@@ -68,6 +75,8 @@ router.get('/', async (req, res) => {
         else if (sort === 'location') sortColumn = 'location_name';
         else if (sort === 'created_at') sortColumn = 'p.created_at';
         else if (sort === 'quantity') sortColumn = 'p.quantity';
+        else if (sort === 'used_for') sortColumn = 'p.used_for';
+        else if (sort === 'used_at') sortColumn = 'p.used_at';
 
         if (order && order.toUpperCase() === 'ASC') sortOrder = 'ASC';
 
@@ -176,11 +185,16 @@ router.post('/', upload, async (req, res) => {
 router.put('/:id', upload, async (req, res) => {
     try {
         const db = getDb();
-        const { name, description, category_id, location_id, quantity, datasheet_url, qr_code } = req.body;
+        const { name, description, category_id, location_id, quantity, datasheet_url, qr_code, used_at, used_for, used_note } = req.body;
         const id = req.params.id; console.log("req.body:", req.body);
 
         const safeCategoryId = (category_id === '' || category_id === 'null' || category_id === undefined) ? null : category_id;
-        const safeLocationId = (location_id === '' || location_id === 'null' || location_id === undefined) ? null : location_id;
+        const safeUsedAt = (used_at === '' || used_at === 'null' || used_at === undefined) ? null : used_at;
+        const safeUsedFor = (used_for === '' || used_for === 'null' || used_for === undefined) ? null : used_for;
+        const safeUsedNote = (used_note === '' || used_note === 'null' || used_note === undefined) ? null : used_note;
+        const safeLocationId = safeUsedAt
+            ? null
+            : (location_id === '' || location_id === 'null' || location_id === undefined) ? null : location_id;
 
         // QRコード重複チェック（自分自身は除外）
         const safeQrCode = (qr_code === '' || qr_code === 'null' || qr_code === undefined) ? null : qr_code;
@@ -191,8 +205,8 @@ router.put('/:id', upload, async (req, res) => {
             if (dupLoc) return res.status(409).json({ error: 'このQRコードは保管場所に登録済みです' });
         }
 
-        let query = `UPDATE parts SET name = ?, description = ?, category_id = ?, location_id = ?, quantity = ?, datasheet_url = ?, qr_code = ?, updated_at = CURRENT_TIMESTAMP`;
-        const params = [name, description, safeCategoryId, safeLocationId, quantity, datasheet_url, safeQrCode];
+        let query = `UPDATE parts SET name = ?, description = ?, category_id = ?, location_id = ?, quantity = ?, datasheet_url = ?, qr_code = ?, used_at = ?, used_for = ?, used_note = ?, updated_at = CURRENT_TIMESTAMP`;
+        const params = [name, description, safeCategoryId, safeLocationId, quantity, datasheet_url, safeQrCode, safeUsedAt, safeUsedFor, safeUsedNote];
 
         // Fetch current file paths to delete old files if necessary
         const currentPart = await db.get('SELECT image_path, datasheet_path FROM parts WHERE id = ?', [id]);
@@ -332,6 +346,20 @@ router.post('/:id/restore', async (req, res) => {
         const db = getDb();
         await db.run('UPDATE parts SET deleted_at = NULL WHERE id = ?', [req.params.id]);
         res.json({ message: 'Restored successfully' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/parts/:id/unuse - Restore used part to active inventory
+router.post('/:id/unuse', async (req, res) => {
+    try {
+        const db = getDb();
+        await db.run(
+            'UPDATE parts SET used_at = NULL, used_for = NULL, used_note = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [req.params.id]
+        );
+        res.json({ message: 'Part restored to active inventory' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

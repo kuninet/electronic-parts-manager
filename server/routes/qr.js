@@ -77,7 +77,7 @@ router.get('/lookup/:qrCode', async (req, res) => {
                        c.name as category_name
                 FROM parts p
                 LEFT JOIN categories c ON p.category_id = c.id
-                WHERE p.location_id = ? AND p.deleted_at IS NULL
+                WHERE p.location_id = ? AND p.deleted_at IS NULL AND p.used_at IS NULL
                 ORDER BY p.name ASC
             `, [location.id]);
             return res.json({ type: 'location', data: { ...location, parts } });
@@ -90,7 +90,7 @@ router.get('/lookup/:qrCode', async (req, res) => {
             FROM parts p
             LEFT JOIN categories c ON p.category_id = c.id
             LEFT JOIN locations l ON p.location_id = l.id
-            WHERE p.qr_code = ? AND p.deleted_at IS NULL
+            WHERE p.qr_code = ? AND p.deleted_at IS NULL AND p.used_at IS NULL
         `, [qrCode]);
         if (part) {
             return res.json({ type: 'part', data: part });
