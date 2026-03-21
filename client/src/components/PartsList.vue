@@ -6,8 +6,8 @@ import BulkEditModal from './BulkEditModal.vue';
 import MiniQrScanner from './MiniQrScanner.vue';
 
 const HOVER_PREVIEW_DELAY_MS = 2000;
-const HOVER_PREVIEW_WIDTH = 360;
-const HOVER_PREVIEW_HEIGHT = 360;
+const HOVER_PREVIEW_WIDTH = 540;
+const HOVER_PREVIEW_HEIGHT = 500;
 
 const props = defineProps({
   initialLocationId: {
@@ -79,8 +79,8 @@ const clampHoverPreviewPosition = (rect) => {
     const margin = 16;
     const maxLeft = Math.max(margin, window.innerWidth - HOVER_PREVIEW_WIDTH - margin);
     const maxTop = Math.max(margin, window.innerHeight - HOVER_PREVIEW_HEIGHT - margin);
-    const preferredLeft = rect.right - (HOVER_PREVIEW_WIDTH * 0.32);
-    const preferredTop = rect.top - 20;
+    const preferredLeft = rect.right - (HOVER_PREVIEW_WIDTH * 0.72);
+    const preferredTop = rect.top - 36;
 
     return {
         left: Math.min(Math.max(preferredLeft, margin), maxLeft),
@@ -1509,7 +1509,7 @@ td {
 .hover-image-preview {
     position: fixed;
     z-index: 2500;
-    width: 360px;
+    width: 540px;
     padding: 0.75rem;
     border-radius: 14px;
     background: rgba(15, 23, 42, 0.96);
@@ -1524,7 +1524,7 @@ td {
 
 .hover-image-preview img {
     width: 100%;
-    height: 300px;
+    height: 430px;
     object-fit: contain;
     border-radius: 10px;
     background: rgba(255, 255, 255, 0.04);
