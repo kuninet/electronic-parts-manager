@@ -19,6 +19,7 @@ const locationImagePreview = ref(null);
 const partForm = ref({ name: '', description: '', quantity: 1 });
 const partImage = ref(null);
 const partImagePreview = ref(null);
+const registeringPart = ref(false);
 
 // カテゴリ・ロケーション
 const categories = ref([]);
@@ -42,6 +43,18 @@ const printCount = ref(44);
 
 // スキャナーインスタンス
 let html5QrCode = null;
+
+const createUnnamedPartLabel = () => {
+    const now = new Date();
+    const timestamp = now.toLocaleString('ja-JP', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+    return `(名称未設定) ${timestamp}`;
+};
 
 // --- マスタデータ取得 ---
 const loadMasterData = async () => {
@@ -261,14 +274,17 @@ const handlePartScan = async (qrCode) => {
 };
 
 const registerPart = async () => {
-    if (!partForm.value.name.trim()) {
-        showStatus('部品名を入力してください', 'error');
+    if (registeringPart.value) {
         return;
     }
+
+    const resolvedName = partForm.value.name.trim() || createUnnamedPartLabel();
+    registeringPart.value = true;
+
     try {
         const formData = new FormData();
         formData.append('qr_code', scannedQrCode.value);
-        formData.append('name', partForm.value.name);
+        formData.append('name', resolvedName);
         formData.append('description', partForm.value.description);
         formData.append('quantity', partForm.value.quantity);
         if (selectedCategoryId.value) formData.append('category_id', selectedCategoryId.value);
@@ -278,13 +294,16 @@ const registerPart = async () => {
         }
         const res = await api.post('/qr/register-part', formData);
 
-        showStatus(`部品「${partForm.value.name}」を登録しました`, 'success');
+        partForm.value.name = resolvedName;
+        showStatus(`部品「${resolvedName}」を登録しました`, 'success');
         // 登録した部品の情報を表示
         const partRes = await api.get(`/qr/lookup/${encodeURIComponent(scannedQrCode.value)}`);
         partInfo.value = partRes.data.data;
         currentMode.value = 'part-info';
     } catch (err) {
         showStatus('登録エラー: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+        registeringPart.value = false;
     }
 };
 
@@ -574,17 +593,35 @@ onUnmounted(() => {
 
     <!-- 部品登録フォーム -->
     <div v-if="currentMode === 'register-part'" class="form-container glass-panel">
-      <h2>🔧 部品を登録</h2>
+      <div class="form-header">
+        <h2>🔧 部品を登録</h2>
+        <button class="btn btn-primary btn-header-action" @click="registerPart" :disabled="registeringPart">
+          {{ registeringPart ? '登録中...' : '登録する' }}
+        </button>
+      </div>
       <p class="qr-id-display">QR: {{ scannedQrCode }}</p>
 
       <div class="form-group">
-        <label>部品名 *</label>
-        <input v-model="partForm.name" type="text" placeholder="例: 10kΩ抵抗" class="form-input" />
+        <label>部品名</label>
+        <input v-model="partForm.name" type="text" placeholder="未入力なら日時付きで自動入力" class="form-input" />
       </div>
 
       <div class="form-group">
         <label>説明</label>
         <input v-model="partForm.description" type="text" placeholder="例: 1/4W カーボン抵抗" class="form-input" />
+      </div>
+
+      <div class="form-group">
+        <label>📷 写真（任意）</label>
+        <input
+          type="file"
+          accept="image/*"
+          capture="environment"
+          @change="onPartImageChange"
+          class="form-input-file"
+        />
+        <p class="form-hint">スマホやiPadではカメラが優先して開きます。</p>
+        <img v-if="partImagePreview" :src="partImagePreview" class="image-preview" />
       </div>
 
       <div class="form-group">
@@ -608,14 +645,10 @@ onUnmounted(() => {
         </select>
       </div>
 
-      <div class="form-group">
-        <label>📷 写真（任意）</label>
-        <input type="file" accept="image/*" @change="onPartImageChange" class="form-input-file" />
-        <img v-if="partImagePreview" :src="partImagePreview" class="image-preview" />
-      </div>
-
       <div class="form-actions">
-        <button class="btn btn-primary" @click="registerPart">登録する</button>
+        <button class="btn btn-primary" @click="registerPart" :disabled="registeringPart">
+          {{ registeringPart ? '登録中...' : '登録する' }}
+        </button>
         <button class="btn btn-cancel" @click="backToMenu">キャンセル</button>
       </div>
     </div>
@@ -870,8 +903,16 @@ onUnmounted(() => {
 }
 
 .form-container h2 {
-    margin-bottom: 1rem;
+    margin-bottom: 0;
     font-size: 1.2rem;
+}
+
+.form-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
 }
 
 .qr-id-display {
@@ -958,6 +999,17 @@ onUnmounted(() => {
     transform: translateY(-1px);
 }
 
+.btn:disabled {
+    opacity: 0.7;
+    cursor: wait;
+}
+
+.btn-header-action {
+    flex: 0 0 auto;
+    min-width: 7rem;
+    padding-inline: 1rem;
+}
+
 .btn-cancel {
     background: rgba(255,255,255,0.05);
     color: var(--text-secondary);
@@ -965,6 +1017,17 @@ onUnmounted(() => {
 }
 .btn-cancel:hover {
     border-color: var(--text-secondary);
+}
+
+@media (max-width: 480px) {
+    .form-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .btn-header-action {
+        width: 100%;
+    }
 }
 
 /* 情報表示 */
