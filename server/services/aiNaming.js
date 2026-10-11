@@ -7,23 +7,24 @@ const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 
 // 許可されたGeminiモデル一覧（ホワイトリスト）
 const ALLOWED_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-2.5-pro',
-  'gemini-1.5-flash-latest',
-  'gemini-flash-latest'
+  'gemini-flash-latest',
+  'gemini-flash-lite-latest',
+  'gemini-3.8-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-pro-latest'
 ];
 
 // モデル表示用メタデータ
 const AVAILABLE_MODELS = [
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: '推奨・高速かつ高精度な標準モデル' },
-  { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', description: '最軽量・低コストモデル' },
-  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: '高度な推論と詳細判定モデル' },
-  { id: 'gemini-1.5-flash-latest', name: 'Gemini 1.5 Flash', description: '安定版モデル' },
-  { id: 'gemini-flash-latest', name: 'Gemini Flash Latest', description: '最新Flashエイリアス' }
+  { id: 'gemini-flash-latest', name: 'Gemini Flash (Latest)', description: '最新のFlashモデル（推奨・高速高精度）' },
+  { id: 'gemini-flash-lite-latest', name: 'Gemini Flash-Lite (Latest)', description: '最新のFlash-Liteモデル（最軽量・低コスト）' },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', description: '第3.8世代 Flash 固定バージョン' },
+  { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite', description: '第3.5世代 Flash-Lite 固定バージョン' },
+  { id: 'gemini-pro-latest', name: 'Gemini Pro (Latest)', description: '最新のProモデル（高精度推論）' }
 ];
 
-const DEFAULT_MODEL = 'gemini-2.5-flash';
+const DEFAULT_MODEL = 'gemini-flash-latest';
 
 // レート制限用変数（ミリ秒）
 let lastApiCallTimestamp = 0;

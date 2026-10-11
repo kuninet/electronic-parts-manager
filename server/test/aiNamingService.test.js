@@ -36,9 +36,10 @@ test('AI Naming サービスの単体テスト', async (t) => {
   });
 
   await t.test('B3: モデル許可リストとヘルパー関数', async () => {
-    assert.equal(getDefaultModel(), 'gemini-2.5-flash');
-    assert.equal(isValidModel('gemini-2.5-flash'), true);
-    assert.equal(isValidModel('gemini-2.5-pro'), true);
+    assert.equal(getDefaultModel(), 'gemini-flash-latest');
+    assert.equal(isValidModel('gemini-flash-latest'), true);
+    assert.equal(isValidModel('gemini-3.8-flash'), true);
+    assert.equal(isValidModel('gemini-3.5-flash-lite'), true);
     assert.equal(isValidModel('invalid-custom-model'), false);
     assert.equal(isValidModel(''), false);
     assert.equal(isValidModel(null), false);
@@ -154,7 +155,7 @@ test('AI Naming サービスの単体テスト', async (t) => {
     const suggestion = await suggestPartName(partId, {
       db,
       mockClient,
-      model: 'gemini-2.5-flash',
+      model: 'gemini-flash-latest',
       skipThrottle: true
     });
 
@@ -194,7 +195,7 @@ test('AI Naming サービスの単体テスト', async (t) => {
     const newSuggestion = await suggestPartName(partId, {
       db,
       mockClient: mockClient2,
-      model: 'gemini-2.5-flash',
+      model: 'gemini-flash-latest',
       force: true,
       skipThrottle: true
     });
@@ -311,7 +312,7 @@ test('AI Naming サービスの単体テスト', async (t) => {
         await suggestPartName(partId, {
           db,
           mockClient: mock429Client,
-          model: 'gemini-2.5-flash',
+          model: 'gemini-flash-latest',
           skipThrottle: true
         });
       },
@@ -347,7 +348,7 @@ test('AI Naming サービスの単体テスト', async (t) => {
         await suggestPartName(partId, {
           db,
           mockClient: mockApiKeyInvalidClient,
-          model: 'gemini-2.5-flash',
+          model: 'gemini-flash-latest',
           skipThrottle: true
         });
       },
@@ -373,7 +374,7 @@ test('AI Naming サービスの単体テスト', async (t) => {
         await suggestPartName(partId, {
           db,
           mockClient: {},
-          model: 'gemini-2.5-flash',
+          model: 'gemini-flash-latest',
           skipThrottle: true
         });
       },

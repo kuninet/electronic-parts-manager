@@ -55,7 +55,7 @@ test('/api/ai-naming ルートのテスト', async (t) => {
     const data = await res.json();
     assert.equal(Array.isArray(data), true);
     assert.ok(data.length > 0);
-    assert.ok(data.some(m => m.id === 'gemini-2.5-flash'));
+    assert.ok(data.some(m => m.id === 'gemini-flash-latest'));
   });
 
   await t.test('GET /suggestions が pending 候補一覧を返すこと', async () => {
@@ -68,7 +68,7 @@ test('/api/ai-naming ルートのテスト', async (t) => {
     await db.run(`
       INSERT INTO ai_name_suggestions (
         part_id, model, image_path, suggested_name, confidence, status
-      ) VALUES (?, 'gemini-2.5-flash', ?, '10kΩ 金属皮膜抵抗', 0.92, 'pending')
+      ) VALUES (?, 'gemini-flash-latest', ?, '10kΩ 金属皮膜抵抗', 0.92, 'pending')
     `, [partId, dummyImage.imagePath]);
 
     const res = await fetch(`${baseUrl}/suggestions`);
