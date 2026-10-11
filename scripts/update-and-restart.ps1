@@ -206,7 +206,7 @@ try {
         # 12. SQLite DB バックアップ (D8)
         if (Test-Path -LiteralPath $paths.DbPath) {
             if (-not (Test-Path -LiteralPath $paths.BackupDir)) {
-                New-Item -ItemType Directory -LiteralPath $paths.BackupDir -Force -ErrorAction Stop | Out-Null
+                New-Item -ItemType Directory -Path $paths.BackupDir -Force -ErrorAction Stop | Out-Null
             }
             $dbTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
             $backupFile = Join-Path $paths.BackupDir ("database-{0}.sqlite" -f $dbTimestamp)

@@ -6,7 +6,7 @@ function Initialize-EpmLog {
     $repoRoot = Get-RepoRoot
     $logDir = Join-Path $repoRoot ("logs\{0}" -f $Name)
     if (-not (Test-Path -LiteralPath $logDir)) {
-        New-Item -ItemType Directory -LiteralPath $logDir -Force -ErrorAction Stop | Out-Null
+        New-Item -ItemType Directory -Path $logDir -Force -ErrorAction Stop | Out-Null
     }
     $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     $logFile = Join-Path $logDir ("{0}-{1}.log" -f $Name, $timestamp)
