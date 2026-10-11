@@ -222,7 +222,9 @@ function Get-Pm2Apps {
     try {
         $raw = (cmd /c "pm2 jlist 2>nul") -join "`n"
         if (-not $raw) { return ,@() }
-        $startIdx = $raw.IndexOf('[')
+        $match = [regex]::Match($raw, '\[\s*[\{\]]')
+        if (-not $match.Success) { return ,@() }
+        $startIdx = $match.Index
         $endIdx = $raw.LastIndexOf(']')
         if ($startIdx -ge 0 -and $endIdx -ge $startIdx) {
             $jsonStr = $raw.Substring($startIdx, $endIdx - $startIdx + 1)
@@ -281,12 +283,6 @@ function Wait-EpmHealthy {
         $webApp = $apps | Where-Object { $_.name -eq 'epm-web' }
         $pm2Ok = ($null -ne $serverApp -and $serverApp.status -eq 'online' -and $null -ne $webApp -and $webApp.status -eq 'online')
 
-        # PM2 jlist からの取得が空配列等で判定できない場合のフォールバック
-        # API と WebPort が通信可能であれば、実質的に正常稼働とみなす
-        if (-not $pm2Ok -and ($apps.Count -eq 0 -or $null -eq $apps) -and $apiOk -and $webOk) {
-            $pm2Ok = $true
-        }
-
         # (c) Webポート (5173) 接続確認
         $webOk = $false
         $tcp = New-Object System.Net.Sockets.TcpClient
@@ -301,6 +297,12 @@ function Wait-EpmHealthy {
             $webOk = $false
         } finally {
             $tcp.Close()
+        }
+
+        # PM2 jlist からの取得が空配列等で判定できない場合のフォールバック
+        # API と WebPort の両方で通信可能であれば、実質的に正常稼働とみなす
+        if (-not $pm2Ok -and ($apps.Count -eq 0 -or $null -eq $apps) -and $apiOk -and $webOk) {
+            $pm2Ok = $true
         }
 
         if ($apiOk -and $pm2Ok -and $webOk) {
