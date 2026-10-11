@@ -205,4 +205,46 @@ test('Windows スクリプト静的検査 (S-1 〜 S-8)', async (t) => {
         assert.match(gitignore, /client\/dist\.prev\//);
         assert.match(gitignore, /logs\//);
     });
+
+    await t.test('S-9: PM2個別操作バッチ (pm2-start, pm2-stop, pm2-restart) の検証', () => {
+        const expected = [
+            { name: 'pm2-start.bat', cmd: 'pm2 start' },
+            { name: 'pm2-stop.bat', cmd: 'pm2 stop' },
+            { name: 'pm2-restart.bat', cmd: 'pm2 restart' }
+        ];
+
+        for (const item of expected) {
+            const filePath = path.join(scriptsDir, item.name);
+            assert.ok(fs.existsSync(filePath), `${item.name} が存在すること`);
+
+            const buf = fs.readFileSync(filePath);
+            // BOM なしチェック (先頭3バイトが EF BB BF でないこと)
+            const hasBom = buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf;
+            assert.equal(hasBom, false, `${item.name} は BOM なしであること`);
+
+            // 単独 LF なし（CRLF）チェック
+            let hasAloneLf = false;
+            for (let i = 0; i < buf.length; i++) {
+                if (buf[i] === 0x0a) {
+                    if (i === 0 || buf[i - 1] !== 0x0d) {
+                        hasAloneLf = true;
+                        break;
+                    }
+                }
+            }
+            assert.equal(hasAloneLf, false, `${item.name} は CRLF 改行であること`);
+
+            const content = buf.toString('utf8');
+            assert.match(content, /ecosystem\.config\.js/, `${item.name} は ecosystem.config.js を指定していること`);
+            assert.match(content, new RegExp(item.cmd), `${item.name} は "${item.cmd}" を含んでいること`);
+        }
+    });
+
+    await t.test('S-10: client/vite.config.js に preview.proxy 設定が含まれていること', () => {
+        const viteConfigPath = path.join(repoRoot, 'client/vite.config.js');
+        const content = fs.readFileSync(viteConfigPath, 'utf8');
+        assert.match(content, /preview:\s*\{/, 'preview ブロックが定義されていること');
+        assert.match(content, /'\/api':\s*\{\s*target:\s*'http:\/\/localhost:3001'/, 'preview.proxy で /api がプロキシされていること');
+        assert.match(content, /'\/uploads':\s*\{\s*target:\s*'http:\/\/localhost:3001'/, 'preview.proxy で /uploads がプロキシされていること');
+    });
 });
