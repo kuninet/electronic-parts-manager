@@ -134,6 +134,31 @@ async function initDb() {
     await db.run('ALTER TABLE parts ADD COLUMN used_note TEXT');
   } catch (e) { }
 
+  // Migration: AI部品名判定候補テーブル作成
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS ai_name_suggestions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      part_id INTEGER NOT NULL,
+      model TEXT,
+      image_path TEXT,
+      suggested_name TEXT,
+      part_number TEXT,
+      manufacturer TEXT,
+      package TEXT,
+      category_hint TEXT,
+      markings TEXT,
+      description TEXT,
+      confidence REAL,
+      status TEXT DEFAULT 'pending',
+      error_message TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(part_id) REFERENCES parts(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_name_suggestions_part_id ON ai_name_suggestions(part_id);
+    CREATE INDEX IF NOT EXISTS idx_ai_name_suggestions_status ON ai_name_suggestions(status);
+  `);
+
   // Seed some initial data if empty
   const categories = await db.all('SELECT * FROM categories');
   if (categories.length === 0) {
