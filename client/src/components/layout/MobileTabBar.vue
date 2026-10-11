@@ -20,7 +20,12 @@
       <AppIcon name="check" size="20" />
       <span>使用済み</span>
     </button>
-    <a href="#/qr" class="tab-item qr-link">
+    <a
+      href="#/qr"
+      class="tab-item qr-link"
+      :class="{ active: currentView === 'qr' }"
+      :aria-current="currentView === 'qr' ? 'page' : undefined"
+    >
       <AppIcon name="qr" size="20" />
       <span>QR</span>
     </a>
