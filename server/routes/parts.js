@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { getDb } = require('../database');
+const { normalizePartNumber } = require('../utils/partNumber');
 const { resizeImageBuffer, validateImage } = require('../utils/image');
 const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 
@@ -57,8 +58,8 @@ router.get('/', async (req, res) => {
         }
 
         if (search) {
-            query += ` AND (p.name LIKE ? OR p.description LIKE ?)`;
-            params.push(`%${search}%`, `%${search}%`);
+            query += ` AND (p.name LIKE ? OR p.description LIKE ? OR p.part_number LIKE ?)`;
+            params.push(`%${search}%`, `%${search}%`, `%${search}%`);
         }
 
         if (used_for) {
@@ -80,7 +81,11 @@ router.get('/', async (req, res) => {
 
         if (order && order.toUpperCase() === 'ASC') sortOrder = 'ASC';
 
-        query += ` ORDER BY ${sortColumn} ${sortOrder}`;
+        if (sort === 'part_number') {
+            query += ` ORDER BY (p.part_number IS NULL OR p.part_number = ''), p.part_number ${sortOrder}`;
+        } else {
+            query += ` ORDER BY ${sortColumn} ${sortOrder}`;
+        }
 
         const parts = await db.all(query, params);
         res.json(parts);
@@ -117,6 +122,12 @@ router.post('/', upload, async (req, res) => {
         const category_id = (req.body.category_id === '' || req.body.category_id === 'null' || req.body.category_id === undefined) ? null : req.body.category_id;
         const location_id = (req.body.location_id === '' || req.body.location_id === 'null' || req.body.location_id === undefined) ? null : req.body.location_id;
         const tags = req.body.tags ? req.body.tags.split(',').map(t => t.trim()).filter(t => t) : [];
+
+        const partNumberResult = normalizePartNumber(req.body.part_number);
+        if (partNumberResult.error) {
+            return res.status(400).json({ error: partNumberResult.error });
+        }
+        const safePartNumber = partNumberResult.value ?? null;
 
         let image_path = null;
         if (req.files['image']) {
@@ -158,9 +169,9 @@ router.post('/', upload, async (req, res) => {
         }
 
         const result = await db.run(`
-      INSERT INTO parts (name, description, category_id, location_id, quantity, image_path, datasheet_url, datasheet_path)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `, [name, description, category_id, location_id, quantity, image_path, datasheet_url, datasheet_path]);
+      INSERT INTO parts (name, description, category_id, location_id, quantity, image_path, datasheet_url, datasheet_path, part_number)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [name, description, category_id, location_id, quantity, image_path, datasheet_url, datasheet_path, safePartNumber]);
 
         const partId = result.lastID;
 
@@ -205,8 +216,18 @@ router.put('/:id', upload, async (req, res) => {
             if (dupLoc) return res.status(409).json({ error: 'このQRコードは保管場所に登録済みです' });
         }
 
+        const partNumberResult = normalizePartNumber(req.body.part_number);
+        if (partNumberResult.error) {
+            return res.status(400).json({ error: partNumberResult.error });
+        }
+
         let query = `UPDATE parts SET name = ?, description = ?, category_id = ?, location_id = ?, quantity = ?, datasheet_url = ?, qr_code = ?, used_at = ?, used_for = ?, used_note = ?, updated_at = CURRENT_TIMESTAMP`;
         const params = [name, description, safeCategoryId, safeLocationId, quantity, datasheet_url, safeQrCode, safeUsedAt, safeUsedFor, safeUsedNote];
+
+        if (partNumberResult.value !== undefined) {
+            query += `, part_number = ?`;
+            params.push(partNumberResult.value);
+        }
 
         // Fetch current file paths to delete old files if necessary
         const currentPart = await db.get('SELECT image_path, datasheet_path FROM parts WHERE id = ?', [id]);
@@ -309,7 +330,7 @@ router.patch('/:id', async (req, res) => {
         const allowedFields = [
             'name', 'description', 'category_id', 'location_id',
             'quantity', 'datasheet_url', 'qr_code', 'used_at',
-            'used_for', 'used_note'
+            'used_for', 'used_note', 'part_number'
         ];
         const updates = [];
         const params = [];
@@ -317,6 +338,13 @@ router.patch('/:id', async (req, res) => {
         for (const field of allowedFields) {
             if (req.body[field] !== undefined) {
                 let val = req.body[field];
+                if (field === 'part_number') {
+                    const pnResult = normalizePartNumber(val);
+                    if (pnResult.error) {
+                        return res.status(400).json({ error: pnResult.error });
+                    }
+                    val = pnResult.value;
+                }
                 if ((field === 'category_id' || field === 'location_id' || field === 'used_at' || field === 'used_for' || field === 'used_note') && (val === '' || val === 'null')) {
                     val = null;
                 }

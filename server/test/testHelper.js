@@ -42,6 +42,7 @@ async function createTestDb() {
       datasheet_url TEXT,
       datasheet_path TEXT,
       qr_code TEXT,
+      part_number TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       deleted_at DATETIME DEFAULT NULL,

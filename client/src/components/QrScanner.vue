@@ -16,7 +16,7 @@ const locationImage = ref(null);
 const locationImagePreview = ref(null);
 
 // 部品登録フォーム
-const partForm = ref({ name: '', description: '', quantity: 1 });
+const partForm = ref({ name: '', part_number: '', description: '', quantity: 1 });
 const partImage = ref(null);
 const partImagePreview = ref(null);
 const registeringPart = ref(false);
@@ -260,7 +260,7 @@ const handlePartScan = async (qrCode) => {
             currentMode.value = 'menu';
         } else {
             // 未登録 → 登録フォーム
-            partForm.value = { name: '', description: '', quantity: 1 };
+            partForm.value = { name: '', part_number: '', description: '', quantity: 1 };
             partImage.value = null;
             partImagePreview.value = null;
             selectedCategoryId.value = '';
@@ -285,6 +285,7 @@ const registerPart = async () => {
         const formData = new FormData();
         formData.append('qr_code', scannedQrCode.value);
         formData.append('name', resolvedName);
+        formData.append('part_number', partForm.value.part_number || '');
         formData.append('description', partForm.value.description);
         formData.append('quantity', partForm.value.quantity);
         if (selectedCategoryId.value) formData.append('category_id', selectedCategoryId.value);
@@ -607,6 +608,11 @@ onUnmounted(() => {
       </div>
 
       <div class="form-group">
+        <label>型番</label>
+        <input v-model="partForm.part_number" type="text" placeholder="例: NE555P（任意）" maxlength="100" class="form-input" />
+      </div>
+
+      <div class="form-group">
         <label>説明</label>
         <input v-model="partForm.description" type="text" placeholder="例: 1/4W カーボン抵抗" class="form-input" />
       </div>
@@ -670,6 +676,7 @@ onUnmounted(() => {
         <ul class="parts-list-simple">
           <li v-for="part in locationInfo.parts" :key="part.id">
             <span class="part-name">{{ part.name }}</span>
+            <span v-if="part.part_number" class="part-number-badge" style="margin-left: 0.3rem; font-size: 0.75rem;">🔖 {{ part.part_number }}</span>
             <span v-if="part.quantity" class="part-qty">×{{ part.quantity }}</span>
           </li>
         </ul>
@@ -690,6 +697,7 @@ onUnmounted(() => {
         <img v-if="partInfo.image_path" :src="partInfo.image_path" class="info-image" />
         <div class="info-details">
           <p class="info-name">{{ partInfo.name }}</p>
+          <p v-if="partInfo.part_number" class="info-pn" style="font-family: monospace; color: #c084fc;">🔖 型番: {{ partInfo.part_number }}</p>
           <p class="info-qr">QR: {{ partInfo.qr_code }}</p>
           <p v-if="partInfo.description" class="info-desc">{{ partInfo.description }}</p>
           <p v-if="partInfo.quantity">数量: {{ partInfo.quantity }}</p>

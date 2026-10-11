@@ -15,6 +15,7 @@ erDiagram
     parts {
         integer id PK
         string name
+        string part_number "型番 (最大100文字)"
         string description
         integer category_id FK
         integer location_id FK
@@ -22,6 +23,7 @@ erDiagram
         string image_path
         string datasheet_url
         string datasheet_path
+        string qr_code
         datetime created_at
         datetime updated_at
         datetime deleted_at "論理削除用"
@@ -57,6 +59,7 @@ erDiagram
 | --- | --- | --- |
 | `id` | INTEGER | 主キー (AUTOINCREMENT) |
 | `name` | TEXT | パーツ名 (必須) |
+| `part_number` | TEXT | 型番 (任意、最大100文字、インデックス `idx_parts_part_number` 設定。完全一致・前方一致や `ORDER BY part_number` ソートに有効。※中間一致検索 `LIKE '%...%'` ではインデックスは使用されません) |
 | `description` | TEXT | 詳細説明 |
 | `category_id` | INTEGER | `categories.id` への外部キー |
 | `location_id` | INTEGER | `locations.id` への外部キー |
@@ -64,6 +67,7 @@ erDiagram
 | `image_path` | TEXT | アップロードされた画像のパス (`/uploads/...`) |
 | `datasheet_url` | TEXT | 外部データシートURL |
 | `datasheet_path` | TEXT | アップロードされたPDFのパス (`/uploads/...`) |
+| `qr_code` | TEXT | 個別QRコード (UNIQUE) |
 | `created_at` | DATETIME | 作成日時 |
 | `updated_at` | DATETIME | 更新日時 |
 | `deleted_at` | DATETIME | 削除日時 (NULLなら有効、日時が入っていればゴミ箱) |

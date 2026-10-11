@@ -281,6 +281,24 @@ test('AI Naming サービスの単体テスト', async (t) => {
     );
   });
 
+  await t.test('applySuggestion で 101文字以上の part_number を渡すと status 400 の例外になること', async () => {
+    const pRes = await db.run("INSERT INTO parts (name, image_path) VALUES ('Part Validation', ?)", [dummyImage.imagePath]);
+    const partId = pRes.lastID;
+    const sRes = await db.run("INSERT INTO ai_name_suggestions (part_id, image_path, suggested_name, status) VALUES (?, ?, '候補名', 'pending')", [partId, dummyImage.imagePath]);
+    const suggestionId = sRes.lastID;
+
+    await assert.rejects(
+      async () => {
+        await applySuggestion(suggestionId, { db, part_number: 'A'.repeat(101) });
+      },
+      (err) => {
+        assert.equal(err.status, 400);
+        assert.match(err.message, /100文字以内で入力してください/);
+        return true;
+      }
+    );
+  });
+
   await t.test('rejectSuggestion で status が rejected に更新されること', async () => {
     const sRes = await db.run(
       "INSERT INTO ai_name_suggestions (part_id, suggested_name, status) VALUES (1, '却下対象候補', 'pending')"

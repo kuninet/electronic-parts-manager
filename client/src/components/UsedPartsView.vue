@@ -99,6 +99,7 @@ defineExpose({ fetchParts });
             <span class="used-badge">使用済み</span>
           </div>
 
+          <p v-if="part.part_number" class="part-number-badge" title="型番">🔖 {{ part.part_number }}</p>
           <p v-if="part.qr_code" class="qr-code-badge">📱 {{ part.qr_code }}</p>
           <p class="used-meta"><strong>使用先:</strong> {{ part.used_for || '-' }}</p>
           <p class="used-meta"><strong>使用日時:</strong> {{ formatDateTime(part.used_at) }}</p>
@@ -236,6 +237,20 @@ defineExpose({ fetchParts });
   padding: 2rem;
   text-align: center;
   color: var(--text-secondary);
+}
+
+.part-number-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  font-family: monospace;
+  background: rgba(147, 51, 234, 0.15);
+  color: #c084fc;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid rgba(147, 51, 234, 0.3);
+  width: fit-content;
 }
 
 .qr-code-badge {

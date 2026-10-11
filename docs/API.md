@@ -11,12 +11,12 @@
 #### `GET /api/parts`
 パーツ一覧を取得します。
 -   **クエリパラメータ**:
-    -   `search`: 検索キーワード (名前または説明)
+    -   `search`: 検索キーワード (名前、型番、または説明)
     -   `category_id`: カテゴリIDでフィルタ
     -   `location_id`: 保管場所IDでフィルタ
     -   `tag_id`: タグIDでフィルタ
     -   `status`: `'trash'` を指定するとゴミ箱の中身を取得。指定なしで通常パーツ。
-    -   `sort`: ソートキー (`name`, `category`, `location`, `quantity`, `created_at`)
+    -   `sort`: ソートキー (`name`, `category`, `location`, `quantity`, `created_at`, `part_number`, `used_for`, `used_at`)
     -   `order`: 並び順 (`ASC`, `DESC`)
 
 #### `GET /api/parts/:id`
@@ -27,9 +27,10 @@
 -   **Content-Type**: `multipart/form-data`
 -   **Body**:
     -   `name` (必須)
+    -   `part_number`: 型番（任意、最大100文字）
     -   `description`
-    -   `category_id` (必須)
-    -   `location_id` (必須)
+    -   `category_id` (任意)
+    -   `location_id` (任意)
     -   `quantity`
     -   `tags`: カンマ区切りの文字列
     -   `image`: 画像ファイル
@@ -39,7 +40,12 @@
 #### `PUT /api/parts/:id`
 パーツ情報を更新します。
 -   **Content-Type**: `multipart/form-data`
--   **Body**: `POST /api/parts` と同様
+-   **Body**: `POST /api/parts` と同様（※`part_number` が未送信の場合は既存値を保持、空文字の場合はNULLクリア）
+
+#### `PATCH /api/parts/:id`
+指定したフィールドのみを部分更新します。
+-   **Content-Type**: `application/json`
+-   **Body**: 更新したいフィールド（`name`, `part_number`, `description`, `category_id`, `location_id`, `quantity`, `datasheet_url`, `qr_code`, `tags` など）
 
 #### `DELETE /api/parts/:id`
 パーツを論理削除（ゴミ箱へ移動）します。

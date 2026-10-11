@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted, onUnmounted, watch, computed } from 'vue';
 import api from '../api';
 import { isAutoNamed } from '../constants';
+import { splitByQuery } from '../utils/highlight';
 import TagInput from './TagInput.vue';
 import BulkEditModal from './BulkEditModal.vue';
 import MiniQrScanner from './MiniQrScanner.vue';
@@ -462,6 +463,7 @@ const startInlineEdit = (part) => {
     editingPartId.value = part.id;
     editingForm.value = {
         name: part.name,
+        part_number: part.part_number || '',
         category_id: part.category_id || '',
         location_id: part.location_id || '',
         quantity: part.quantity || 0,
@@ -487,6 +489,7 @@ const saveInlineEdit = async (part) => {
         formData.append('tags', editingForm.value.tags.join(','));
         
         // Preserve other fields
+        formData.append('part_number', part.part_number || '');
         formData.append('description', part.description || '');
         formData.append('datasheet_url', part.datasheet_url || '');
 
@@ -528,6 +531,7 @@ const quickUpdatePart = async (part, changes) => {
         const merged = { ...part, ...changes };
         
         formData.append('name', merged.name);
+        formData.append('part_number', merged.part_number || '');
         formData.append('quantity', merged.quantity);
         formData.append('category_id', merged.category_id || '');
         formData.append('location_id', merged.location_id || '');
@@ -598,7 +602,7 @@ defineExpose({ fetchParts });
       <input 
         v-model="searchQuery" 
         type="text" 
-        placeholder="パーツ名や説明で検索..." 
+        placeholder="パーツ名・型番・説明で検索..." 
         class="search-input"
       />
       
@@ -627,6 +631,7 @@ defineExpose({ fetchParts });
          <select v-model="sortField" class="filter-select sort-select">
             <option value="id">登録順</option>
             <option value="name">名前順</option>
+            <option value="part_number">型番順</option>
             <option value="category">カテゴリ順</option>
             <option value="location">保管場所順</option>
             <option value="quantity">個数順</option>
@@ -901,8 +906,15 @@ defineExpose({ fetchParts });
                     />
                 </div>
                 <h3 v-else @click.stop="startNameEdit(part)" class="editable-text" title="クリックで編集">
-                    {{ part.name }}
+                    <template v-for="(seg, i) in splitByQuery(part.name, searchQuery)" :key="i">
+                        <mark v-if="seg.match">{{ seg.text }}</mark><template v-else>{{ seg.text }}</template>
+                    </template>
                 </h3>
+                <p v-if="part.part_number" class="part-number-badge" title="型番">
+                    🔖 <template v-for="(seg, i) in splitByQuery(part.part_number, searchQuery)" :key="i">
+                        <mark v-if="seg.match">{{ seg.text }}</mark><template v-else>{{ seg.text }}</template>
+                    </template>
+                </p>
                 <p v-if="part.qr_code" class="qr-code-badge" title="QRコード">
                     📱 {{ part.qr_code }}
                 </p>
@@ -1033,13 +1045,26 @@ defineExpose({ fetchParts });
               <td class="col-name">
                 <div class="name-cell" v-if="editingPartId !== part.id">
                   <div class="name-row">
-                    <span class="part-name">{{ part.name }}</span>
+                    <span class="part-name">
+                      <template v-for="(seg, i) in splitByQuery(part.name, searchQuery)" :key="i">
+                        <mark v-if="seg.match">{{ seg.text }}</mark><template v-else>{{ seg.text }}</template>
+                      </template>
+                    </span>
+                    <span v-if="part.part_number" class="part-number-badge list-part-number" title="型番">
+                      🔖 <template v-for="(seg, i) in splitByQuery(part.part_number, searchQuery)" :key="i">
+                        <mark v-if="seg.match">{{ seg.text }}</mark><template v-else>{{ seg.text }}</template>
+                      </template>
+                    </span>
                     <span v-if="part.qr_code" class="qr-code-badge list-qr">📱 {{ part.qr_code }}</span>
                   </div>
                   <div class="tags-container" v-if="part.tags">
                        <span v-for="tag in part.tags.split(',')" :key="tag" class="small-tag-pill">{{ tag }}</span>
                   </div>
-                  <span class="part-desc" v-if="part.description">{{ part.description }}</span>
+                  <span class="part-desc" v-if="part.description">
+                    <template v-for="(seg, i) in splitByQuery(part.description, searchQuery)" :key="i">
+                      <mark v-if="seg.match">{{ seg.text }}</mark><template v-else>{{ seg.text }}</template>
+                    </template>
+                  </span>
                 </div>
                 <!-- Edit Mode: Name -->
                 <div class="name-cell" v-else @click.stop>
@@ -1250,6 +1275,25 @@ select option {
   word-break: break-all;
 }
 
+.part-number-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.75rem;
+    font-family: monospace;
+    background: rgba(147, 51, 234, 0.15);
+    color: #c084fc;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid rgba(147, 51, 234, 0.3);
+    width: fit-content;
+    white-space: nowrap;
+}
+
+.list-part-number {
+  display: inline-flex;
+}
+
 .qr-code-badge {
     display: inline-flex;
     align-items: center;
@@ -1267,6 +1311,13 @@ select option {
 
 .list-qr {
   display: inline-flex;
+}
+
+mark {
+  background: rgba(250, 204, 21, 0.4);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
 }
 
 .name-row {
