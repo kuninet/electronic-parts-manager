@@ -6,17 +6,25 @@
   >
     <!-- 写真とステータスバッジ -->
     <div class="photo-wrap">
-      <img
-        v-if="visible && part.image_path"
-        :src="part.image_path"
-        :alt="part.name"
-        loading="lazy"
-        decoding="async"
-        class="photo-img"
-      />
-      <div v-else class="photo-placeholder" aria-hidden="true">
-        <AppIcon name="chip" size="40" />
-      </div>
+      <button
+        type="button"
+        class="photo-btn"
+        :class="{ 'no-photo': !hasPreviewablePhoto(part) }"
+        :aria-label="photoAriaLabel"
+        @click="onPhotoClick"
+      >
+        <img
+          v-if="visible && part.image_path"
+          :src="part.image_path"
+          alt=""
+          loading="lazy"
+          decoding="async"
+          class="photo-img"
+        />
+        <div v-else class="photo-placeholder" aria-hidden="true">
+          <AppIcon name="chip" size="40" />
+        </div>
+      </button>
 
       <!-- チェックボックス（ホバー時または選択モード時に表示） -->
       <label class="select-label" :class="{ 'always-visible': selectionMode }">
@@ -110,6 +118,7 @@ import { LOW_STOCK_THRESHOLD } from '../../constants';
 import { useQuantitySync } from '../../composables/useQuantitySync';
 import { usePartsFilters } from '../../composables/usePartsFilters';
 import { splitByQuery } from '../../utils/highlight';
+import { hasPreviewablePhoto } from '../../utils/photoPreview';
 import AppIcon from '../ui/AppIcon.vue';
 import QuantityStepper from './QuantityStepper.vue';
 
@@ -132,7 +141,18 @@ const props = defineProps({
   }
 });
 
-defineEmits(['edit', 'toggle-select', 'quick-update']);
+const emit = defineEmits(['edit', 'toggle-select', 'quick-update', 'preview']);
+
+const onPhotoClick = () => {
+  if (hasPreviewablePhoto(props.part)) emit('preview');
+  else emit('edit');
+};
+
+const photoAriaLabel = computed(() => {
+  return hasPreviewablePhoto(props.part)
+    ? `${props.part.name} の写真を拡大`
+    : `${props.part.name} を編集`;
+});
 
 const qtySync = useQuantitySync();
 const filters = usePartsFilters();
@@ -207,6 +227,29 @@ const hl = (text) => {
   overflow: hidden;
 }
 
+.photo-btn {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: zoom-in;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.photo-btn.no-photo {
+  cursor: pointer;
+}
+
+.photo-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .photo-img {
   width: 100%;
   height: 100%;
@@ -262,6 +305,7 @@ const hl = (text) => {
   gap: var(--space-1);
   font-size: var(--fs-11);
   font-weight: 500;
+  pointer-events: none;
 }
 
 .status-dot {

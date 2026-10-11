@@ -16,11 +16,17 @@
       />
     </td>
     <td class="col-thumb">
-      <div class="thumb-box-40">
+      <button
+        type="button"
+        class="thumb-btn thumb-box-40"
+        :class="{ 'no-photo': !hasPreviewablePhoto(part) }"
+        :aria-label="photoAriaLabel"
+        @click="onPhotoClick"
+      >
         <img
           v-if="visible && part.image_path"
           :src="part.image_path"
-          :alt="part.name"
+          alt=""
           loading="lazy"
           decoding="async"
           class="thumb-img"
@@ -28,7 +34,7 @@
         <div v-else class="thumb-placeholder">
           <AppIcon name="chip" size="20" />
         </div>
-      </div>
+      </button>
     </td>
     <td class="col-name">
       <button type="button" class="row-title-btn" @click="$emit('edit')">
@@ -73,11 +79,17 @@
     @click="$emit('edit')"
   >
     <div class="stack-thumb-wrap">
-      <div class="thumb-box-52">
+      <button
+        type="button"
+        class="thumb-btn thumb-box-52"
+        :class="{ 'no-photo': !hasPreviewablePhoto(part) }"
+        :aria-label="photoAriaLabel"
+        @click.stop="onPhotoClick"
+      >
         <img
           v-if="visible && part.image_path"
           :src="part.image_path"
-          :alt="part.name"
+          alt=""
           loading="lazy"
           decoding="async"
           class="thumb-img"
@@ -85,7 +97,7 @@
         <div v-else class="thumb-placeholder">
           <AppIcon name="chip" size="28" />
         </div>
-      </div>
+      </button>
     </div>
 
     <div class="stack-body">
@@ -113,6 +125,7 @@
 import { computed } from 'vue';
 import { LOW_STOCK_THRESHOLD } from '../../constants';
 import { useQuantitySync } from '../../composables/useQuantitySync';
+import { hasPreviewablePhoto } from '../../utils/photoPreview';
 import AppIcon from '../ui/AppIcon.vue';
 import QuantityStepper from './QuantityStepper.vue';
 
@@ -136,7 +149,18 @@ const props = defineProps({
   }
 });
 
-defineEmits(['edit', 'toggle-select']);
+const emit = defineEmits(['edit', 'toggle-select', 'preview']);
+
+const onPhotoClick = () => {
+  if (hasPreviewablePhoto(props.part)) emit('preview');
+  else emit('edit');
+};
+
+const photoAriaLabel = computed(() => {
+  return hasPreviewablePhoto(props.part)
+    ? `${props.part.name} の写真を拡大`
+    : `${props.part.name} を編集`;
+});
 
 const qtySync = useQuantitySync();
 
@@ -183,6 +207,21 @@ const statusLabel = computed(() => {
 .select-checkbox {
   cursor: pointer;
   accent-color: var(--accent);
+}
+
+.thumb-btn {
+  border: 0;
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.thumb-btn.no-photo {
+  cursor: pointer;
+}
+
+.thumb-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .thumb-box-40 {

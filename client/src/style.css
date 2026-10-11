@@ -38,6 +38,14 @@
   --sidebar-w: 240px;
   --topbar-h: 52px;
   --tabbar-h: 64px;
+
+  /* 写真ライトボックス（テーマ非依存の暗いクローム） */
+  --lightbox-overlay: rgba(8, 9, 12, 0.88);
+  --lightbox-chrome: rgba(21, 23, 28, 0.72);
+  --lightbox-border: rgba(255, 255, 255, 0.08);
+  --lightbox-fg: #e8eaed;
+  --lightbox-fg-2: #a8aebb;
+  --lightbox-btn-hover: rgba(255, 255, 255, 0.08);
 }
 
 /* ========================================================
