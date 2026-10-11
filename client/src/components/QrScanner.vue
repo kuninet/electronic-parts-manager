@@ -46,6 +46,7 @@ const printCount = ref(44);
 
 // スキャナーインスタンス
 let html5QrCode = null;
+let disposed = false; // アンマウント・停止・再起動のあとに start() が完了した場合にカメラを止めるため
 
 const createUnnamedPartLabel = () => {
     const now = new Date();
@@ -101,7 +102,8 @@ const startScanner = async () => {
         // DOMの中身もクリア（html5-qrcodeが前のvideoを残すことがある）
         readerEl.innerHTML = '';
 
-        html5QrCode = new Html5Qrcode('qr-reader');
+        const instance = new Html5Qrcode('qr-reader');
+        html5QrCode = instance;
         scannerActive.value = true;
 
         // カメラ設定（iOS Safari対応）
@@ -114,7 +116,7 @@ const startScanner = async () => {
 
         // まずbackカメラを試行、失敗したらカメラID指定で再試行
         try {
-            await html5QrCode.start(
+            await instance.start(
                 { facingMode: 'environment' },
                 config,
                 onScanSuccess,
@@ -132,7 +134,7 @@ const startScanner = async () => {
                         /back|rear|environment/i.test(c.label)
                     ) || cameras[cameras.length - 1]; // 見つからなければ最後のカメラ（通常は背面）
 
-                    await html5QrCode.start(
+                    await instance.start(
                         backCamera.id,
                         config,
                         onScanSuccess,
@@ -144,6 +146,12 @@ const startScanner = async () => {
             } catch (retryErr) {
                 throw retryErr;
             }
+        }
+
+        // 起動が終わった時点で、自分がもう現役のインスタンスでなければ止める
+        if (disposed || html5QrCode !== instance) {
+            try { await instance.stop(); } catch (e) { }
+            return;
         }
     } catch (err) {
         console.error('カメラ起動エラー:', err);
@@ -521,6 +529,7 @@ const getImageUrl = (imagePath) => {
 
 // クリーンアップ
 onUnmounted(() => {
+    disposed = true;
     stopScanner();
     if (locationImagePreview.value) {
         URL.revokeObjectURL(locationImagePreview.value);
@@ -542,7 +551,7 @@ onUnmounted(() => {
           <span class="icon">📦</span>
           <span class="title-gradient">QR 入出庫管理</span>
         </h1>
-        <a href="/" class="btn-back">← メイン画面</a>
+        <a href="#/" class="btn-back">← メイン画面</a>
       </div>
     </header>
 
@@ -804,7 +813,9 @@ onUnmounted(() => {
 <style scoped>
 .qr-app {
     min-height: 100vh;
+    min-height: 100dvh;
     padding: 0.5rem;
+    padding-top: calc(0.5rem + env(safe-area-inset-top));
     max-width: 480px;
     margin: 0 auto;
 }
@@ -1182,5 +1193,11 @@ onUnmounted(() => {
     border-radius: var(--radius-md);
     font-size: 0.85rem;
     margin-top: 0.5rem;
+}
+
+@media (max-width: 768px) {
+    .qr-app {
+        padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 0.5rem);
+    }
 }
 </style>

@@ -69,13 +69,24 @@ flowchart TD
         CameraFab[CameraFab<br/>右下固定カメラボタン]
         TabBar[MobileTabBar: 64px<br/>パーツ / 保管庫 / 使用済 / QR / その他]
         MoreSheet[MobileMoreSheet<br/>ボトムシートメニュー]
+        QrScanner[QrScanner<br/>QRスキャン / 入出庫画面]
 
         MobileTopBar --> MobileFilter --> MobileList
         MobileList -. 重なり防止 .-> CameraFab
         MobileList -. 重なり防止 .-> TabBar
         TabBar -. タップ .-> MoreSheet
+        TabBar -. タップ (QR画面でも常時表示) .-> QrScanner
     end
 ```
+
+#### 画面切り替えとナビゲーション
+- **ハッシュルーティング**: `#/qr` で QR 画面（`QrScanner`）、それ以外（`#/` 等）で通常画面（`.app-shell`）を切り替えます。
+- **QR 画面からの復帰動線**: QR 画面でも `MobileTabBar` が常時表示され、他タブ選択時に `leaveQrPage()` を経由して通常画面へ復帰します。また、ヘッダーの「← メイン画面」リンクは `href="#/"` による再読み込み無しの SPA 内遷移です。
+
+#### セーフエリア対応（ノッチ / Dynamic Island / ホームバー）
+- **設計作法**: セーフエリアInsetは CSS の `calc(既存の余白 + env(safe-area-inset-*))` で付与します。
+- **上部余白 (`safe-area-inset-top`)**: 通常画面のトップバー（`.app-topbar`）および QR 画面（`.qr-app`）に付与し、PWA standalone モード（`viewport-fit=cover`）でのステータスバーやノッチとの重なりを防止します。
+- **下部余白 (`safe-area-inset-bottom`)**: タブバー（`MobileTabBar`）、浮動ボタン（`CameraFab`）、ボトムシート（`MobileMoreSheet`）、トースト（`ToastHost`）、および QR 画面のスクロール領域下部（`padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 0.5rem)`）に付与し、ホームインジケーターやタブバーとの被りを防止します。
 
 ---
 

@@ -67,6 +67,23 @@ const switchView = (view) => {
   currentView.value = view;
 };
 
+// QR 画面（#/qr）からメイン画面へ戻る
+const leaveQrPage = () => {
+  if (currentPage.value !== 'qr') return;
+  window.location.hash = '#/';
+  currentPage.value = 'main'; // hashchange を待たずに切り替える
+};
+
+const onTabNavigate = (view) => {
+  leaveQrPage();
+  switchView(view);
+};
+
+const onTabMore = () => {
+  leaveQrPage();
+  showMoreSheet.value = true;
+};
+
 const handleLocationSelect = (id) => {
   filters.locationId.value = String(id);
   switchView('parts');
@@ -258,13 +275,6 @@ const onCameraFileChange = async (event) => {
       </main>
     </div>
 
-    <MobileTabBar
-      class="only-mobile"
-      :current-view="currentView"
-      @navigate="switchView"
-      @more="showMoreSheet = true"
-    />
-
     <CameraFab
       v-if="currentView === 'parts'"
       class="only-mobile"
@@ -330,6 +340,13 @@ const onCameraFileChange = async (event) => {
       @close="showQrGenerator = false"
     />
   </div>
+
+  <MobileTabBar
+    class="only-mobile"
+    :current-view="currentPage === 'qr' ? 'qr' : currentView"
+    @navigate="onTabNavigate"
+    @more="onTabMore"
+  />
 
   <ToastHost />
 </template>
