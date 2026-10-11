@@ -6,7 +6,7 @@ function Initialize-EpmLog {
     $repoRoot = Get-RepoRoot
     $logDir = Join-Path $repoRoot ("logs\{0}" -f $Name)
     if (-not (Test-Path -LiteralPath $logDir)) {
-        New-Item -ItemType Directory -LiteralPath $logDir -Force -ErrorAction Stop | Out-Null
+        New-Item -ItemType Directory -Path $logDir -Force -ErrorAction Stop | Out-Null
     }
     $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
     $logFile = Join-Path $logDir ("{0}-{1}.log" -f $Name, $timestamp)
@@ -97,8 +97,8 @@ function Get-GitOutput {
     if ($code -ne 0) {
         throw ("git {0} が失敗しました (exit {1})" -f ($ArgumentList -join ' '), $code)
     }
-    if ($null -eq $output) { return ,@() }
-    return ,([string[]]$output)
+    if ($null -eq $output) { return }
+    return [string[]]$output
 }
 
 function Get-RepoRoot {
@@ -167,6 +167,11 @@ function Get-EpmPaths {
         $apiPort = [int]$portEnv
     }
 
+    # Web Scheme (VITE_HTTPS) 解決
+    $clientEnvPath = Join-Path $clientDir '.env'
+    $viteHttps = Read-DotEnvValue -Path $clientEnvPath -Key 'VITE_HTTPS'
+    $webScheme = if ($viteHttps -eq 'false') { 'http' } else { 'https' }
+
     return [pscustomobject]@{
         ServerDir  = $serverDir
         ClientDir  = $clientDir
@@ -174,6 +179,7 @@ function Get-EpmPaths {
         UploadDir  = $uploadDir
         ApiPort    = $apiPort
         WebPort    = 5173
+        WebScheme  = $webScheme
         Ecosystem  = (Join-Path $RepoRoot 'ecosystem.config.js')
         BackupDir  = (Join-Path $serverDir 'backups\db')
     }
@@ -218,26 +224,45 @@ function Test-Prerequisites {
 }
 
 function Get-Pm2Apps {
+    $libDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+    if (-not $libDir -and $script:RepoRoot) { $libDir = Join-Path $script:RepoRoot 'scripts\lib' }
+    $helperScript = Join-Path $libDir 'pm2-apps.js'
+
+    if (-not (Test-Path -LiteralPath $helperScript)) {
+        throw ("PM2 状態取得スクリプトが見つかりません: {0}" -f $helperScript)
+    }
+
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
-        $prevPref = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $jlistOutput = pm2 jlist 2>$null
+        $lines = & node $helperScript 2>&1
+        $code = $LASTEXITCODE
+    } finally {
         $ErrorActionPreference = $prevPref
-        if (-not $jlistOutput) { return @() }
-        $jsonLine = $jlistOutput | Where-Object { $_ -match '^\s*\[\s*(\{|\])' } | Select-Object -Last 1
-        if (-not $jsonLine) { return @() }
-        $parsed = $jsonLine | ConvertFrom-Json
-        $result = @()
-        foreach ($app in $parsed) {
+    }
+
+    if ($null -eq $code) { $code = 0 }
+    if ($code -ne 0) {
+        $errText = ($lines | Where-Object { $_ -is [string] -or $_ -is [System.Management.Automation.ErrorRecord] }) -join "`n"
+        throw ("PM2 状態取得失敗 (exit {0}): {1}" -f $code, $errText)
+    }
+
+    $result = @()
+    if ($lines) {
+        $validLines = $lines | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }
+        foreach ($line in $validLines) {
+            $lineStr = [string]$line
+            if (-not $lineStr.Trim()) { continue }
+            $parts = $lineStr -split "`t", 2
+            $appName = $parts[0]
+            $appStatus = if ($parts.Length -gt 1) { $parts[1] } else { '' }
             $result += [pscustomobject]@{
-                name   = $app.name
-                status = $app.pm2_env.status
+                name   = $appName
+                status = $appStatus
             }
         }
-        return $result
-    } catch {
-        return @()
     }
+    return ,([object[]]$result)
 }
 
 function Stop-EpmApps {
@@ -274,25 +299,54 @@ function Wait-EpmHealthy {
         }
 
         # (b) PM2 online 確認
-        $apps = Get-Pm2Apps
-        $serverApp = $apps | Where-Object { $_.name -eq 'epm-server' }
-        $webApp = $apps | Where-Object { $_.name -eq 'epm-web' }
-        $pm2Ok = ($null -ne $serverApp -and $serverApp.status -eq 'online' -and $null -ne $webApp -and $webApp.status -eq 'online')
-
-        # (c) Webポート (5173) 接続確認
-        $webOk = $false
-        $tcp = New-Object System.Net.Sockets.TcpClient
+        $pm2Ok = $false
         try {
-            $ar = $tcp.BeginConnect('127.0.0.1', $Paths.WebPort, $null, $null)
-            $wait = $ar.AsyncWaitHandle.WaitOne(1000, $false)
-            if ($wait -and $tcp.Connected) {
-                $tcp.EndConnect($ar)
-                $webOk = $true
-            }
+            $apps = Get-Pm2Apps
+            $serverApp = $apps | Where-Object { $_.name -eq 'epm-server' }
+            $webApp = $apps | Where-Object { $_.name -eq 'epm-web' }
+            $pm2Ok = ($null -ne $serverApp -and $serverApp.status -eq 'online' -and $null -ne $webApp -and $webApp.status -eq 'online')
         } catch {
-            $webOk = $false
-        } finally {
-            $tcp.Close()
+            $pm2Ok = $false
+        }
+
+        # (c) Webポート (5173) 疎通確認（プロキシ経由 API 疎通確認、curl 不可時は TCP 疎通にフォールバック）
+        $webOk = $false
+        $hasCurl = $null -ne (Get-Command 'curl.exe' -ErrorAction SilentlyContinue)
+        if ($hasCurl) {
+            try {
+                $scheme = if ($Paths.WebScheme) { $Paths.WebScheme } else { 'https' }
+                $proxyHealthUrl = ("{0}://127.0.0.1:{1}/api/health" -f $scheme, $Paths.WebPort)
+                $curlOut = & curl.exe -k -s -m 3 $proxyHealthUrl 2>$null
+                if ($LASTEXITCODE -eq 0 -and $curlOut -match '"status"\s*:\s*"ok"') {
+                    $webOk = $true
+                } elseif ($scheme -eq 'https') {
+                    # https で応答がない場合、http も試すフォールバック
+                    $httpProxyUrl = ("http://127.0.0.1:{0}/api/health" -f $Paths.WebPort)
+                    $curlOutHttp = & curl.exe -s -m 3 $httpProxyUrl 2>$null
+                    if ($LASTEXITCODE -eq 0 -and $curlOutHttp -match '"status"\s*:\s*"ok"') {
+                        $webOk = $true
+                    }
+                }
+            } catch {
+                $webOk = $false
+            }
+        }
+
+        # curl.exe が利用できない場合は TCP 接続にフォールバック
+        if (-not $hasCurl) {
+            $tcp = New-Object System.Net.Sockets.TcpClient
+            try {
+                $ar = $tcp.BeginConnect('127.0.0.1', $Paths.WebPort, $null, $null)
+                $wait = $ar.AsyncWaitHandle.WaitOne(1000, $false)
+                if ($wait -and $tcp.Connected) {
+                    $tcp.EndConnect($ar)
+                    $webOk = $true
+                }
+            } catch {
+                $webOk = $false
+            } finally {
+                $tcp.Close()
+            }
         }
 
         if ($apiOk -and $pm2Ok -and $webOk) {

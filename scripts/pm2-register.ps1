@@ -30,43 +30,48 @@ if (-not (Test-NodeVersion)) {
 
 $paths = Get-EpmPaths -RepoRoot $script:RepoRoot
 
-# 2. 依存関係のインストール（未インストールの場合のみ）
+try {
+    $currentApps = Get-Pm2Apps
+} catch {
+    Write-EpmLog -Level ERR -Message ("PM2 の状態を取得できませんでした: {0}" -f $_.Exception.Message)
+    exit 1
+}
+$serverApp = $currentApps | Where-Object { $_.name -eq 'epm-server' }
+$webApp = $currentApps | Where-Object { $_.name -eq 'epm-web' }
+if (($null -ne $serverApp -and $serverApp.status -eq 'online') -or ($null -ne $webApp -and $webApp.status -eq 'online')) {
+    Write-EpmLog -Level STEP -Message "既存の EPM プロセスが稼働中のため、安全に停止します..."
+    Stop-EpmApps -Ecosystem $paths.Ecosystem
+}
+
+# 3. ポート競合確認 (別プロセスの使用を検出)
+if (-not (Test-PortFree -Port $paths.WebPort)) {
+    Write-EpmLog -Level ERR -Message ("ポート {0} が別プロセスで使用中です。start_app.bat 等のウィンドウをすべて閉じてから再実行してください。" -f $paths.WebPort)
+    exit 1
+}
+if (-not (Test-PortFree -Port $paths.ApiPort)) {
+    Write-EpmLog -Level ERR -Message ("ポート {0} が別プロセスで使用中です。start_app.bat 等のウィンドウをすべて閉じてから再実行してください。" -f $paths.ApiPort)
+    exit 1
+}
+
+# 4. 依存関係のインストール（登録時は確実に最新の依存関係を整合）
 $dirs = @($paths.ServerDir, $paths.ClientDir, $script:RepoRoot)
 foreach ($d in $dirs) {
-    $nm = Join-Path $d 'node_modules'
-    if (-not (Test-Path -LiteralPath $nm)) {
-        Write-EpmLog -Level STEP -Message ("依存関係が見つからないためインストールします: {0} (npm ci)..." -f $d)
+    if (Test-Path -LiteralPath (Join-Path $d 'package-lock.json')) {
+        Write-EpmLog -Level STEP -Message ("依存関係をインストール中: {0} (npm ci)..." -f $d)
         $null = Invoke-Native -FilePath 'npm' -ArgumentList @('ci') -WorkingDirectory $d
     }
 }
 
-# 3. 初回ビルドの実行（dist が無い場合）
-$distDir = Join-Path $paths.ClientDir 'dist'
-if (-not (Test-Path -LiteralPath $distDir)) {
-    Write-EpmLog -Level STEP -Message "フロントエンドの初期ビルドを実行します..."
-    Invoke-ClientBuild -ClientDir $paths.ClientDir
-    $null = Switch-ClientDist -ClientDir $paths.ClientDir
-}
+# 5. フロントエンドのビルド実行（登録時は確実に最新成果物を配置）
+Write-EpmLog -Level STEP -Message "フロントエンドのビルドを実行します..."
+Invoke-ClientBuild -ClientDir $paths.ClientDir
+$null = Switch-ClientDist -ClientDir $paths.ClientDir
 
-# 4. ポート確認
-$currentApps = Get-Pm2Apps
-$serverApp = $currentApps | Where-Object { $_.name -eq 'epm-server' }
-$webApp = $currentApps | Where-Object { $_.name -eq 'epm-web' }
-
-if (($null -eq $webApp -or $webApp.status -ne 'online') -and -not (Test-PortFree -Port $paths.WebPort)) {
-    Write-EpmLog -Level ERR -Message ("ポート {0} が使用中です。start_app.bat 等のウィンドウをすべて閉じてから再実行してください。" -f $paths.WebPort)
-    exit 1
-}
-if (($null -eq $serverApp -or $serverApp.status -ne 'online') -and -not (Test-PortFree -Port $paths.ApiPort)) {
-    Write-EpmLog -Level ERR -Message ("ポート {0} が使用中です。start_app.bat 等のウィンドウをすべて閉じてから再実行してください。" -f $paths.ApiPort)
-    exit 1
-}
-
-# 5. PM2 アプリケーションの登録と起動
+# 6. PM2 アプリケーションの登録と起動
 Write-EpmLog -Level STEP -Message "PM2 にアプリケーションを登録・起動します..."
 Start-EpmApps -Ecosystem $paths.Ecosystem
 
-# 6. ヘルスチェック待機
+# 7. ヘルスチェック待機
 $isHealthy = Wait-EpmHealthy -Paths $paths -TimeoutSec 60
 if (-not $isHealthy) {
     Write-EpmLog -Level ERR -Message "アプリケーションの正常起動を確認できませんでした。ログを確認します:"
@@ -74,7 +79,7 @@ if (-not $isHealthy) {
     exit 1
 }
 
-# 7. PM2 状態保存
+# 8. PM2 状態保存
 Write-EpmLog -Level STEP -Message "PM2 プロセス構成を保存中 (pm2 save)..."
 $null = Invoke-Native -FilePath 'pm2' -ArgumentList @('save')
 
@@ -130,7 +135,7 @@ try {
 
 Write-EpmLog -Level OK -Message "=================================================="
 Write-EpmLog -Level OK -Message "PM2 へのサービス登録が正常に完了しました！"
-Write-EpmLog -Level OK -Message ("アクセス URL: https://{0}:{1}" -f $ip, $paths.WebPort)
+Write-EpmLog -Level OK -Message ("アクセス URL: {0}://{1}:{2}" -f $paths.WebScheme, $ip, $paths.WebPort)
 Write-EpmLog -Level OK -Message "運用手順・ショートカット作成手順は docs/WINDOWS_SETUP.md を参照してください。"
 Write-EpmLog -Level OK -Message "=================================================="
 

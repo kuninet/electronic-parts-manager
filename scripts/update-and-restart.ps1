@@ -65,7 +65,13 @@ try {
         $exitCode = 1
         return
     }
-    $currentApps = Get-Pm2Apps
+    try {
+        $currentApps = Get-Pm2Apps
+    } catch {
+        Write-EpmLog -Level ERR -Message ("PM2 の状態を取得できませんでした: {0}" -f $_.Exception.Message)
+        $exitCode = 1
+        return
+    }
     $hasServer = $null -ne ($currentApps | Where-Object { $_.name -eq 'epm-server' })
     $hasWeb = $null -ne ($currentApps | Where-Object { $_.name -eq 'epm-web' })
     if (-not $hasServer -or -not $hasWeb) {
@@ -91,7 +97,7 @@ try {
     if ($uncommitted.Count -gt 0) {
         Write-EpmLog -Level ERR -Message "未コミットの変更が存在します。git stash するかコミットしてから再実行してください。"
         foreach ($line in $uncommitted) {
-            Write-EpmLog -Level INFO -Message ("  {0}" -f $line)
+            Write-EpmLog -Level INFO -Message ("  " + $line)
         }
         $exitCode = 1
         return
@@ -168,7 +174,7 @@ try {
     if ($commits.Count -gt 0) {
         Write-EpmLog -Level INFO -Message "【適用されるコミット】"
         foreach ($c in $commits) {
-            Write-EpmLog -Level INFO -Message ("  {0}" -f $c)
+            Write-EpmLog -Level INFO -Message ("  " + $c)
         }
     }
 
@@ -206,7 +212,7 @@ try {
         # 12. SQLite DB バックアップ (D8)
         if (Test-Path -LiteralPath $paths.DbPath) {
             if (-not (Test-Path -LiteralPath $paths.BackupDir)) {
-                New-Item -ItemType Directory -LiteralPath $paths.BackupDir -Force -ErrorAction Stop | Out-Null
+                New-Item -ItemType Directory -Path $paths.BackupDir -Force -ErrorAction Stop | Out-Null
             }
             $dbTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
             $backupFile = Join-Path $paths.BackupDir ("database-{0}.sqlite" -f $dbTimestamp)
@@ -324,7 +330,7 @@ try {
                 $ip = $nicIp.IPAddress
             }
         } catch {}
-        Write-EpmLog -Level OK -Message ("アクセス URL: https://{0}:{1}" -f $ip, $paths.WebPort)
+        Write-EpmLog -Level OK -Message ("アクセス URL: {0}://{1}:{2}" -f $paths.WebScheme, $ip, $paths.WebPort)
         Write-EpmLog -Level OK -Message "=================================================="
 
     } catch {
