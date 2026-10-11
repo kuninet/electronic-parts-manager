@@ -1,9 +1,11 @@
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, watch } from 'vue';
+import { ref, reactive, onMounted, onUnmounted, watch, computed } from 'vue';
 import api from '../api';
+import { isAutoNamed } from '../constants';
 import TagInput from './TagInput.vue';
 import BulkEditModal from './BulkEditModal.vue';
 import MiniQrScanner from './MiniQrScanner.vue';
+import AiSuggestionReviewModal from './AiSuggestionReviewModal.vue';
 
 const HOVER_PREVIEW_DELAY_MS = 1000;
 const HOVER_PREVIEW_WIDTH = 540;
@@ -205,9 +207,180 @@ const fetchParts = async () => {
   }
 };
 
+// AI Naming
+const aiStatus = ref({
+  enabled: false,
+  todayCount: 0,
+  dailyLimit: 200,
+  defaultModel: ''
+});
+const aiModels = ref([]);
+const pendingSuggestionsCount = ref(0);
+const pendingPartIds = ref(new Set());
+const showAiReviewModal = ref(false);
+const showAiBatchModal = ref(false);
+const selectedAiModel = ref('');
+
+watch(selectedAiModel, (newModel) => {
+  if (newModel) {
+    localStorage.setItem('ai_naming_model', newModel);
+  }
+});
+
+const filterAutoNamed = ref(false);
+
+const autoNamedCount = computed(() => {
+  return parts.value.filter(p => isAutoNamed(p.name)).length;
+});
+
+const displayedParts = computed(() => {
+  if (filterAutoNamed.value) {
+    return parts.value.filter(p => isAutoNamed(p.name));
+  }
+  return parts.value;
+});
+
+const fetchAiStatus = async () => {
+  try {
+    const [statusRes, modelsRes, suggestionsRes] = await Promise.all([
+      api.get('/ai-naming/status'),
+      api.get('/ai-naming/models'),
+      api.get('/ai-naming/suggestions')
+    ]);
+    aiStatus.value = statusRes.data;
+    aiModels.value = modelsRes.data;
+    pendingSuggestionsCount.value = suggestionsRes.data.length;
+    // B1: 既にpending候補が存在する部品IDのセットを保持
+    pendingPartIds.value = new Set(suggestionsRes.data.map(s => Number(s.part_id)));
+
+    // B3: サーバーから取得したモデル一覧から選択（無効なlocalStorage値を排除）
+    const savedModel = localStorage.getItem('ai_naming_model');
+    const isValidSaved = savedModel && modelsRes.data.some(m => m.id === savedModel);
+    if (isValidSaved) {
+      selectedAiModel.value = savedModel;
+    } else if (statusRes.data.defaultModel && modelsRes.data.some(m => m.id === statusRes.data.defaultModel)) {
+      selectedAiModel.value = statusRes.data.defaultModel;
+    } else if (modelsRes.data.length > 0) {
+      selectedAiModel.value = modelsRes.data[0].id;
+    }
+  } catch (err) {
+    console.error('AI状態取得失敗', err);
+  }
+};
+
+// 一括判定の実行状態
+const aiBatchProgress = ref({
+  running: false,
+  current: 0,
+  total: 0,
+  currentName: '',
+  successCount: 0,
+  errorCount: 0,
+  aborted: false,
+  completed: false,
+  errors: []
+});
+
+// B1: 既にpendingの候補がある部品を一括判定対象から除外
+const getBatchTargets = () => {
+  if (selectedItems.value.size > 0) {
+    return Array.from(selectedItems.value)
+      .map(id => parts.value.find(p => p.id === id))
+      .filter(p => p && p.image_path && !pendingPartIds.value.has(p.id));
+  }
+  return parts.value.filter(p => isAutoNamed(p.name) && p.image_path && !pendingPartIds.value.has(p.id));
+};
+
+const openAiBatchModal = () => {
+  aiBatchProgress.value = {
+    running: false,
+    current: 0,
+    total: getBatchTargets().length,
+    currentName: '',
+    successCount: 0,
+    errorCount: 0,
+    aborted: false,
+    completed: false,
+    errors: []
+  };
+  showAiBatchModal.value = true;
+};
+
+const startAiBatchExecution = async () => {
+  const targets = getBatchTargets();
+  if (targets.length === 0) return;
+
+  aiBatchProgress.value.running = true;
+  aiBatchProgress.value.total = targets.length;
+  aiBatchProgress.value.current = 0;
+  aiBatchProgress.value.successCount = 0;
+  aiBatchProgress.value.errorCount = 0;
+  aiBatchProgress.value.aborted = false;
+  aiBatchProgress.value.completed = false;
+  aiBatchProgress.value.errors = [];
+
+  let consecutiveFailures = 0; // M2: 連続失敗カウンタ
+
+  for (let i = 0; i < targets.length; i++) {
+    if (aiBatchProgress.value.aborted) {
+      break;
+    }
+    const part = targets[i];
+    aiBatchProgress.value.current = i + 1;
+    aiBatchProgress.value.currentName = part.name;
+
+    try {
+      await api.post(`/ai-naming/suggest/${part.id}`, {
+        model: selectedAiModel.value,
+        force: true
+      });
+      aiBatchProgress.value.successCount++;
+      consecutiveFailures = 0; // 成功時にリセット
+    } catch (err) {
+      aiBatchProgress.value.errorCount++;
+      consecutiveFailures++;
+      aiBatchProgress.value.errors.push({
+        name: part.name,
+        error: err.response?.data?.error || err.message
+      });
+
+      const errCode = err.response?.data?.code || '';
+      const errMsg = err.response?.data?.error || err.message || '';
+
+      if (errCode === 'DAILY_LIMIT_EXCEEDED') {
+        alert('1日の判定上限に達したため中止しました');
+        break;
+      }
+
+      // 致命的エラー（APIキー無効、モデル不正等）は3回待たずに即時中断
+      if (errCode === 'API_KEY_INVALID' || errCode === 'INVALID_MODEL' || err.response?.status === 401 || err.response?.status === 403 || errMsg.includes('APIキー') || errMsg.includes('API key')) {
+        alert(`致命的な設定エラーが発生したため一括処理を中断しました: ${errMsg}`);
+        aiBatchProgress.value.aborted = true;
+        break;
+      }
+
+      // M2: 3件連続失敗で自動中断
+      if (consecutiveFailures >= 3) {
+        alert('判定が3件連続で失敗したため、一括処理を自動中断しました。APIキーやネットワーク接続をご確認ください。');
+        aiBatchProgress.value.aborted = true;
+        break;
+      }
+    }
+  }
+
+  aiBatchProgress.value.running = false;
+  aiBatchProgress.value.completed = true;
+  await fetchAiStatus();
+};
+
+const abortAiBatch = () => {
+  aiBatchProgress.value.aborted = true;
+};
+
 onMounted(() => {
   fetchMetadata();
   fetchParts();
+  fetchAiStatus();
 });
 
 // Debounce search
@@ -236,10 +409,10 @@ const toggleSelection = (part) => {
 };
 
 const toggleSelectAll = () => {
-    if (selectedItems.value.size === parts.value.length) {
+    if (selectedItems.value.size === displayedParts.value.length) {
         selectedItems.value.clear();
     } else {
-        parts.value.forEach(p => selectedItems.value.add(p.id));
+        displayedParts.value.forEach(p => selectedItems.value.add(p.id));
     }
 };
 
@@ -473,6 +646,35 @@ defineExpose({ fetchParts });
         + 追加
       </button>
 
+      <!-- 🏷️ 仮名 (N) フィルタボタン -->
+      <button 
+        class="btn btn-auto-name" 
+        :class="{ active: filterAutoNamed }"
+        @click="filterAutoNamed = !filterAutoNamed"
+        title="名称未設定またはカメラ登録の部品のみ表示"
+      >
+        🏷️ 仮名 ({{ autoNamedCount }})
+      </button>
+
+      <!-- AI命名アクションボタン（AI有効時のみ表示） -->
+      <template v-if="!showTrash && aiStatus.enabled">
+        <button 
+          class="btn btn-ai-suggest"
+          @click="openAiBatchModal"
+          title="写真からGemini AIで部品名を判定"
+        >
+          ✨ AIで部品名を判定
+        </button>
+        <button 
+          v-if="pendingSuggestionsCount > 0"
+          class="btn btn-ai-review"
+          @click="showAiReviewModal = true"
+          title="AI判定された候補を確認"
+        >
+          📋 候補を確認 ({{ pendingSuggestionsCount }})
+        </button>
+      </template>
+
       <button 
         class="btn hover-danger" 
         :class="{ active: showTrash }"
@@ -531,6 +733,131 @@ defineExpose({ fetchParts });
         @close="showQrScanner = false"
     />
 
+    <!-- AI 候補確認モーダル -->
+    <AiSuggestionReviewModal 
+        v-if="showAiReviewModal" 
+        @close="showAiReviewModal = false; fetchParts(); fetchAiStatus();"
+        @updated="fetchParts(); fetchAiStatus();"
+    />
+
+    <!-- AI 一括判定ダイアログモーダル -->
+    <div v-if="showAiBatchModal" class="modal-overlay" @click.self="aiBatchProgress.running ? null : showAiBatchModal = false">
+      <div class="modal-content glass-panel ai-batch-modal-box">
+        <div class="modal-header">
+          <h2>✨ AI部品名一括判定</h2>
+          <button v-if="!aiBatchProgress.running" class="btn-icon" @click="showAiBatchModal = false">❌</button>
+        </div>
+
+        <div class="modal-body">
+          <div v-if="!aiBatchProgress.running && !aiBatchProgress.completed">
+            <p class="batch-intro">
+              写真が登録されている電子部品の画像から、Gemini AIを使って部品名・型番・メーカー等を自動推定します。
+            </p>
+
+            <div class="target-summary-box">
+              <span class="summary-label">判定対象:</span>
+              <strong v-if="selectedItems.size > 0">
+                選択中の部品のうち写真あり {{ getBatchTargets().length }} 件
+              </strong>
+              <strong v-else>
+                仮名の部品のうち写真あり {{ getBatchTargets().length }} 件
+              </strong>
+            </div>
+
+            <div v-if="getBatchTargets().length === 0" class="alert-box-warning mt-3">
+              対象となる部品がありません（写真が登録されている部品が必要です）。
+            </div>
+
+            <div class="form-group mt-4">
+              <label>使用するGeminiモデル:</label>
+              <select v-model="selectedAiModel" class="filter-select model-select" :disabled="aiModels.length === 0">
+                <option v-if="aiModels.length === 0" value="" disabled>モデルを読み込み中...</option>
+                <option v-for="m in aiModels" :key="m.id" :value="m.id">
+                  {{ m.name }} ({{ m.description }})
+                </option>
+              </select>
+            </div>
+
+            <div class="api-status-info mt-2">
+              本日実行数: {{ aiStatus.todayCount }} / {{ aiStatus.dailyLimit }}件
+            </div>
+          </div>
+
+          <!-- 実行中プログレス -->
+          <div v-else-if="aiBatchProgress.running" class="batch-running-box">
+            <div class="progress-header">
+              <span>判定中... {{ aiBatchProgress.current }} / {{ aiBatchProgress.total }} 件</span>
+              <span class="progress-pct">{{ Math.round((aiBatchProgress.current / aiBatchProgress.total) * 100) }}%</span>
+            </div>
+            <div class="progress-bar-bg">
+              <div
+                class="progress-bar-fill"
+                :style="{ width: Math.round((aiBatchProgress.current / aiBatchProgress.total) * 100) + '%' }"
+              ></div>
+            </div>
+            <p class="current-item-name">処理中: {{ aiBatchProgress.currentName }}</p>
+            <div class="run-stats">
+              <span class="stat-success">成功: {{ aiBatchProgress.successCount }}</span>
+              <span class="stat-error">失敗: {{ aiBatchProgress.errorCount }}</span>
+            </div>
+            <div class="batch-abort-row">
+              <button class="btn btn-danger" @click="abortAiBatch">⏹️ 中止する</button>
+            </div>
+          </div>
+
+          <!-- 完了時 -->
+          <div v-else-if="aiBatchProgress.completed" class="batch-completed-box">
+            <h3 v-if="!aiBatchProgress.aborted">🎉 判定が完了しました</h3>
+            <h3 v-else>⚠️ 判定を中止しました</h3>
+            <div class="summary-counts">
+              <p>成功: <strong>{{ aiBatchProgress.successCount }}</strong> 件</p>
+              <p>失敗: <strong>{{ aiBatchProgress.errorCount }}</strong> 件</p>
+            </div>
+            <div v-if="aiBatchProgress.errors.length > 0" class="error-detail-list">
+              <h4>エラー一覧:</h4>
+              <ul>
+                <li v-for="(err, idx) in aiBatchProgress.errors" :key="idx">
+                  {{ err.name }}: {{ err.error }}
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button
+            v-if="!aiBatchProgress.running && !aiBatchProgress.completed"
+            class="btn btn-secondary"
+            @click="showAiBatchModal = false"
+          >
+            キャンセル
+          </button>
+          <button
+            v-if="!aiBatchProgress.running && !aiBatchProgress.completed"
+            class="btn btn-primary"
+            :disabled="getBatchTargets().length === 0"
+            @click="startAiBatchExecution"
+          >
+            判定を開始
+          </button>
+          <button
+            v-if="aiBatchProgress.completed"
+            class="btn btn-secondary"
+            @click="showAiBatchModal = false; fetchParts();"
+          >
+            閉じる
+          </button>
+          <button
+            v-if="aiBatchProgress.completed && aiBatchProgress.successCount > 0"
+            class="btn btn-success"
+            @click="showAiBatchModal = false; showAiReviewModal = true;"
+          >
+            📋 判定候補を確認する
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="loading" class="loading">読み込み中...</div>
     <div v-else-if="error" class="error">{{ error }}</div>
     
@@ -538,7 +865,7 @@ defineExpose({ fetchParts });
       <!-- Grid View -->
       <div v-if="viewMode === 'grid'" class="parts-grid" :class="gridSize">
         <div 
-            v-for="part in parts" 
+            v-for="part in displayedParts" 
             :key="part.id" 
             v-lazy-render
             :data-part-id="part.id"
@@ -679,7 +1006,7 @@ defineExpose({ fetchParts });
           <thead>
             <tr>
               <th class="col-checkbox">
-                <input type="checkbox" :checked="selectedItems.size === parts.length && parts.length > 0" @change="toggleSelectAll" />
+                <input type="checkbox" :checked="selectedItems.size === displayedParts.length && displayedParts.length > 0" @change="toggleSelectAll" />
               </th>
               <th>画像</th>
               <th>パーツ名</th>
@@ -690,7 +1017,7 @@ defineExpose({ fetchParts });
             </tr>
           </thead>
           <tbody>
-            <tr v-for="part in parts" :key="part.id" v-lazy-render :data-part-id="part.id" @click="$emit('edit', part)" class="list-row" :class="{ selected: selectedItems.has(part.id) }">
+            <tr v-for="part in displayedParts" :key="part.id" v-lazy-render :data-part-id="part.id" @click="$emit('edit', part)" class="list-row" :class="{ selected: selectedItems.has(part.id) }">
               <td class="col-checkbox" @click.stop>
                  <input type="checkbox" :checked="selectedItems.has(part.id)" @change="toggleSelection(part)" />
               </td>
@@ -1615,5 +1942,162 @@ td {
 @keyframes skeleton-shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+/* AI Naming and Auto-named filters */
+.btn-auto-name {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+.btn-auto-name.active {
+  background: #f59e0b;
+  color: #1e293b;
+  font-weight: bold;
+}
+
+.btn-ai-suggest {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: #ffffff;
+  border: none;
+  font-weight: bold;
+}
+.btn-ai-suggest:hover {
+  filter: brightness(1.1);
+}
+
+.btn-ai-review {
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+  color: #ffffff;
+  border: none;
+  font-weight: bold;
+}
+.btn-ai-review:hover {
+  filter: brightness(1.1);
+}
+
+.ai-batch-modal-box {
+  max-width: 540px;
+}
+
+.batch-intro {
+  color: #94a3b8;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin-bottom: 1rem;
+}
+
+.target-summary-box {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.8rem 1rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.summary-label {
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.model-select {
+  width: 100%;
+  margin-top: 0.4rem;
+}
+
+.api-status-info {
+  font-size: 0.8rem;
+  color: #64748b;
+  text-align: right;
+}
+
+.batch-running-box {
+  padding: 1.5rem 0;
+  text-align: center;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  color: #e2e8f0;
+}
+
+.progress-bar-bg {
+  width: 100%;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 100%);
+  transition: width 0.3s ease;
+}
+
+.current-item-name {
+  font-size: 0.88rem;
+  color: #cbd5e1;
+  margin-bottom: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.run-stats {
+  display: flex;
+  justify-content: center;
+  gap: 1.5rem;
+  font-size: 0.85rem;
+  margin-bottom: 1.25rem;
+}
+
+.stat-success {
+  color: #34d399;
+}
+
+.stat-error {
+  color: #f87171;
+}
+
+.batch-completed-box {
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.summary-counts {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  margin: 1rem 0;
+  font-size: 1.05rem;
+}
+
+.error-detail-list {
+  text-align: left;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  padding: 0.8rem 1rem;
+  border-radius: 8px;
+  max-height: 140px;
+  overflow-y: auto;
+  font-size: 0.82rem;
+  color: #fca5a5;
+  margin-top: 1rem;
+}
+
+.error-detail-list h4 {
+  margin: 0 0 0.4rem 0;
+}
+
+.error-detail-list ul {
+  margin: 0;
+  padding-left: 1.2rem;
 }
 </style>

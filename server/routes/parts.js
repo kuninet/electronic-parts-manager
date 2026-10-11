@@ -296,6 +296,87 @@ router.put('/:id', upload, async (req, res) => {
     }
 });
 
+// PATCH /api/parts/:id - Partial update (updates only provided fields)
+router.patch('/:id', async (req, res) => {
+    try {
+        const db = getDb();
+        const id = req.params.id;
+        const currentPart = await db.get('SELECT * FROM parts WHERE id = ? AND deleted_at IS NULL', [id]);
+        if (!currentPart) {
+            return res.status(404).json({ error: 'Part not found' });
+        }
+
+        const allowedFields = [
+            'name', 'description', 'category_id', 'location_id',
+            'quantity', 'datasheet_url', 'qr_code', 'used_at',
+            'used_for', 'used_note'
+        ];
+        const updates = [];
+        const params = [];
+
+        for (const field of allowedFields) {
+            if (req.body[field] !== undefined) {
+                let val = req.body[field];
+                if ((field === 'category_id' || field === 'location_id' || field === 'used_at' || field === 'used_for' || field === 'used_note') && (val === '' || val === 'null')) {
+                    val = null;
+                }
+                if (field === 'qr_code') {
+                    if (val === '' || val === 'null') val = null;
+                    if (val) {
+                        const dupPart = await db.get('SELECT id FROM parts WHERE qr_code = ? AND id != ? AND deleted_at IS NULL', [val, id]);
+                        if (dupPart) return res.status(409).json({ error: 'このQRコードは別の部品に登録済みです' });
+                        const dupLoc = await db.get('SELECT id FROM locations WHERE qr_code = ?', [val]);
+                        if (dupLoc) return res.status(409).json({ error: 'このQRコードは保管場所に登録済みです' });
+                    }
+                }
+                updates.push(`${field} = ?`);
+                params.push(val);
+            }
+        }
+
+        if (updates.length === 0 && req.body.tags === undefined) {
+            return res.status(400).json({ error: 'No fields provided to update' });
+        }
+
+        if (updates.length > 0) {
+            updates.push('updated_at = CURRENT_TIMESTAMP');
+            params.push(id);
+            const query = `UPDATE parts SET ${updates.join(', ')} WHERE id = ?`;
+            await db.run(query, params);
+        }
+
+        // Tags update if provided
+        if (req.body.tags !== undefined) {
+            const tags = Array.isArray(req.body.tags)
+                ? req.body.tags
+                : (typeof req.body.tags === 'string' ? req.body.tags.split(',').map(t => t.trim()).filter(Boolean) : []);
+
+            await db.run('DELETE FROM part_tags WHERE part_id = ?', [id]);
+            for (const tagName of tags) {
+                let tag = await db.get('SELECT id FROM tags WHERE name = ?', [tagName]);
+                if (!tag) {
+                    const tagResult = await db.run('INSERT INTO tags (name) VALUES (?)', [tagName]);
+                    tag = { id: tagResult.lastID };
+                }
+                await db.run('INSERT INTO part_tags (part_id, tag_id) VALUES (?, ?)', [id, tag.id]);
+            }
+        }
+
+        const updatedPart = await db.get(`
+            SELECT p.*, c.name as category_name, l.name as location_name,
+            (SELECT GROUP_CONCAT(t.name, ',') FROM tags t JOIN part_tags pt ON t.id = pt.tag_id WHERE pt.part_id = p.id) as tags
+            FROM parts p
+            LEFT JOIN categories c ON p.category_id = c.id
+            LEFT JOIN locations l ON p.location_id = l.id
+            WHERE p.id = ?
+        `, [id]);
+
+        res.json(updatedPart);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // DELETE /api/parts/:id - Soft Delete part
 router.delete('/:id', async (req, res) => {
     try {

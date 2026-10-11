@@ -69,6 +69,7 @@ app.use('/api/tags', require('./routes/tags'));
 app.use('/api/master', require('./routes/master'));
 app.use('/api/backup', backupRouter);
 app.use('/api/qr', require('./routes/qr'));
+app.use('/api/ai-naming', require('./routes/aiNaming'));
 
 // Initialize DB and start server
 initDb().then(() => {
