@@ -10,11 +10,16 @@ const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/cl
 
 // Configure Multer for file uploads (memoryStorage for S3 support)
 const storage = multer.memoryStorage();
-const uploadMiddleware = multer({ storage: storage });
+const uploadMiddleware = multer({
+    storage: storage,
+    limits: { fileSize: 50 * 1024 * 1024 }
+});
 const upload = uploadMiddleware.fields([
     { name: 'image', maxCount: 1 },
     { name: 'datasheet', maxCount: 1 }
 ]);
+
+const MAX_IMAGE_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
 const s3Images = new S3Client({ region: process.env.AWS_REGION || 'ap-northeast-1' });
 const IMAGES_BUCKET = process.env.S3_IMAGES_BUCKET;
@@ -132,6 +137,9 @@ router.post('/', upload, async (req, res) => {
         let image_path = null;
         if (req.files['image']) {
             const file = req.files['image'][0];
+            if (file.size > MAX_IMAGE_FILE_SIZE) {
+                return res.status(413).json({ error: '画像ファイルサイズは20MB以下にしてください' });
+            }
             const ext = path.extname(file.originalname).toLowerCase();
             const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
             const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
@@ -234,6 +242,9 @@ router.put('/:id', upload, async (req, res) => {
 
         if (req.files['image']) {
             const file = req.files['image'][0];
+            if (file.size > MAX_IMAGE_FILE_SIZE) {
+                return res.status(413).json({ error: '画像ファイルサイズは20MB以下にしてください' });
+            }
             const ext = path.extname(file.originalname).toLowerCase();
             const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
             const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
@@ -624,5 +635,8 @@ router.put('/:id/qr', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+const { multerErrorHandler } = require('../utils/multerErrorHandler');
+router.use(multerErrorHandler);
 
 module.exports = router;

@@ -10,6 +10,7 @@ import QrScanner from './components/QrScanner.vue';
 import QrGenerator from './components/QrGenerator.vue';
 
 import api from './api';
+import { resizeImageFile } from './utils/imageResize';
 
 const showModal = ref(false);
 const showDataModal = ref(false);
@@ -98,15 +99,22 @@ const switchView = (view) => {
     if (view === 'parts') targetLocationId.value = ''; // Reset filter when manually switching
 };
 
+const uploadingCameraFile = ref(false);
+
 const handleCameraClick = () => {
+    if (uploadingCameraFile.value) return;
     cameraInput.value.click();
 };
 
 const onCameraFileChange = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
+    const file = event.target.files?.[0];
+    if (!file || uploadingCameraFile.value) return;
 
+    uploadingCameraFile.value = true;
     try {
+        // iPhone等で撮影された写真を長辺最大1200px・JPEG品質80%に最適化
+        const processedFile = await resizeImageFile(file);
+
         const now = new Date();
         const timestamp = now.toLocaleString('ja-JP', { 
             year: 'numeric', 
@@ -119,7 +127,7 @@ const onCameraFileChange = async (event) => {
         const formData = new FormData();
         formData.append('name', `(カメラ登録) ${timestamp}`);
         formData.append('quantity', 1);
-        formData.append('image', file);
+        formData.append('image', processedFile);
 
         const res = await api.post('/parts', formData);
         
@@ -163,6 +171,7 @@ const onCameraFileChange = async (event) => {
         console.error(err);
         alert('登録に失敗しました');
     } finally {
+        uploadingCameraFile.value = false;
         event.target.value = ''; // Reset input
     }
 };
@@ -212,10 +221,16 @@ const onCameraFileChange = async (event) => {
             accept="image/*" 
             capture="environment" 
             class="hidden-input" 
+            :disabled="uploadingCameraFile"
             @change="onCameraFileChange"
           />
-          <button v-if="currentView === 'parts'" class="btn btn-outline btn-sm camera-btn" @click="handleCameraClick">
-            📷 {{ isMobile ? 'カメラで追加' : '画像から追加' }}
+          <button 
+            v-if="currentView === 'parts'" 
+            class="btn btn-outline btn-sm camera-btn" 
+            :disabled="uploadingCameraFile"
+            @click="handleCameraClick"
+          >
+            📷 {{ uploadingCameraFile ? '最適化・登録中...' : (isMobile ? 'カメラで追加' : '画像から追加') }}
           </button>
           <a href="#/qr" class="btn btn-outline btn-sm qr-link">📦 QR入出庫</a>
           

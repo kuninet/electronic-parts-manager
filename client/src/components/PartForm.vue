@@ -1,7 +1,8 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 
 import api from '../api';
+import { resizeImageFile } from '../utils/imageResize';
 import TagInput from './TagInput.vue';
 import MiniQrScanner from './MiniQrScanner.vue';
 
@@ -32,6 +33,8 @@ const formData = ref({
 const categories = ref([]);
 const locations = ref([]);
 const imageFile = ref(null);
+const imagePreviewUrl = ref(null);
+const resizingImage = ref(false);
 const datasheetFile = ref(null);
 const loading = ref(false);
 const showQrScanner = ref(false);
@@ -79,9 +82,36 @@ onMounted(async () => {
   }
 });
 
-const handleImageChange = (e) => {
-  imageFile.value = e.target.files[0];
+const handleImageChange = async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) {
+    if (imagePreviewUrl.value) {
+      URL.revokeObjectURL(imagePreviewUrl.value);
+      imagePreviewUrl.value = null;
+    }
+    imageFile.value = null;
+    return;
+  }
+
+  resizingImage.value = true;
+  try {
+    const resized = await resizeImageFile(file);
+    imageFile.value = resized;
+    if (imagePreviewUrl.value) {
+      URL.revokeObjectURL(imagePreviewUrl.value);
+    }
+    imagePreviewUrl.value = URL.createObjectURL(resized);
+  } finally {
+    resizingImage.value = false;
+  }
 };
+
+onUnmounted(() => {
+  if (imagePreviewUrl.value) {
+    URL.revokeObjectURL(imagePreviewUrl.value);
+    imagePreviewUrl.value = null;
+  }
+});
 
 const handleDatasheetChange = (e) => {
   datasheetFile.value = e.target.files[0];
@@ -194,8 +224,8 @@ const toggleUsedState = (nextValue) => {
             <h2>{{ part ? 'パーツ編集' : '新規パーツ追加' }}</h2>
              <div class="form-actions-top">
                 <button type="button" class="btn btn-sm" @click="$emit('close')">キャンセル</button>
-                <button type="button" class="btn btn-primary btn-sm" @click="handleSubmit" :disabled="loading">
-                  {{ loading ? '保存中...' : '保存' }}
+                <button type="button" class="btn btn-primary btn-sm" @click="handleSubmit" :disabled="loading || resizingImage">
+                  {{ loading ? '保存中...' : (resizingImage ? '画像最適化中...' : '保存') }}
                 </button>
               </div>
         </div>
@@ -298,10 +328,14 @@ const toggleUsedState = (nextValue) => {
 
           <div class="form-group">
             <label>画像</label>
-            <input type="file" accept="image/*" @change="handleImageChange" />
-             <div v-if="imageFile" class="current-image-preview">
-                 <p>新規選択画像: {{ imageFile.name }}</p>
-             </div>
+            <input type="file" accept="image/*" @change="handleImageChange" :disabled="resizingImage" />
+            <div v-if="resizingImage" class="resizing-indicator">
+              <span class="spinner-small">⏳</span> 画像を最適化中...
+            </div>
+            <div v-else-if="imageFile" class="current-image-preview">
+              <p>新規選択画像: {{ imageFile.name }} ({{ Math.round(imageFile.size / 1024) }} KB)</p>
+              <img v-if="imagePreviewUrl" :src="imagePreviewUrl" class="thumb-preview" alt="プレビュー" />
+            </div>
           </div>
 
           <div class="form-group">
@@ -326,8 +360,8 @@ const toggleUsedState = (nextValue) => {
 
           <div class="form-actions">
             <button type="button" class="btn" @click="$emit('close')">キャンセル</button>
-            <button type="submit" class="btn btn-primary" :disabled="loading">
-              {{ loading ? '保存中...' : '保存' }}
+            <button type="submit" class="btn btn-primary" :disabled="loading || resizingImage">
+              {{ loading ? '保存中...' : (resizingImage ? '画像最適化中...' : '保存') }}
             </button>
           </div>
         </form>
@@ -549,16 +583,21 @@ select option {
   margin-bottom: 0.5rem;
 }
 
-.current-image-preview img {
+.current-image-preview img,
+.thumb-preview {
   max-width: 100%;
   max-height: 200px;
   border-radius: 8px;
   border: 1px solid var(--border-color);
+  object-fit: contain;
 }
-.current-image-preview img {
-  max-width: 100%;
-  max-height: 200px;
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
+
+.resizing-indicator {
+  margin-top: 0.5rem;
+  color: var(--accent-color, #38bdf8);
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 </style>
