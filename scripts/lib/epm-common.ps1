@@ -97,8 +97,8 @@ function Get-GitOutput {
     if ($code -ne 0) {
         throw ("git {0} が失敗しました (exit {1})" -f ($ArgumentList -join ' '), $code)
     }
-    if ($null -eq $output) { return ,@() }
-    return ,([string[]]$output)
+    if ($null -eq $output) { return }
+    return [string[]]$output
 }
 
 function Get-RepoRoot {
@@ -249,7 +249,8 @@ function Get-Pm2Apps {
 
     $result = @()
     if ($lines) {
-        foreach ($line in $lines) {
+        $validLines = $lines | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }
+        foreach ($line in $validLines) {
             $lineStr = [string]$line
             if (-not $lineStr.Trim()) { continue }
             $parts = $lineStr -split "`t", 2

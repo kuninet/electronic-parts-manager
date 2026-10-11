@@ -30,8 +30,12 @@ if (-not (Test-NodeVersion)) {
 
 $paths = Get-EpmPaths -RepoRoot $script:RepoRoot
 
-# 2. 稼働中 PM2 プロセスの確認と停止 (ファイルロック防止)
-$currentApps = Get-Pm2Apps
+try {
+    $currentApps = Get-Pm2Apps
+} catch {
+    Write-EpmLog -Level ERR -Message ("PM2 の状態を取得できませんでした: {0}" -f $_.Exception.Message)
+    exit 1
+}
 $serverApp = $currentApps | Where-Object { $_.name -eq 'epm-server' }
 $webApp = $currentApps | Where-Object { $_.name -eq 'epm-web' }
 if (($null -ne $serverApp -and $serverApp.status -eq 'online') -or ($null -ne $webApp -and $webApp.status -eq 'online')) {

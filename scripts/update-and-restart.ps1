@@ -97,7 +97,7 @@ try {
     if ($uncommitted.Count -gt 0) {
         Write-EpmLog -Level ERR -Message "未コミットの変更が存在します。git stash するかコミットしてから再実行してください。"
         foreach ($line in $uncommitted) {
-            Write-EpmLog -Level INFO -Message ("  {0}" -f $line)
+            Write-EpmLog -Level INFO -Message ("  " + $line)
         }
         $exitCode = 1
         return
@@ -174,7 +174,7 @@ try {
     if ($commits.Count -gt 0) {
         Write-EpmLog -Level INFO -Message "【適用されるコミット】"
         foreach ($c in $commits) {
-            Write-EpmLog -Level INFO -Message ("  {0}" -f $c)
+            Write-EpmLog -Level INFO -Message ("  " + $c)
         }
     }
 
