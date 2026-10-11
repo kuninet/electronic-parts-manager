@@ -158,6 +158,9 @@ test('Windows スクリプト静的検査 (S-1 〜 S-8)', async (t) => {
 
         assert.match(content, /database-\\d\{8\}_\\d\{6\}/, 'バックアップ削除正規表現が含まれていること');
         assert.match(content, /(Select-Object\s+-Last\s+1|LastIndexOf)/, 'Get-Pm2Apps に JSON パース処理が含まれていること');
+        assert.match(content, /curl\.exe\s+-k\s+-s\s+-m\s+3/, 'Wait-EpmHealthy に curl.exe によるプロキシ疎通確認が含まれていること');
+        assert.match(content, /System\.Net\.Sockets\.TcpClient/, 'Wait-EpmHealthy に TCP フォールバックが含まれていること');
+        assert.match(content, /WebScheme\s*=\s*\$webScheme/, 'Get-EpmPaths に WebScheme が定義されていること');
     });
 
     await t.test('S-7: ecosystem.config.js の構造と設定が正しいこと', () => {

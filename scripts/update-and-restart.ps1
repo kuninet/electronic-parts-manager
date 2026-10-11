@@ -324,7 +324,7 @@ try {
                 $ip = $nicIp.IPAddress
             }
         } catch {}
-        Write-EpmLog -Level OK -Message ("アクセス URL: https://{0}:{1}" -f $ip, $paths.WebPort)
+        Write-EpmLog -Level OK -Message ("アクセス URL: {0}://{1}:{2}" -f $paths.WebScheme, $ip, $paths.WebPort)
         Write-EpmLog -Level OK -Message "=================================================="
 
     } catch {

@@ -131,7 +131,7 @@ try {
 
 Write-EpmLog -Level OK -Message "=================================================="
 Write-EpmLog -Level OK -Message "PM2 へのサービス登録が正常に完了しました！"
-Write-EpmLog -Level OK -Message ("アクセス URL: https://{0}:{1}" -f $ip, $paths.WebPort)
+Write-EpmLog -Level OK -Message ("アクセス URL: {0}://{1}:{2}" -f $paths.WebScheme, $ip, $paths.WebPort)
 Write-EpmLog -Level OK -Message "運用手順・ショートカット作成手順は docs/WINDOWS_SETUP.md を参照してください。"
 Write-EpmLog -Level OK -Message "=================================================="
 

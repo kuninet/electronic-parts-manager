@@ -167,6 +167,11 @@ function Get-EpmPaths {
         $apiPort = [int]$portEnv
     }
 
+    # Web Scheme (VITE_HTTPS) 解決
+    $clientEnvPath = Join-Path $clientDir '.env'
+    $viteHttps = Read-DotEnvValue -Path $clientEnvPath -Key 'VITE_HTTPS'
+    $webScheme = if ($viteHttps -eq 'false') { 'http' } else { 'https' }
+
     return [pscustomobject]@{
         ServerDir  = $serverDir
         ClientDir  = $clientDir
@@ -174,6 +179,7 @@ function Get-EpmPaths {
         UploadDir  = $uploadDir
         ApiPort    = $apiPort
         WebPort    = 5173
+        WebScheme  = $webScheme
         Ecosystem  = (Join-Path $RepoRoot 'ecosystem.config.js')
         BackupDir  = (Join-Path $serverDir 'backups\db')
     }
@@ -283,20 +289,44 @@ function Wait-EpmHealthy {
         $webApp = $apps | Where-Object { $_.name -eq 'epm-web' }
         $pm2Ok = ($null -ne $serverApp -and $serverApp.status -eq 'online' -and $null -ne $webApp -and $webApp.status -eq 'online')
 
-        # (c) Webポート (5173) 接続確認
+        # (c) Webポート (5173) 疎通確認（プロキシ経由 API 疎通確認、curl 不可時は TCP 疎通にフォールバック）
         $webOk = $false
-        $tcp = New-Object System.Net.Sockets.TcpClient
-        try {
-            $ar = $tcp.BeginConnect('127.0.0.1', $Paths.WebPort, $null, $null)
-            $wait = $ar.AsyncWaitHandle.WaitOne(1000, $false)
-            if ($wait -and $tcp.Connected) {
-                $tcp.EndConnect($ar)
-                $webOk = $true
+        $hasCurl = $null -ne (Get-Command 'curl.exe' -ErrorAction SilentlyContinue)
+        if ($hasCurl) {
+            try {
+                $scheme = if ($Paths.WebScheme) { $Paths.WebScheme } else { 'https' }
+                $proxyHealthUrl = ("{0}://127.0.0.1:{1}/api/health" -f $scheme, $Paths.WebPort)
+                $curlOut = & curl.exe -k -s -m 3 $proxyHealthUrl 2>$null
+                if ($LASTEXITCODE -eq 0 -and $curlOut -match '"status"\s*:\s*"ok"') {
+                    $webOk = $true
+                } elseif ($scheme -eq 'https') {
+                    # https で応答がない場合、http も試すフォールバック
+                    $httpProxyUrl = ("http://127.0.0.1:{0}/api/health" -f $Paths.WebPort)
+                    $curlOutHttp = & curl.exe -s -m 3 $httpProxyUrl 2>$null
+                    if ($LASTEXITCODE -eq 0 -and $curlOutHttp -match '"status"\s*:\s*"ok"') {
+                        $webOk = $true
+                    }
+                }
+            } catch {
+                $webOk = $false
             }
-        } catch {
-            $webOk = $false
-        } finally {
-            $tcp.Close()
+        }
+
+        # curl.exe が利用できない場合は TCP 接続にフォールバック
+        if (-not $hasCurl) {
+            $tcp = New-Object System.Net.Sockets.TcpClient
+            try {
+                $ar = $tcp.BeginConnect('127.0.0.1', $Paths.WebPort, $null, $null)
+                $wait = $ar.AsyncWaitHandle.WaitOne(1000, $false)
+                if ($wait -and $tcp.Connected) {
+                    $tcp.EndConnect($ar)
+                    $webOk = $true
+                }
+            } catch {
+                $webOk = $false
+            } finally {
+                $tcp.Close()
+            }
         }
 
         # PM2 jlist からの取得が空配列等で判定できない場合のフォールバック
