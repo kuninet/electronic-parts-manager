@@ -138,18 +138,18 @@
       <span class="bulk-count">{{ selectedParts.length }} 件選択中</span>
       <div class="bulk-buttons">
         <template v-if="!showTrash">
-          <button type="button" class="btn btn-secondary btn-sm" @click="showBulkEditModal = true">
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="bulkBusy" @click="showBulkEditModal = true">
             一括編集
           </button>
-          <button type="button" class="btn btn-danger btn-sm" @click="handleBulkAction('trash')">
+          <button type="button" class="btn btn-danger btn-sm" :disabled="bulkBusy" @click="handleBulkAction(BULK_ACTION.TRASH)">
             ゴミ箱へ
           </button>
         </template>
         <template v-else>
-          <button type="button" class="btn btn-secondary btn-sm" @click="handleBulkAction('restore')">
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="bulkBusy" @click="handleBulkAction(BULK_ACTION.RESTORE)">
             復元
           </button>
-          <button type="button" class="btn btn-danger btn-sm" @click="handleBulkAction('delete')">
+          <button type="button" class="btn btn-danger btn-sm" :disabled="bulkBusy" @click="handleBulkAction(BULK_ACTION.PERMANENT_DELETE)">
             完全削除
           </button>
         </template>
@@ -283,7 +283,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import api from '../api';
-import { isAutoNamed } from '../constants';
+import { isAutoNamed, BULK_ACTION } from '../constants';
 import { usePartsFilters } from '../composables/usePartsFilters';
 import { usePartsStats } from '../composables/usePartsStats';
 import { useQuantitySync } from '../composables/useQuantitySync';
@@ -310,6 +310,7 @@ const loading = ref(true);
 const showTrash = ref(false);
 
 const selectedParts = ref([]);
+const bulkBusy = ref(false);
 const showBulkEditModal = ref(false);
 
 // モバイル画面判定
@@ -489,32 +490,43 @@ const quickUpdatePart = async (id, changes) => {
 
 // 一括操作
 const handleBulkAction = async (action) => {
+  if (bulkBusy.value || selectedParts.value.length === 0) return;
+  const ids = [...selectedParts.value];
+  if (action === BULK_ACTION.TRASH) {
+    const qrCount = parts.value.filter((p) => ids.includes(p.id) && p.qr_code).length;
+    let msg = `選択した ${ids.length} 件をゴミ箱へ移動しますか？`;
+    if (qrCount > 0) msg += `\n\n※ ${qrCount} 件の QR コードの紐付けが解除され、復元しても戻りません`;
+    if (!confirm(msg)) return;
+  }
+  if (action === BULK_ACTION.PERMANENT_DELETE &&
+      !confirm(`選択した ${ids.length} 件を完全に削除します。\n画像も削除され、この操作は取り消せません。よろしいですか？`)) return;
+
+  bulkBusy.value = true;
   try {
-    if (action === 'trash') {
-      await api.post('/parts/bulk-delete', { ids: selectedParts.value });
-      toast.success('選択したパーツをゴミ箱へ移動しました');
-    } else if (action === 'restore') {
-      await api.post('/parts/bulk-restore', { ids: selectedParts.value });
-      toast.success('選択したパーツを復元しました');
-    } else if (action === 'delete') {
-      if (!confirm('選択したパーツを完全に削除しますか？この操作は取り消せません。')) return;
-      await api.post('/parts/bulk-permanent-delete', { ids: selectedParts.value });
-      toast.success('選択したパーツを完全に削除しました');
-    }
+    if (action !== BULK_ACTION.RESTORE) ids.forEach((id) => qtySync.discard(id));
+    const res = await api.post('/parts/bulk/action', { action, ids });
+    const affected = Number(res.data?.affected ?? ids.length);
+    const label = { trash: 'ゴミ箱へ移動しました', restore: '復元しました', delete: '完全に削除しました' }[action];
+    toast.success(`${affected} 件を${label}`);
+    if (affected < ids.length) toast.info(`${ids.length - affected} 件は対象外のため処理されませんでした`);
     selectedParts.value = [];
     await fetchParts();
     stats.refresh();
   } catch (err) {
     console.error(err);
-    toast.error('一括操作に失敗しました');
+    toast.error(err.response?.data?.error || '一括操作に失敗しました');
+  } finally {
+    bulkBusy.value = false;
   }
 };
 
 const handleBulkUpdate = async (updateData) => {
+  if (bulkBusy.value || selectedParts.value.length === 0) return;
+  bulkBusy.value = true;
   try {
-    await api.post('/parts/bulk-update', {
-      ids: selectedParts.value,
-      ...updateData
+    await api.post('/parts/bulk/update', {
+      ids: [...selectedParts.value],
+      updates: updateData
     });
     showBulkEditModal.value = false;
     selectedParts.value = [];
@@ -523,7 +535,9 @@ const handleBulkUpdate = async (updateData) => {
     stats.refresh();
   } catch (err) {
     console.error(err);
-    toast.error('一括更新に失敗しました');
+    toast.error(err.response?.data?.error || '一括更新に失敗しました');
+  } finally {
+    bulkBusy.value = false;
   }
 };
 
@@ -568,8 +582,7 @@ const startAiBatch = async () => {
   for (const part of targets) {
     aiBatchProgress.value.currentName = part.part_number || part.name;
     try {
-      await api.post('/ai-naming/suggest', {
-        part_id: part.id,
+      await api.post(`/ai-naming/suggest/${part.id}`, {
         model: selectedAiModel.value || undefined
       });
       aiBatchProgress.value.successCount++;

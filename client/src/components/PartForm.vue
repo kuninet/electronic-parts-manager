@@ -1,13 +1,15 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 
 import api from '../api';
 import { resizeImageFile } from '../utils/imageResize';
 import TagInput from './TagInput.vue';
 import MiniQrScanner from './MiniQrScanner.vue';
 import { useToast } from '../composables/useToast';
+import { useQuantitySync } from '../composables/useQuantitySync';
 
 const toast = useToast();
+const qtySync = useQuantitySync();
 
 const props = defineProps({
   part: {
@@ -16,7 +18,7 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['close', 'saved']);
+const emit = defineEmits(['close', 'saved', 'deleted', 'restored']);
 
 const formData = ref({
   name: '',
@@ -40,8 +42,16 @@ const imagePreviewUrl = ref(null);
 const resizingImage = ref(false);
 const datasheetFile = ref(null);
 const loading = ref(false);
+const deleting = ref(false);
 const showQrScanner = ref(false);
 const isUsed = ref(false);
+
+const canTrash = computed(() => !!props.part && !props.part.deleted_at);
+const canRestore = computed(() => !!props.part && !!props.part.deleted_at);
+
+let initialSnapshot = '';
+const takeSnapshot = () => { initialSnapshot = JSON.stringify(formData.value); };
+const isDirty = () => JSON.stringify(formData.value) !== initialSnapshot;
 
 const suggestedTags = ref([]);
 
@@ -80,10 +90,51 @@ onMounted(async () => {
       formData.value.used_for = props.part.used_for || '';
       formData.value.used_note = props.part.used_note || '';
     }
+    takeSnapshot();
   } catch (err) {
     console.error('Failed to load metadata', err);
   }
 });
+
+const handleTrash = async () => {
+  if (!canTrash.value || deleting.value || loading.value) return;
+  const p = props.part;
+  const lines = [`「${p.name}」をゴミ箱へ移動しますか？`, '', '・ゴミ箱から復元できます'];
+  if (p.qr_code) lines.push('・QRコードの紐付けは解除され、復元しても戻りません');
+  if (!confirm(lines.join('\n'))) return;
+  deleting.value = true;
+  try {
+    qtySync.discard(p.id);
+    await api.delete(`/parts/${p.id}`);
+    toast.success(`「${p.name}」をゴミ箱へ移動しました`);
+    emit('deleted', p);
+    emit('close');
+  } catch (err) {
+    console.error(err);
+    toast.error(err.response?.data?.error || 'ゴミ箱への移動に失敗しました');
+  } finally {
+    deleting.value = false;
+  }
+};
+
+const handleRestore = async () => {
+  if (!canRestore.value || deleting.value || loading.value) return;
+  const p = props.part;
+  if (isDirty() && !confirm('編集中の内容は保存されません。復元しますか？')) return;
+  deleting.value = true;
+  try {
+    await api.post(`/parts/${p.id}/restore`);
+    toast.success(`「${p.name}」を復元しました`);
+    if (p.used_at) toast.info('使用済み一覧に戻りました');
+    emit('restored', p);
+    emit('close');
+  } catch (err) {
+    console.error(err);
+    toast.error(err.response?.data?.error || '復元に失敗しました');
+  } finally {
+    deleting.value = false;
+  }
+};
 
 const handleImageChange = async (e) => {
   const file = e.target.files?.[0];
@@ -235,8 +286,8 @@ const toggleUsedState = (nextValue) => {
         <div class="modal-header-actions">
             <h2>{{ part ? 'パーツ編集' : '新規パーツ追加' }}</h2>
              <div class="form-actions-top">
-                <button type="button" class="btn btn-sm" @click="$emit('close')">キャンセル</button>
-                <button type="button" class="btn btn-primary btn-sm" @click="handleSubmit" :disabled="loading || resizingImage">
+                <button type="button" class="btn btn-sm" :disabled="deleting" @click="$emit('close')">キャンセル</button>
+                <button type="button" class="btn btn-primary btn-sm" @click="handleSubmit" :disabled="loading || resizingImage || deleting">
                   {{ loading ? '保存中...' : (resizingImage ? '画像最適化中...' : '保存') }}
                 </button>
               </div>
@@ -371,8 +422,14 @@ const toggleUsedState = (nextValue) => {
           </div>
 
           <div class="form-actions">
-            <button type="button" class="btn" @click="$emit('close')">キャンセル</button>
-            <button type="submit" class="btn btn-primary" :disabled="loading || resizingImage">
+            <button v-if="canTrash" type="button" class="btn btn-danger trash-btn" :disabled="deleting || loading" @click="handleTrash">
+              {{ deleting ? '移動中...' : 'ゴミ箱へ移動' }}
+            </button>
+            <button v-else-if="canRestore" type="button" class="btn btn-secondary trash-btn restore-btn" :disabled="deleting || loading" @click="handleRestore">
+              {{ deleting ? '復元中...' : 'ゴミ箱から復元' }}
+            </button>
+            <button type="button" class="btn" :disabled="deleting" @click="$emit('close')">キャンセル</button>
+            <button type="submit" class="btn btn-primary" :disabled="loading || resizingImage || deleting">
               {{ loading ? '保存中...' : (resizingImage ? '画像最適化中...' : '保存') }}
             </button>
           </div>
@@ -613,5 +670,20 @@ select option {
   display: flex;
   align-items: center;
   gap: 0.4rem;
+}
+
+.trash-btn {
+  margin-right: auto;
+}
+
+@media (max-width: 480px) {
+  .form-actions {
+    flex-wrap: wrap;
+  }
+  .trash-btn {
+    order: 2;
+    width: 100%;
+    margin-right: 0;
+  }
 }
 </style>

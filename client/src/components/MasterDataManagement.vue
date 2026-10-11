@@ -71,12 +71,20 @@ const addCategory = async () => {
   }
 };
 
-const deleteCategory = async (id) => {
-  if (!confirm('カテゴリを削除しますか?')) return;
+const deleteCategory = async (cat) => {
+  const id = typeof cat === 'object' ? cat.id : cat;
+  const name = typeof cat === 'object' ? cat.name : (categories.value.find(c => c.id === id)?.name || id);
+  const msg = `カテゴリ「${name}」を削除しますか？\n\n・ゴミ箱内のパーツは「未分類」になります\n・使用済みのパーツが残っている場合は削除できません`;
+  if (!confirm(msg)) return;
   try {
-    await api.delete(`/categories/${id}`);
+    const res = await api.delete(`/categories/${id}`);
     fetchData();
-    toast.success('カテゴリを削除しました');
+    const detached = res.data?.detachedTrashedParts ?? 0;
+    if (detached > 0) {
+      toast.success(`カテゴリを削除しました（ゴミ箱内の ${detached} 件は未分類になりました）`);
+    } else {
+      toast.success('カテゴリを削除しました');
+    }
   } catch (err) {
     const msg = err.response?.data?.error || 'カテゴリの削除に失敗しました';
     toast.error(msg);
@@ -138,12 +146,20 @@ const addLocation = async () => {
   }
 };
 
-const deleteLocation = async (id) => {
-  if (!confirm('保管場所を削除しますか?')) return;
+const deleteLocation = async (loc) => {
+  const id = typeof loc === 'object' ? loc.id : loc;
+  const name = typeof loc === 'object' ? loc.name : (locations.value.find(l => l.id === id)?.name || id);
+  const msg = `保管場所「${name}」を削除しますか？\n\n・この場所への入庫履歴も削除されます\n・ゴミ箱内のパーツは「場所未設定」になります`;
+  if (!confirm(msg)) return;
   try {
-    await api.delete(`/locations/${id}`);
+    const res = await api.delete(`/locations/${id}`);
     fetchData();
-    toast.success('保管場所を削除しました');
+    const detached = res.data?.detachedTrashedParts ?? 0;
+    if (detached > 0) {
+      toast.success(`保管場所を削除しました（ゴミ箱内の ${detached} 件は場所未設定になりました）`);
+    } else {
+      toast.success('保管場所を削除しました');
+    }
   } catch (err) {
     const msg = err.response?.data?.error || '保管場所の削除に失敗しました';
     toast.error(msg);
@@ -335,7 +351,7 @@ const handleReorder = async (type, list) => {
                         </div>
                         <div class="actions">
                             <button class="btn-icon" @click="startEdit('location', loc)">✏️</button>
-                            <button class="btn-icon" @click="deleteLocation(loc.id)">🗑</button>
+                            <button class="btn-icon" @click="deleteLocation(loc)">🗑</button>
                         </div>
                     </div>
                 </template>
@@ -372,7 +388,7 @@ const handleReorder = async (type, list) => {
                     <span>{{ cat.name }}</span>
                     <div class="actions">
                         <button class="btn-icon" @click="startEdit('category', cat)">✏️</button>
-                        <button class="btn-icon" @click="deleteCategory(cat.id)">🗑</button>
+                        <button class="btn-icon" @click="deleteCategory(cat)">🗑</button>
                     </div>
                 </template>
               </li>

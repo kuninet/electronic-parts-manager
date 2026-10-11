@@ -64,6 +64,16 @@ async function createTestDb() {
       FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE storage_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      part_id INTEGER NOT NULL,
+      location_id INTEGER NOT NULL,
+      memo TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(part_id) REFERENCES parts(id),
+      FOREIGN KEY(location_id) REFERENCES locations(id)
+    );
+
     CREATE TABLE ai_name_suggestions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       part_id INTEGER NOT NULL,
