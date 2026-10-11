@@ -99,6 +99,39 @@ router.get('/', async (req, res) => {
     }
 });
 
+const LOW_STOCK_THRESHOLD = 5;
+// GET /api/parts/stats - サイドバー用の件数
+router.get('/stats', async (req, res) => {
+    try {
+        const db = getDb();
+        const row = await db.get(`
+      SELECT
+        SUM(CASE WHEN deleted_at IS NULL AND used_at IS NULL THEN 1 ELSE 0 END) AS active,
+        SUM(CASE WHEN deleted_at IS NULL AND used_at IS NOT NULL THEN 1 ELSE 0 END) AS used,
+        SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END) AS trash,
+        SUM(CASE WHEN deleted_at IS NULL AND used_at IS NULL AND quantity = 0 THEN 1 ELSE 0 END) AS out_of_stock,
+        SUM(CASE WHEN deleted_at IS NULL AND used_at IS NULL AND quantity > 0 AND quantity < ? THEN 1 ELSE 0 END) AS low_stock
+      FROM parts`, [LOW_STOCK_THRESHOLD]);
+        const categories = await db.all(`
+      SELECT c.id, c.name, COUNT(p.id) AS count
+      FROM categories c
+      LEFT JOIN parts p ON p.category_id = c.id AND p.deleted_at IS NULL AND p.used_at IS NULL
+      GROUP BY c.id ORDER BY c.display_order, c.id`);
+        const uncategorized = await db.get(`SELECT COUNT(*) AS count FROM parts WHERE category_id IS NULL AND deleted_at IS NULL AND used_at IS NULL`);
+        const locations = await db.get('SELECT COUNT(*) AS count FROM locations');
+        const ai = await db.get(`SELECT COUNT(*) AS count FROM ai_name_suggestions s JOIN parts p ON s.part_id = p.id WHERE s.status = 'pending' AND p.deleted_at IS NULL`);
+        res.json({
+            active: row.active || 0, used: row.used || 0, trash: row.trash || 0,
+            lowStock: row.low_stock || 0, outOfStock: row.out_of_stock || 0,
+            locations: locations.count, aiPending: ai.count,
+            categories, uncategorized: uncategorized.count,
+            lowStockThreshold: LOW_STOCK_THRESHOLD
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // GET /api/parts/:id - Get single part
 router.get('/:id', async (req, res) => {
     try {

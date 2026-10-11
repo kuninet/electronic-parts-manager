@@ -1,165 +1,208 @@
+<template>
+  <div class="toast-host">
+    <!-- ステータス通知リージョン（polite） -->
+    <div class="toast-region" role="status" aria-live="polite">
+      <TransitionGroup name="toast">
+        <div
+          v-for="toast in politeToasts"
+          :key="toast.id"
+          class="toast-item"
+          :class="`toast-${toast.type}`"
+          @mouseenter="pause(toast.id)"
+          @mouseleave="resume(toast.id)"
+          @focusin="pause(toast.id)"
+          @focusout="resume(toast.id)"
+        >
+          <div class="toast-icon-wrap" :class="toast.type" aria-hidden="true">
+            <AppIcon :name="getIconName(toast.type)" size="16" />
+          </div>
+          <span class="toast-message">{{ toast.message }}</span>
+          <button
+            type="button"
+            class="toast-close-btn"
+            aria-label="通知を閉じる"
+            @click="dismiss(toast.id)"
+          >
+            <AppIcon name="x" size="12" />
+          </button>
+        </div>
+      </TransitionGroup>
+    </div>
+
+    <!-- アラート通知リージョン（assertive） -->
+    <div class="toast-region" role="alert" aria-live="assertive">
+      <TransitionGroup name="toast">
+        <div
+          v-for="toast in alertToasts"
+          :key="toast.id"
+          class="toast-item"
+          :class="`toast-${toast.type}`"
+          @mouseenter="pause(toast.id)"
+          @mouseleave="resume(toast.id)"
+          @focusin="pause(toast.id)"
+          @focusout="resume(toast.id)"
+        >
+          <div class="toast-icon-wrap" :class="toast.type" aria-hidden="true">
+            <AppIcon :name="getIconName(toast.type)" size="16" />
+          </div>
+          <span class="toast-message">{{ toast.message }}</span>
+          <button
+            type="button"
+            class="toast-close-btn"
+            aria-label="通知を閉じる"
+            @click="dismiss(toast.id)"
+          >
+            <AppIcon name="x" size="12" />
+          </button>
+        </div>
+      </TransitionGroup>
+    </div>
+  </div>
+</template>
+
 <script setup>
+import { computed } from 'vue';
 import { useToast } from '../composables/useToast';
+import AppIcon from './ui/AppIcon.vue';
 
-const { toasts, dismiss } = useToast();
+const { toasts, dismiss, pause, resume } = useToast();
 
-const getIcon = (type) => {
+const politeToasts = computed(() => {
+  return toasts.value.filter((t) => t.type === 'success' || t.type === 'info');
+});
+
+const alertToasts = computed(() => {
+  return toasts.value.filter((t) => t.type === 'warning' || t.type === 'error');
+});
+
+const getIconName = (type) => {
   switch (type) {
     case 'success':
-      return '✅';
-    case 'error':
-      return '❌';
+      return 'check';
     case 'warning':
-      return '⚠️';
+    case 'error':
+      return 'alert';
     case 'info':
     default:
-      return 'ℹ️';
+      return 'info';
   }
 };
 </script>
 
-<template>
-  <div class="toast-host" aria-live="polite" aria-atomic="true">
-    <TransitionGroup name="toast-slide" tag="div" class="toast-container">
-      <div
-        v-for="toast in toasts"
-        :key="toast.id"
-        class="toast-item"
-        :class="`toast-${toast.type}`"
-        role="alert"
-        @click="dismiss(toast.id)"
-      >
-        <span class="toast-icon">{{ getIcon(toast.type) }}</span>
-        <span class="toast-message">{{ toast.message }}</span>
-        <button
-          type="button"
-          class="toast-close-btn"
-          aria-label="閉じる"
-          @click.stop="dismiss(toast.id)"
-        >
-          ×
-        </button>
-      </div>
-    </TransitionGroup>
-  </div>
-</template>
-
 <style scoped>
 .toast-host {
   position: fixed;
-  bottom: 1.5rem;
-  right: 1.5rem;
+  right: 20px;
+  bottom: 20px;
   z-index: 9999;
   pointer-events: none;
-  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 380px;
   width: 100%;
 }
 
-.toast-container {
+.toast-region {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  align-items: flex-end;
+  gap: var(--space-2);
 }
 
 .toast-item {
   pointer-events: auto;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.85rem 1.1rem;
-  background: var(--bg-card-solid);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  box-shadow: var(--shadow-modal);
-  font-size: 0.95rem;
-  line-height: 1.4;
-  cursor: pointer;
+  gap: var(--space-3);
+  padding: 10px var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   word-break: break-word;
-  transition: transform 0.2s ease, opacity 0.2s ease;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
-.toast-item:hover {
-  transform: translateY(-2px);
-}
-
-/* タイプ別アクセント */
-.toast-success {
-  border-left: 4px solid var(--success);
-}
-
-.toast-error {
-  border-left: 4px solid var(--danger);
-}
-
-.toast-warning {
-  border-left: 4px solid var(--warning);
-}
-
-.toast-info {
-  border-left: 4px solid var(--accent-color);
-}
-
-.toast-icon {
-  font-size: 1.1rem;
+.toast-icon-wrap {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toast-icon-wrap.success {
+  color: var(--ok);
+}
+
+.toast-icon-wrap.info {
+  color: var(--accent);
+}
+
+.toast-icon-wrap.warning {
+  color: var(--warn);
+}
+
+.toast-icon-wrap.error {
+  color: var(--ng);
 }
 
 .toast-message {
   flex: 1;
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  color: var(--text);
+  line-height: 1.4;
 }
 
 .toast-close-btn {
   background: transparent;
-  color: var(--text-muted);
-  font-size: 1.25rem;
-  line-height: 1;
-  padding: 0.2rem 0.4rem;
-  border-radius: 4px;
-  cursor: pointer;
   border: none;
-  opacity: 0.7;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--dur);
 }
 
 .toast-close-btn:hover {
-  opacity: 1;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 /* アニメーション */
-.toast-slide-enter-active,
-.toast-slide-leave-active {
-  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+.toast-enter-active {
+  transition: opacity 160ms var(--ease), transform 160ms var(--ease);
 }
 
-.toast-slide-enter-from {
+.toast-leave-active {
+  transition: opacity 120ms var(--ease);
+}
+
+.toast-enter-from {
   opacity: 0;
-  transform: translateY(20px) scale(0.95);
+  transform: translateY(8px);
 }
 
-.toast-slide-leave-to {
+.toast-leave-to {
   opacity: 0;
-  transform: translateX(30px) scale(0.9);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .toast-enter-active,
+  .toast-leave-active {
+    transition-duration: 0ms !important;
+  }
+}
+
+/* モバイル対応 */
 @media (max-width: 768px) {
   .toast-host {
-    bottom: 1rem;
-    left: 1rem;
-    right: 1rem;
+    left: 12px;
+    right: 12px;
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 12px);
     max-width: none;
     width: auto;
-  }
-
-  .toast-container {
-    align-items: stretch;
-  }
-
-  .toast-item {
-    width: 100%;
   }
 }
 </style>

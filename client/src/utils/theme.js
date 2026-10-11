@@ -10,6 +10,11 @@ export const THEMES = {
 
 export const THEME_STORAGE_KEY = 'epm_theme';
 
+export const THEME_COLORS = {
+  light: '#fbfbfc',
+  dark: '#0e0f12'
+};
+
 /**
  * 有効なテーマ設定値か検証・正規化
  * @param {string} theme 

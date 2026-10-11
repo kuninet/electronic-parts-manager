@@ -60,66 +60,79 @@ const removeTag = (index) => {
 .tag-input-wrapper {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .tag-input-container {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .tag-input-field {
-    flex: 1;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--border-color);
-    padding: 0.5rem;
-    border-radius: 4px;
-    color: white;
-    min-width: 100px;
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 0 var(--space-2);
+  height: 32px;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  min-width: 100px;
+}
+
+.tag-input-field:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .tags-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: var(--space-1);
 }
 
 .tag-pill {
-  background: var(--accent-color);
-  color: white;
-  padding: 0.1rem 0.5rem;
-  border-radius: 1rem;
-  font-size: 0.85rem;
-  display: flex;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  font-size: var(--fs-12);
+  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-1);
 }
 
 .remove-tag {
   background: none;
   border: none;
-  color: white;
-  font-size: 1.1rem;
+  color: var(--accent-text);
+  font-size: var(--fs-12);
   cursor: pointer;
   padding: 0;
   line-height: 1;
+  opacity: 0.7;
 }
 
 .remove-tag:hover {
-  color: #ffcccc;
+  opacity: 1;
+  color: var(--ng);
 }
 
 .btn-small {
-  padding: 0.4rem 0.8rem;
-  font-size: 0.9rem;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid var(--border-color);
-  color: white;
-  border-radius: 4px;
+  padding: 0 var(--space-3);
+  height: 32px;
+  font-size: var(--fs-13);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-md);
   cursor: pointer;
+  transition: background-color var(--dur);
 }
 
 .btn-small:hover {
-    background: rgba(255, 255, 255, 0.2);
+  background: var(--surface-hover);
 }
 </style>

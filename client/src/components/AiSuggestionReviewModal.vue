@@ -344,7 +344,7 @@ const getConfidenceBadgeClass = (confidence) => {
 .modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.75);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -358,12 +358,12 @@ const getConfidenceBadgeClass = (confidence) => {
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg-card-solid);
-  color: var(--text-main);
-  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  border-radius: var(--radius-lg);
   overflow: hidden;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border);
 }
 
 .modal-header {
@@ -371,18 +371,18 @@ const getConfidenceBadgeClass = (confidence) => {
   justify-content: space-between;
   align-items: flex-start;
   padding: 1.25rem 1.5rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--border);
 }
 
 .header-title-row h2 {
   margin: 0;
   font-size: 1.35rem;
-  color: #f8fafc;
+  color: var(--text);
 }
 
 .header-subtitle {
   font-size: 0.85rem;
-  color: #94a3b8;
+  color: var(--text-2);
   margin-top: 0.25rem;
   display: block;
 }
@@ -391,13 +391,14 @@ const getConfidenceBadgeClass = (confidence) => {
   display: flex;
   gap: 1rem;
   padding: 0.75rem 1.5rem;
-  background: rgba(0, 0, 0, 0.2);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
   align-items: center;
 }
 
 .apply-high-btn {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  background: var(--ok-fg);
+  color: var(--bg);
   border: none;
   font-weight: bold;
 }
@@ -415,7 +416,7 @@ const getConfidenceBadgeClass = (confidence) => {
 
 .modal-footer {
   padding: 1rem 1.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--border);
   display: flex;
   justify-content: flex-end;
 }
@@ -423,17 +424,17 @@ const getConfidenceBadgeClass = (confidence) => {
 .state-message {
   text-align: center;
   padding: 3rem 1rem;
-  color: #94a3b8;
+  color: var(--text-2);
 }
 
 .empty-message p {
   font-size: 1.1rem;
-  color: #f1f5f9;
+  color: var(--text);
 }
 
 .empty-message .subtext {
   font-size: 0.9rem;
-  color: #64748b;
+  color: var(--text-3);
   margin-top: 0.5rem;
 }
 
@@ -448,15 +449,15 @@ const getConfidenceBadgeClass = (confidence) => {
   grid-template-columns: 140px 1fr 110px;
   gap: 1.25rem;
   padding: 1.25rem;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   align-items: start;
 }
 
 .suggestion-card.mismatch {
-  border-color: #ef4444;
-  background: rgba(239, 68, 68, 0.05);
+  border-color: var(--ng);
+  background: var(--ng-bg);
 }
 
 .card-image-col {
@@ -470,28 +471,28 @@ const getConfidenceBadgeClass = (confidence) => {
   width: 130px;
   height: 130px;
   object-fit: cover;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
 }
 
 .no-img-box {
   width: 130px;
   height: 130px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 8px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #64748b;
+  color: var(--text-3);
   font-size: 0.85rem;
 }
 
 .model-badge {
   font-size: 0.72rem;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-2);
   padding: 0.2rem 0.5rem;
   border-radius: 9999px;
-  color: #cbd5e1;
+  color: var(--text-2);
   max-width: 130px;
   text-overflow: ellipsis;
   overflow: hidden;
@@ -512,11 +513,11 @@ const getConfidenceBadgeClass = (confidence) => {
 
 .orig-name {
   font-size: 0.85rem;
-  color: #94a3b8;
+  color: var(--text-2);
 }
 
 .orig-val {
-  color: #e2e8f0;
+  color: var(--text);
   margin-left: 0.4rem;
   font-weight: 500;
 }
@@ -529,29 +530,29 @@ const getConfidenceBadgeClass = (confidence) => {
 }
 
 .badge-high {
-  background: rgba(16, 185, 129, 0.2);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.4);
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+  border: 1px solid var(--ok);
 }
 
 .badge-mid {
-  background: rgba(245, 158, 11, 0.2);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border: 1px solid var(--warn);
 }
 
 .badge-low {
-  background: rgba(239, 68, 68, 0.2);
-  color: #f87171;
-  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: var(--ng-bg);
+  color: var(--ng-fg);
+  border: 1px solid var(--ng);
 }
 
 .alert-box-warning {
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid #ef4444;
-  color: #fca5a5;
+  background: var(--ng-bg);
+  border: 1px solid var(--ng);
+  color: var(--ng-fg);
   padding: 0.5rem 0.75rem;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 0.82rem;
 }
 
@@ -563,25 +564,25 @@ const getConfidenceBadgeClass = (confidence) => {
 
 .field-label {
   font-size: 0.8rem;
-  color: #94a3b8;
+  color: var(--text-2);
   font-weight: 600;
 }
 
 .edit-name-input {
   width: 100%;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: 0.6rem 0.8rem;
-  color: #fff;
+  color: var(--text);
   font-size: 0.95rem;
   font-weight: 600;
 }
 
 .edit-name-input:focus {
   outline: none;
-  border-color: #38bdf8;
-  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--accent);
+  background: var(--surface-2);
 }
 
 .meta-tags-grid {
@@ -592,26 +593,26 @@ const getConfidenceBadgeClass = (confidence) => {
 
 .meta-tag {
   font-size: 0.78rem;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  color: #e2e8f0;
+  border-radius: var(--radius-sm);
+  color: var(--text);
 }
 
 .meta-tag .tag-k {
-  color: #94a3b8;
+  color: var(--text-2);
   margin-right: 0.25rem;
 }
 
 .meta-tag.highlight {
-  background: rgba(56, 189, 248, 0.15);
-  color: #7dd3fc;
-  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent);
 }
 
 .category-hint-row {
   font-size: 0.85rem;
-  color: #cbd5e1;
+  color: var(--text-2);
 }
 
 .category-checkbox-label {
@@ -623,7 +624,7 @@ const getConfidenceBadgeClass = (confidence) => {
 
 .part-description {
   font-size: 0.8rem;
-  color: #94a3b8;
+  color: var(--text-2);
   margin: 0;
   line-height: 1.4;
 }

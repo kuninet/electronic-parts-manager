@@ -227,42 +227,43 @@ const handleReset = async () => {
 <style scoped>
 .modal-overlay {
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.7);
+  inset: 0;
+  background: var(--overlay);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 1000;
+  padding: var(--space-4);
 }
 
 .modal-content {
-  background: var(--bg-card-solid);
-  color: var(--text-main);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   padding: 2rem;
   width: 100%;
   max-width: 500px;
   max-height: 90vh; /* Handle small screens */
   overflow-y: auto;
   position: relative;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-lg);
 }
 
 .danger-zone {
-    border: 1px solid var(--danger);
+    border: 1px solid var(--ng);
     padding: 1rem;
-    border-radius: 8px;
-    background: rgba(220, 38, 38, 0.1);
+    border-radius: var(--radius-md);
+    background: var(--ng-bg);
 }
 
 .danger-zone h3 {
-    color: var(--danger);
+    color: var(--ng);
 }
 
 h2 {
   margin-bottom: 2rem;
-  color: var(--accent-color);
+  color: var(--accent);
 }
 
 h3 {
@@ -276,7 +277,7 @@ h3 {
 
 .divider {
   height: 1px;
-  background: var(--border-color);
+  background: var(--border);
   margin: 1.5rem 0;
 }
 
@@ -298,19 +299,19 @@ h3 {
 }
 
 .btn-outline {
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   background: transparent;
-  color: var(--text-primary);
+  color: var(--text);
   display: inline-block;
   cursor: pointer;
   padding: 0.75rem 1.5rem;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-weight: 600;
 }
 
 .btn-outline:hover {
-  border-color: var(--accent-color);
-  background: rgba(255,255,255,0.05);
+  border-color: var(--accent);
+  background: var(--surface-hover);
 }
 
 .hidden-input {
@@ -320,15 +321,15 @@ h3 {
 .status-msg {
   margin-top: 1rem;
   padding: 0.5rem;
-  border-radius: 4px;
-  background: rgba(0,0,0,0.2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
 }
 
-.status-msg.success { color: var(--success); }
-.status-msg.error { color: var(--danger); }
+.status-msg.success { color: var(--ok); }
+.status-msg.error { color: var(--ng); }
 .status-msg.info { 
-    color: var(--accent-color); 
-    border-left: 3px solid var(--accent-color);
+    color: var(--accent); 
+    border-left: 3px solid var(--accent);
 }
 
 .footer {
@@ -343,23 +344,23 @@ h3 {
 
 .progress-bar-container {
   margin-top: 0.5rem;
-  background: rgba(255,255,255,0.1);
-  border-radius: 4px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
   height: 8px;
   overflow: hidden;
 }
 
 .progress-bar {
   height: 100%;
-  background: var(--accent-color);
-  border-radius: 4px;
+  background: var(--accent);
+  border-radius: var(--radius-sm);
   transition: width 0.3s ease;
 }
 
 .progress-label {
   text-align: right;
   font-size: 0.8rem;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-top: 0.25rem;
 }
 </style>

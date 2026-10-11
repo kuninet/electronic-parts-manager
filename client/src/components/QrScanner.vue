@@ -618,7 +618,7 @@ onUnmounted(() => {
       <div class="form-group">
         <label>📷 写真（任意）</label>
         <input type="file" accept="image/*" @change="onLocationImageChange" class="form-input-file" :disabled="resizingLocationImage" />
-        <p v-if="resizingLocationImage" class="resizing-text" style="color: var(--accent-color, #38bdf8); font-size: 0.85rem; margin-top: 0.3rem;">⏳ 画像を最適化中...</p>
+        <p v-if="resizingLocationImage" class="resizing-text" style="color: var(--accent); font-size: 0.85rem; margin-top: 0.3rem;">⏳ 画像を最適化中...</p>
         <img v-if="locationImagePreview && !resizingLocationImage" :src="locationImagePreview" class="image-preview" />
       </div>
 
@@ -664,7 +664,7 @@ onUnmounted(() => {
           :disabled="resizingPartImage"
         />
         <p class="form-hint">スマホやiPadではカメラが優先して開きます。</p>
-        <p v-if="resizingPartImage" class="resizing-text" style="color: var(--accent-color, #38bdf8); font-size: 0.85rem; margin-top: 0.3rem;">⏳ 画像を最適化中...</p>
+        <p v-if="resizingPartImage" class="resizing-text" style="color: var(--accent); font-size: 0.85rem; margin-top: 0.3rem;">⏳ 画像を最適化中...</p>
         <img v-if="partImagePreview && !resizingPartImage" :src="partImagePreview" class="image-preview" />
       </div>
 
@@ -829,31 +829,31 @@ onUnmounted(() => {
 }
 
 .btn-back {
-    color: var(--text-secondary);
+    color: var(--text-2);
     font-size: 0.85rem;
     text-decoration: none;
     padding: 0.4rem 0.8rem;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     transition: all 0.2s;
 }
 .btn-back:hover {
-    border-color: var(--accent-color);
-    color: var(--accent-color);
+    border-color: var(--accent);
+    color: var(--accent);
 }
 
 /* ステータスバー */
 .status-bar {
     padding: 0.75rem 1rem;
-    border-radius: 10px;
+    border-radius: var(--radius-md);
     margin-bottom: 1rem;
     font-weight: 600;
     font-size: 0.9rem;
     animation: slideIn 0.3s ease;
 }
-.status-bar.success { background: rgba(34, 197, 94, 0.2); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.3); }
-.status-bar.error { background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
-.status-bar.info { background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); }
+.status-bar.success { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok); }
+.status-bar.error { background: var(--ng-bg); color: var(--ng-fg); border: 1px solid var(--ng); }
+.status-bar.info { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); }
 
 @keyframes slideIn {
     from { transform: translateY(-10px); opacity: 0; }
@@ -872,25 +872,24 @@ onUnmounted(() => {
     flex-direction: column;
     align-items: center;
     padding: 1.5rem;
-    border-radius: 16px;
-    border: 1px solid var(--border-color);
-    background: var(--bg-card);
-    backdrop-filter: blur(12px);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: var(--surface);
     cursor: pointer;
     transition: all 0.3s ease;
 }
 .menu-btn:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+    box-shadow: var(--shadow-lg);
 }
 .menu-btn:active {
     transform: translateY(0);
 }
 
-.box-btn:hover { border-color: #f59e0b; }
-.part-btn:hover { border-color: #22c55e; }
-.store-btn:hover { border-color: #38bdf8; }
-.print-btn:hover { border-color: #a78bfa; }
+.box-btn:hover { border-color: var(--warn); }
+.part-btn:hover { border-color: var(--ok-fg); }
+.store-btn:hover { border-color: var(--accent); }
+.print-btn:hover { border-color: var(--accent); }
 
 .menu-icon {
     font-size: 2.5rem;
@@ -900,12 +899,12 @@ onUnmounted(() => {
 .menu-label {
     font-size: 1.1rem;
     font-weight: 700;
-    color: var(--text-primary);
+    color: var(--text);
 }
 
 .menu-desc {
     font-size: 0.8rem;
-    color: var(--text-secondary);
+    color: var(--text-2);
     margin-top: 0.25rem;
 }
 
@@ -921,19 +920,19 @@ onUnmounted(() => {
     font-weight: 600;
     font-size: 1rem;
     padding: 1rem;
-    background: var(--bg-card);
-    border-radius: 12px;
-    border: 1px solid var(--border-color);
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
 }
 
 .stored-list {
     margin-top: 0.5rem;
     font-size: 0.8rem;
-    color: var(--text-secondary);
+    color: var(--text-2);
 }
 
 .qr-reader {
-    border-radius: 12px;
+    border-radius: var(--radius-md);
     overflow: hidden;
 }
 
@@ -962,13 +961,13 @@ onUnmounted(() => {
 }
 
 .qr-id-display {
-    background: rgba(56, 189, 248, 0.15);
+    background: var(--accent-soft);
     padding: 0.5rem 1rem;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     font-family: monospace;
     font-size: 0.85rem;
     margin-bottom: 1rem;
-    color: var(--accent-color);
+    color: var(--accent);
 }
 
 .form-group {
@@ -980,21 +979,21 @@ onUnmounted(() => {
     font-size: 0.85rem;
     font-weight: 600;
     margin-bottom: 0.3rem;
-    color: var(--text-secondary);
+    color: var(--text-2);
 }
 
 .form-input {
     width: 100%;
     padding: 0.75rem;
-    background: rgba(0,0,0,0.3);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    color: var(--text-primary);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text);
     font-size: 1rem;
     font-family: inherit;
 }
 .form-input:focus {
-    border-color: var(--accent-color);
+    border-color: var(--accent);
     outline: none;
 }
 
@@ -1008,13 +1007,13 @@ onUnmounted(() => {
     margin-top: 0.5rem;
     max-width: 100%;
     max-height: 200px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     object-fit: cover;
 }
 
 .form-hint {
     font-size: 0.75rem;
-    color: var(--text-secondary);
+    color: var(--text-2);
     margin-top: 0.25rem;
 }
 
@@ -1026,7 +1025,7 @@ onUnmounted(() => {
 
 .btn {
     padding: 0.75rem 1.5rem;
-    border-radius: 10px;
+    border-radius: var(--radius-md);
     font-weight: 600;
     font-size: 1rem;
     flex: 1;
@@ -1037,9 +1036,9 @@ onUnmounted(() => {
 }
 
 .btn-primary {
-    background: var(--accent-gradient);
-    color: white;
-    box-shadow: 0 4px 15px rgba(14, 165, 233, 0.3);
+    background: var(--accent);
+    color: white; /* theme-exempt: プライマリボタンの白文字 */
+    box-shadow: var(--shadow-md);
 }
 .btn-primary:hover {
     transform: translateY(-1px);
@@ -1057,12 +1056,12 @@ onUnmounted(() => {
 }
 
 .btn-cancel {
-    background: rgba(255,255,255,0.05);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color);
+    background: var(--surface-2);
+    color: var(--text-2);
+    border: 1px solid var(--border);
 }
 .btn-cancel:hover {
-    border-color: var(--text-secondary);
+    border-color: var(--border-strong);
 }
 
 @media (max-width: 480px) {
@@ -1089,15 +1088,15 @@ onUnmounted(() => {
     display: flex;
     gap: 1rem;
     padding: 1rem;
-    background: rgba(0,0,0,0.2);
-    border-radius: 12px;
+    background: var(--surface-2);
+    border-radius: var(--radius-md);
     margin-bottom: 1rem;
 }
 
 .info-image {
     width: 80px;
     height: 80px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     object-fit: cover;
     flex-shrink: 0;
 }
@@ -1110,12 +1109,12 @@ onUnmounted(() => {
 .info-qr {
     font-family: monospace;
     font-size: 0.8rem;
-    color: var(--accent-color);
+    color: var(--accent);
 }
 
 .info-desc {
     font-size: 0.85rem;
-    color: var(--text-secondary);
+    color: var(--text-2);
 }
 
 .parts-in-box h3 {
@@ -1132,29 +1131,29 @@ onUnmounted(() => {
     display: flex;
     justify-content: space-between;
     padding: 0.5rem 0.75rem;
-    background: rgba(0,0,0,0.15);
-    border-radius: 8px;
+    background: var(--surface-2);
+    border-radius: var(--radius-md);
     margin-bottom: 0.4rem;
 }
 
 .part-qty {
-    color: var(--text-secondary);
+    color: var(--text-2);
     font-size: 0.85rem;
 }
 
 .empty-box {
     text-align: center;
     padding: 1rem;
-    color: var(--text-secondary);
+    color: var(--text-2);
     font-size: 0.9rem;
 }
 
 /* 箱にしまう完了 */
 .store-result {
     padding: 1rem;
-    background: rgba(34, 197, 94, 0.1);
-    border-radius: 12px;
-    border: 1px solid rgba(34, 197, 94, 0.2);
+    background: var(--ok-bg);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--ok);
 }
 
 .stored-result-list {
@@ -1164,7 +1163,7 @@ onUnmounted(() => {
 }
 .stored-result-list li {
     padding: 0.4rem 0;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid var(--border);
 }
 .stored-result-list li::before {
     content: '✅ ';
@@ -1172,15 +1171,15 @@ onUnmounted(() => {
 
 /* 印刷プレビュー */
 .print-desc {
-    color: var(--text-secondary);
+    color: var(--text-2);
     font-size: 0.85rem;
     margin-bottom: 1rem;
 }
 
 .print-preview {
-    background: rgba(0,0,0,0.2);
+    background: var(--surface-2);
     padding: 1rem;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     font-size: 0.85rem;
     margin-top: 0.5rem;
 }

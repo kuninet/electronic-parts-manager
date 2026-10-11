@@ -15,9 +15,10 @@
   - Excelファイルからのデータインポート機能
 
 ## 技術スタック
-- **Frontend**: Vue.js 3, Vite
+- **Frontend**: Vue.js 3, Vite (PWA 対応)
 - **Backend**: Node.js, Express, SQLite3
-- **Design**: CSS (Glassmorphismを採用したモダンなダークテーマ)
+- **Design**: CSS (Linear / Raycast 風の高密度モダンUI、精緻な 1px ボーダー、ダーク/ライト自動切替、Geist & Noto Sans JP フォント)
+- **Typography**: `@fontsource-variable/geist`, `@fontsource/noto-sans-jp`
 
 ## セットアップ手順
 

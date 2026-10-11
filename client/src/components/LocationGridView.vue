@@ -231,96 +231,121 @@ const handleEditPart = (part) => {
 
 <style scoped>
 .location-grid-container {
-    padding: 1rem;
+    padding: 16px 20px 32px;
     height: 100%;
-    overflow-y: auto; /* Enable scrolling */
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
 }
 
 .toolbar {
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--space-4);
+}
+
+.controls {
+    margin-bottom: var(--space-4);
+    display: flex;
+    gap: var(--space-3);
+}
+
+.search-box {
+    flex: 1;
+    max-width: 440px;
+}
+
+.search-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 32px;
+    padding: 0 var(--space-2);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.search-label:focus-within {
+    border-color: var(--accent);
+}
+
+.search-icon {
+    color: var(--text-3);
 }
 
 .search-input {
-    width: 100%;
-    max-width: 400px;
-    padding: 0.8rem 1rem;
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
-    background: rgba(255, 255, 255, 0.05);
-    color: white;
-    font-size: 1rem;
-}
-.search-input:focus {
+    flex: 1;
+    height: 100%;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: var(--fs-13);
     outline: none;
-    border-color: var(--accent-color);
-    background: rgba(255, 255, 255, 0.1);
+}
+
+.search-input::placeholder {
+    color: var(--text-3);
 }
 
 .grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 2rem;
-    padding-bottom: 100px; /* Space for scrolling */
+    gap: var(--space-3);
 }
 
 .card {
-    background: rgba(30, 41, 59, 0.7);
-    border: 1px solid var(--border-color);
-    border-radius: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     overflow: hidden;
     cursor: pointer;
-    transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
+    transition: border-color var(--dur), box-shadow var(--dur);
     display: flex;
     flex-direction: column;
 }
 
 .card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 12px 24px rgba(0,0,0,0.4);
-    border-color: var(--accent-color);
-    background: rgba(30, 41, 59, 0.9);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
 }
 
 .hover-image-preview {
     position: fixed;
     z-index: 2500;
     width: 540px;
-    padding: 0.75rem;
-    border-radius: 14px;
-    background: rgba(15, 23, 42, 0.96);
-    border: 1px solid rgba(148, 163, 184, 0.35);
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+    padding: var(--space-3);
+    border-radius: var(--radius-xl);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-lg);
     pointer-events: none;
     display: flex;
     flex-direction: column;
-    gap: 0.6rem;
-    backdrop-filter: blur(8px);
+    gap: var(--space-2);
 }
 
 .hover-image-preview img {
     width: 100%;
     height: 430px;
     object-fit: contain;
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.04);
+    border-radius: var(--radius-md);
+    background: var(--surface-2);
 }
 
 .hover-image-preview span {
-    font-size: 0.85rem;
-    color: var(--text-primary);
+    font-size: var(--fs-12);
+    color: var(--text);
     line-height: 1.35;
     word-break: break-word;
 }
 
 .card-image {
-    height: 200px;
-    background: rgba(0,0,0,0.2);
+    height: 180px;
+    background: var(--surface-2);
     display: flex;
     align-items: center;
     justify-content: center;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
 }
 
 .card-image img {
@@ -330,69 +355,75 @@ const handleEditPart = (part) => {
 }
 
 .placeholder {
-    font-size: 3rem;
-    opacity: 0.5;
+    color: var(--text-3);
+    font-size: 2.5rem;
 }
 
 .card-content {
-    padding: 1rem;
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    flex: 1;
 }
 
 .card-content h3 {
-    margin: 0 0 0.5rem 0;
-    font-size: 1.1rem;
-    color: var(--text-primary);
+    margin: 0;
+    font-size: var(--fs-14);
+    font-weight: 600;
+    color: var(--text);
 }
 
 .card-content p {
     margin: 0;
-    font-size: 0.9rem;
-    color: var(--text-secondary);
+    font-size: var(--fs-12);
+    color: var(--text-2);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .card-stats {
-    margin-top: 0.5rem;
-    color: var(--text-secondary);
-    font-size: 0.8rem;
+    margin-top: auto;
+    padding-top: var(--space-2);
+    color: var(--text-3);
+    font-size: var(--fs-11);
     text-align: right;
 }
 
 .loading {
     text-align: center;
-    padding: 2rem;
-    color: var(--text-secondary);
+    padding: 40px 20px;
+    color: var(--text-3);
 }
 
 /* Modal Styles */
 .modal-overlay {
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.8);
+  inset: 0;
+  background: var(--overlay);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 2000;
-  padding: 1rem;
+  padding: var(--space-4);
 }
 
 .modal-content {
-  background: #1e293b;
-  border-radius: 12px;
+  background: var(--surface);
+  border-radius: var(--radius-xl);
   width: 100%;
   max-width: 600px;
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border-color);
-  box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
 }
 
 .modal-header {
-    padding: 1rem 1.5rem;
-    border-bottom: 1px solid var(--border-color);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -400,68 +431,81 @@ const handleEditPart = (part) => {
 
 .modal-header h2 {
     margin: 0;
-    font-size: 1.25rem;
-    color: var(--text-primary);
+    font-size: var(--fs-16);
+    font-weight: 600;
+    color: var(--text);
 }
 
 .close-btn {
     background: none;
     border: none;
-    color: var(--text-secondary);
-    font-size: 1.5rem;
+    color: var(--text-3);
+    font-size: var(--fs-16);
     cursor: pointer;
     line-height: 1;
 }
 
+.close-btn:hover {
+    color: var(--text);
+}
+
 .modal-body {
-    padding: 1.5rem;
+    padding: var(--space-4);
     overflow-y: auto;
 }
 
 .loc-summary {
     display: flex;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
     align-items: center;
-    background: rgba(255,255,255,0.03);
-    padding: 1rem;
-    border-radius: 8px;
+    background: var(--surface-2);
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
 }
 
 .preview-loc-img {
     width: 60px;
     height: 60px;
     object-fit: cover;
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
 }
 
 .description {
-    color: var(--text-secondary);
-    font-size: 0.95rem;
+    color: var(--text-2);
+    font-size: var(--fs-13);
 }
 
 .preview-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    margin-top: 1rem;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
 }
 
 .preview-item {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    padding: 0.5rem;
-    background: rgba(255,255,255,0.05);
-    border-radius: 6px;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background-color var(--dur);
+}
+
+.preview-item:hover {
+    background: var(--surface-hover);
 }
 
 .part-thumb {
     width: 40px;
     height: 40px;
     object-fit: cover;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
 }
 
 .part-thumb-placeholder {
@@ -470,9 +514,9 @@ const handleEditPart = (part) => {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(255,255,255,0.1);
-    border-radius: 4px;
-    font-size: 1.2rem;
+    background: var(--surface);
+    border-radius: var(--radius-sm);
+    color: var(--text-3);
 }
 
 .part-details {
@@ -482,44 +526,38 @@ const handleEditPart = (part) => {
 }
 
 .part-name {
-    font-weight: bold;
-    font-size: 0.95rem;
+    font-weight: 500;
+    font-size: var(--fs-13);
+    color: var(--text);
 }
 
 .part-qty {
-    font-size: 0.85rem;
-    color: var(--text-secondary);
+    font-size: var(--fs-11);
+    color: var(--text-3);
 }
 
 .modal-footer {
-    padding: 1rem 1.5rem;
-    border-top: 1px solid var(--border-color);
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--border);
     display: flex;
     justify-content: flex-end;
-    gap: 1rem;
+    gap: var(--space-2);
 }
 
-.clickable-item {
-    cursor: pointer;
-    transition: background 0.2s;
-}
-.clickable-item:hover {
-    background: rgba(255, 255, 255, 0.1);
-}
 .qr-code-badge {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
-    font-size: 0.75rem;
-    font-family: monospace;
-    background: rgba(245, 158, 11, 0.15);
-    color: #fcd34d;
-    padding: 0.1rem 0.5rem;
-    border-radius: 4px;
-    border: 1px solid rgba(245, 158, 11, 0.3);
-    margin-top: 0.2rem;
+    gap: 3px;
+    font-size: var(--fs-11);
+    background: var(--surface-2);
+    color: var(--text-2);
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    margin-top: 2px;
     width: fit-content;
 }
+
 .loc-info-text {
     display: flex;
     flex-direction: column;

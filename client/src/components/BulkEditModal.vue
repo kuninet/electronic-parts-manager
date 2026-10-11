@@ -131,13 +131,13 @@ const handleSave = () => {
 <style scoped>
 .modal-overlay {
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.7);
+  inset: 0;
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  padding: 1rem;
+  padding: var(--space-4);
 }
 
 .modal-content {
@@ -145,79 +145,100 @@ const handleSave = () => {
   max-width: 600px;
   max-height: 90vh;
   overflow-y: auto;
-  background: #1e293b;
-  padding: 2rem;
-  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-5);
+  border-radius: var(--radius-xl);
 }
 
 .modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2rem;
-    border-bottom: 1px solid var(--border-color);
-    padding-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: var(--space-3);
 }
 
 h2 {
-    margin: 0;
-    font-size: 1.5rem;
-    color: var(--text-primary);
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: 600;
+  color: var(--text);
 }
 
 .form-group {
-    margin-bottom: 2rem;
+  margin-bottom: var(--space-4);
 }
 
 label {
-    display: block;
-    margin-bottom: 0.5rem;
-    color: var(--text-secondary);
-    font-weight: bold;
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  font-weight: 500;
 }
 
 .radio-group {
-    display: flex;
-    gap: 1.5rem;
-    margin-bottom: 0.5rem;
+  display: flex;
+  gap: var(--space-4);
+  margin-bottom: var(--space-2);
 }
 
 .radio-group label {
-    font-weight: normal;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    color: white;
+  font-weight: normal;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text);
 }
 
 select {
-    width: 100%;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--border-color);
-    padding: 0.75rem;
-    border-radius: 8px;
-    color: white;
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 0 var(--space-2);
+  height: 32px;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: var(--fs-13);
+  outline: none;
+  transition: border-color var(--dur);
+}
+
+select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 select option {
-    background: #1e293b;
+  background: var(--surface);
+  color: var(--text);
 }
 
 .mt-2 {
-    margin-top: 0.5rem;
+  margin-top: var(--space-2);
 }
 
 .tag-desc {
-    font-size: 0.85rem;
-    color: var(--text-secondary);
-    margin-bottom: 0.5rem;
+  font-size: var(--fs-12);
+  color: var(--text-3);
+  margin-bottom: var(--space-2);
 }
 
 .form-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 1rem;
-    margin-top: 2rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+@media (max-width: 768px) {
+  select {
+    height: 44px;
+    font-size: 16px;
+  }
 }
 </style>
