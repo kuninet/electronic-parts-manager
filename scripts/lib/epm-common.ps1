@@ -218,25 +218,27 @@ function Test-Prerequisites {
 }
 
 function Get-Pm2Apps {
+    # pm2 jlist の複数行JSONパース (従来の Select-Object -Last 1 では整形JSONの1行目しか拾えず不具合となるため [ と ] のインデックスで抽出)
     try {
-        $prevPref = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $jlistOutput = pm2 jlist 2>$null
-        $ErrorActionPreference = $prevPref
-        if (-not $jlistOutput) { return @() }
-        $jsonLine = $jlistOutput | Where-Object { $_ -match '^\s*\[\s*(\{|\])' } | Select-Object -Last 1
-        if (-not $jsonLine) { return @() }
-        $parsed = $jsonLine | ConvertFrom-Json
-        $result = @()
-        foreach ($app in $parsed) {
-            $result += [pscustomobject]@{
-                name   = $app.name
-                status = $app.pm2_env.status
+        $raw = (cmd /c "pm2 jlist 2>nul") -join "`n"
+        if (-not $raw) { return ,@() }
+        $startIdx = $raw.IndexOf('[')
+        $endIdx = $raw.LastIndexOf(']')
+        if ($startIdx -ge 0 -and $endIdx -ge $startIdx) {
+            $jsonStr = $raw.Substring($startIdx, $endIdx - $startIdx + 1)
+            $parsed = $jsonStr | ConvertFrom-Json
+            $result = @()
+            foreach ($app in $parsed) {
+                $result += [pscustomobject]@{
+                    name   = $app.name
+                    status = $app.pm2_env.status
+                }
             }
+            return ,([object[]]$result)
         }
-        return $result
+        return ,@()
     } catch {
-        return @()
+        return ,@()
     }
 }
 
@@ -278,6 +280,12 @@ function Wait-EpmHealthy {
         $serverApp = $apps | Where-Object { $_.name -eq 'epm-server' }
         $webApp = $apps | Where-Object { $_.name -eq 'epm-web' }
         $pm2Ok = ($null -ne $serverApp -and $serverApp.status -eq 'online' -and $null -ne $webApp -and $webApp.status -eq 'online')
+
+        # PM2 jlist からの取得が空配列等で判定できない場合のフォールバック
+        # API と WebPort が通信可能であれば、実質的に正常稼働とみなす
+        if (-not $pm2Ok -and ($apps.Count -eq 0 -or $null -eq $apps) -and $apiOk -and $webOk) {
+            $pm2Ok = $true
+        }
 
         # (c) Webポート (5173) 接続確認
         $webOk = $false

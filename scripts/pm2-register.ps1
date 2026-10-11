@@ -40,13 +40,10 @@ foreach ($d in $dirs) {
     }
 }
 
-# 3. 初回ビルドの実行（dist が無い場合）
-$distDir = Join-Path $paths.ClientDir 'dist'
-if (-not (Test-Path -LiteralPath $distDir)) {
-    Write-EpmLog -Level STEP -Message "フロントエンドの初期ビルドを実行します..."
-    Invoke-ClientBuild -ClientDir $paths.ClientDir
-    $null = Switch-ClientDist -ClientDir $paths.ClientDir
-}
+# 3. フロントエンドのビルド実行（登録時は確実に最新成果物を配置）
+Write-EpmLog -Level STEP -Message "フロントエンドのビルドを実行します..."
+Invoke-ClientBuild -ClientDir $paths.ClientDir
+$null = Switch-ClientDist -ClientDir $paths.ClientDir
 
 # 4. ポート確認
 $currentApps = Get-Pm2Apps

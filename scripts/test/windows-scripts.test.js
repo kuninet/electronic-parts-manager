@@ -157,7 +157,7 @@ test('Windows スクリプト静的検査 (S-1 〜 S-8)', async (t) => {
         }
 
         assert.match(content, /database-\\d\{8\}_\\d\{6\}/, 'バックアップ削除正規表現が含まれていること');
-        assert.match(content, /Select-Object\s+-Last\s+1/, 'Get-Pm2Apps に Select-Object -Last 1 が含まれていること');
+        assert.match(content, /(Select-Object\s+-Last\s+1|LastIndexOf)/, 'Get-Pm2Apps に JSON パース処理が含まれていること');
     });
 
     await t.test('S-7: ecosystem.config.js の構造と設定が正しいこと', () => {
