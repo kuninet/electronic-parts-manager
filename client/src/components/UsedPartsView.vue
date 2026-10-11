@@ -1,8 +1,153 @@
+<template>
+  <div class="used-parts-view">
+    <!-- 検索・絞り込みコントロール -->
+    <div class="used-controls">
+      <div class="search-box">
+        <label class="search-label">
+          <AppIcon name="search" size="14" class="search-icon" />
+          <input
+            v-model="searchQuery"
+            type="search"
+            placeholder="部品名や説明で検索..."
+            class="search-input"
+          />
+        </label>
+      </div>
+      <div class="search-box">
+        <label class="search-label">
+          <input
+            v-model="usedForFilter"
+            type="text"
+            placeholder="使用先で絞り込み..."
+            class="search-input"
+          />
+        </label>
+      </div>
+    </div>
+
+    <!-- ローディング -->
+    <div v-if="loading" class="state-message">
+      読み込み中...
+    </div>
+
+    <!-- エラー -->
+    <div v-else-if="error" class="state-message error">
+      {{ error }}
+    </div>
+
+    <!-- 空状態 -->
+    <div v-else-if="usedParts.length === 0" class="empty-state">
+      <div class="empty-icon" aria-hidden="true">
+        <AppIcon name="check" size="32" />
+      </div>
+      <p class="empty-text">現在、使用済みの部品はありません</p>
+    </div>
+
+    <!-- 一覧表示 -->
+    <div v-else class="used-content">
+      <!-- デスクトップ：テーブル表示 -->
+      <div class="used-table-wrap only-desktop">
+        <table class="used-table">
+          <thead>
+            <tr>
+              <th style="width: 48px;">写真</th>
+              <th>型番 / 名前</th>
+              <th>使用先</th>
+              <th>使用日時</th>
+              <th>備考</th>
+              <th>元の保管場所</th>
+              <th>個数</th>
+              <th style="width: 140px;">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="part in usedParts" :key="part.id" class="used-row">
+              <td class="col-thumb">
+                <div class="thumb-box-40">
+                  <img
+                    v-if="part.image_path"
+                    :src="part.image_path"
+                    :alt="part.name"
+                    loading="lazy"
+                    decoding="async"
+                    class="thumb-img"
+                  />
+                  <div v-else class="thumb-placeholder">
+                    <AppIcon name="chip" size="20" />
+                  </div>
+                </div>
+              </td>
+              <td class="col-name">
+                <div class="name-wrap">
+                  <span v-if="part.part_number" class="part-pn mono">{{ part.part_number }}</span>
+                  <span class="part-nm">{{ part.name }}</span>
+                </div>
+              </td>
+              <td class="col-meta">{{ part.used_for || '-' }}</td>
+              <td class="col-meta mono">{{ formatDateTime(part.used_at) }}</td>
+              <td class="col-note">{{ part.used_note || '-' }}</td>
+              <td class="col-meta">{{ part.location_name || '-' }}</td>
+              <td class="col-qty mono">{{ part.quantity }}</td>
+              <td class="col-actions">
+                <button type="button" class="btn btn-secondary btn-sm" @click="$emit('edit', part)">
+                  編集
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" @click="restorePart(part)">
+                  通常へ戻す
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- モバイル：スタック表示 -->
+      <div class="used-stack only-mobile">
+        <article v-for="part in usedParts" :key="part.id" class="used-stack-item">
+          <div class="thumb-box-52">
+            <img
+              v-if="part.image_path"
+              :src="part.image_path"
+              :alt="part.name"
+              loading="lazy"
+              decoding="async"
+              class="thumb-img"
+            />
+            <div v-else class="thumb-placeholder">
+              <AppIcon name="chip" size="28" />
+            </div>
+          </div>
+          <div class="stack-info">
+            <span v-if="part.part_number" class="part-pn mono">{{ part.part_number }}</span>
+            <h2 class="part-nm-title">{{ part.name }}</h2>
+            <div class="stack-meta">
+              <span>使用先: {{ part.used_for || '-' }}</span>
+              <span>·</span>
+              <span class="mono">{{ formatDateTime(part.used_at) }}</span>
+            </div>
+            <div class="stack-actions">
+              <button type="button" class="btn btn-secondary btn-sm" @click="$emit('edit', part)">
+                編集
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" @click="restorePart(part)">
+                通常へ戻す
+              </button>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </div>
+</template>
+
 <script setup>
 import { ref, onMounted, watch } from 'vue';
 import api from '../api';
+import { useToast } from '../composables/useToast';
+import AppIcon from './ui/AppIcon.vue';
 
-const emit = defineEmits(['edit']);
+const toast = useToast();
+defineEmits(['edit']);
 
 const usedParts = ref([]);
 const loading = ref(true);
@@ -54,226 +199,240 @@ const restorePart = async (part) => {
   try {
     await api.post(`/parts/${part.id}/unuse`);
     await fetchParts();
+    toast.success(`部品「${part.name}」を通常在庫へ復帰しました`);
   } catch (err) {
     console.error(err);
     const message = err.response?.data?.error || '通常在庫への復帰に失敗しました';
-    alert(message);
+    toast.error(message);
   }
 };
 
 defineExpose({ fetchParts });
 </script>
 
-<template>
-  <div class="used-parts-container">
-    <div class="controls glass-panel">
-      <input
-        v-model="searchQuery"
-        type="text"
-        placeholder="部品名や説明で検索..."
-        class="search-input"
-      />
-      <input
-        v-model="usedForFilter"
-        type="text"
-        placeholder="使用先で絞り込み..."
-        class="filter-input"
-      />
-    </div>
-
-    <div v-if="loading" class="loading">読み込み中...</div>
-    <div v-else-if="error" class="error">{{ error }}</div>
-    <div v-else-if="usedParts.length === 0" class="empty-state glass-panel">
-      現在、使用済みの部品はありません
-    </div>
-    <div v-else class="used-parts-grid">
-      <div v-for="part in usedParts" :key="part.id" class="used-part-card glass-panel">
-        <div class="used-part-image">
-          <img v-if="part.image_path" :src="part.image_path" :alt="part.name" />
-          <div v-else class="placeholder-image">⚡️</div>
-        </div>
-
-        <div class="used-part-content">
-          <div class="used-part-header">
-            <h3>{{ part.name }}</h3>
-            <span class="used-badge">使用済み</span>
-          </div>
-
-          <p v-if="part.part_number" class="part-number-badge" title="型番">🔖 {{ part.part_number }}</p>
-          <p v-if="part.qr_code" class="qr-code-badge">📱 {{ part.qr_code }}</p>
-          <p class="used-meta"><strong>使用先:</strong> {{ part.used_for || '-' }}</p>
-          <p class="used-meta"><strong>使用日時:</strong> {{ formatDateTime(part.used_at) }}</p>
-          <p v-if="part.used_note" class="used-note">{{ part.used_note }}</p>
-          <p class="used-submeta">カテゴリ: {{ part.category_name || '-' }}</p>
-          <p class="used-submeta">元の保管場所: {{ part.location_name || '-' }}</p>
-          <p class="used-submeta">個数: {{ part.quantity }}</p>
-
-          <div class="card-actions">
-            <button class="btn btn-outline" @click="$emit('edit', part)">編集</button>
-            <button class="btn btn-primary" @click="restorePart(part)">通常へ戻す</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</template>
-
 <style scoped>
-.used-parts-container {
+.used-parts-view {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  padding: 16px 20px 32px;
+  gap: var(--space-4);
 }
 
-.controls {
+.used-controls {
   display: flex;
-  gap: 1rem;
-  padding: 1rem;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
-.search-input,
-.filter-input {
+.search-box {
   flex: 1;
-  min-width: 220px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-color);
-  padding: 0.75rem 1rem;
-  border-radius: 8px;
-  color: white;
-  font-size: 1rem;
+  min-width: 200px;
 }
 
-.search-input:focus,
-.filter-input:focus {
+.search-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.search-label:focus-within {
+  border-color: var(--accent);
+}
+
+.search-icon {
+  color: var(--text-3);
+}
+
+.search-input {
+  flex: 1;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
   outline: none;
-  border-color: var(--accent-color);
 }
 
-.used-parts-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 1.5rem;
+.search-input::placeholder {
+  color: var(--text-3);
 }
 
-.used-part-card {
-  overflow: hidden;
+.state-message {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+}
+
+.state-message.error {
+  color: var(--ng-fg);
+}
+
+.empty-state {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
+  gap: var(--space-3);
+  text-align: center;
 }
 
-.used-part-image {
-  height: 220px;
-  background: rgba(0, 0, 0, 0.2);
+.empty-icon {
+  color: var(--text-3);
+}
+
+.empty-text {
+  font-size: var(--fs-14);
+  color: var(--text-2);
+}
+
+/* デスクトップテーブル */
+.used-table-wrap {
+  overflow-x: auto;
+}
+
+.used-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.used-table th {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-strong);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.used-row td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  background: var(--surface);
+  font-size: var(--fs-13);
+}
+
+.thumb-box-40 {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.used-part-image img {
+.thumb-box-52 {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.thumb-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.placeholder-image {
-  font-size: 3rem;
-  opacity: 0.5;
+.thumb-placeholder {
+  color: var(--text-3);
 }
 
-.used-part-content {
-  padding: 1rem;
+.name-wrap {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
 }
 
-.used-part-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  align-items: flex-start;
+.part-pn {
+  font-size: var(--fs-13);
+  font-weight: 500;
+  color: var(--text);
 }
 
-.used-part-header h3 {
-  margin: 0;
-  font-size: 1.1rem;
+.part-nm {
+  font-size: var(--fs-12);
+  color: var(--text-2);
 }
 
-.used-badge {
-  background: rgba(245, 158, 11, 0.15);
-  color: #fcd34d;
-  border: 1px solid rgba(245, 158, 11, 0.25);
-  border-radius: 999px;
-  padding: 0.2rem 0.7rem;
-  font-size: 0.8rem;
+.col-meta {
+  color: var(--text-2);
+  font-size: var(--fs-12);
+}
+
+.col-note {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.used-meta,
-.used-submeta,
-.used-note {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.95rem;
+.col-qty {
+  font-weight: 500;
+  color: var(--text);
 }
 
-.used-note {
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 8px;
-  padding: 0.75rem;
-  color: var(--text-primary);
-}
-
-.card-actions {
+.col-actions {
   display: flex;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
+  gap: var(--space-2);
 }
 
-.empty-state,
-.loading,
-.error {
-  padding: 2rem;
-  text-align: center;
-  color: var(--text-secondary);
+/* モバイルスタック */
+.used-stack {
+  display: flex;
+  flex-direction: column;
 }
 
-.part-number-badge {
-  display: inline-flex;
+.used-stack-item {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.stack-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.part-nm-title {
+  font-size: var(--fs-13);
+  font-weight: 500;
+  color: var(--text);
+  margin: 0;
+}
+
+.stack-meta {
+  display: flex;
   align-items: center;
-  gap: 0.3rem;
-  font-size: 0.75rem;
-  font-family: monospace;
-  background: rgba(147, 51, 234, 0.15);
-  color: #c084fc;
-  padding: 0.1rem 0.5rem;
-  border-radius: 4px;
-  border: 1px solid rgba(147, 51, 234, 0.3);
-  width: fit-content;
+  gap: var(--space-1);
+  font-size: var(--fs-11);
+  color: var(--text-3);
 }
 
-.qr-code-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.75rem;
-  font-family: monospace;
-  background: rgba(245, 158, 11, 0.15);
-  color: #fcd34d;
-  padding: 0.1rem 0.5rem;
-  border-radius: 4px;
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  width: fit-content;
-}
-
-@media (max-width: 768px) {
-  .controls {
-    flex-direction: column;
-  }
-
-  .used-parts-grid {
-    grid-template-columns: 1fr;
-  }
+.stack-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
 }
 </style>

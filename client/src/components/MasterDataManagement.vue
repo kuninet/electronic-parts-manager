@@ -4,6 +4,9 @@ import api from '../api';
 import draggable from 'vuedraggable';
 import MiniQrScanner from './MiniQrScanner.vue';
 import { resizeImageFile } from '../utils/imageResize';
+import { useToast } from '../composables/useToast';
+
+const toast = useToast();
 
 const props = defineProps({
     initialLocationEditId: {
@@ -62,8 +65,9 @@ const addCategory = async () => {
     await api.post('/categories', { name: newCategory.value });
     newCategory.value = '';
     fetchData();
+    toast.success('カテゴリを追加しました');
   } catch (err) {
-    alert('Failed to add category');
+    toast.error('カテゴリの追加に失敗しました');
   }
 };
 
@@ -72,9 +76,10 @@ const deleteCategory = async (id) => {
   try {
     await api.delete(`/categories/${id}`);
     fetchData();
+    toast.success('カテゴリを削除しました');
   } catch (err) {
-    const msg = err.response?.data?.error || 'Failed to delete category';
-    alert(msg);
+    const msg = err.response?.data?.error || 'カテゴリの削除に失敗しました';
+    toast.error(msg);
   }
 };
 
@@ -127,8 +132,9 @@ const addLocation = async () => {
     newLocation.value = '';
     newLocationImage.value = null;
     fetchData();
+    toast.success('保管場所を追加しました');
   } catch (err) {
-    alert('Failed to add location');
+    toast.error('保管場所の追加に失敗しました');
   }
 };
 
@@ -137,9 +143,10 @@ const deleteLocation = async (id) => {
   try {
     await api.delete(`/locations/${id}`);
     fetchData();
+    toast.success('保管場所を削除しました');
   } catch (err) {
-    const msg = err.response?.data?.error || 'Failed to delete location';
-    alert(msg);
+    const msg = err.response?.data?.error || '保管場所の削除に失敗しました';
+    toast.error(msg);
   }
 };
 
@@ -149,8 +156,9 @@ const addTag = async () => {
     await api.post('/tags', { name: newTag.value });
     newTag.value = '';
     fetchData();
+    toast.success('タグを追加しました');
   } catch (err) {
-    alert('Failed to add tag');
+    toast.error('タグの追加に失敗しました');
   }
 };
 
@@ -159,8 +167,9 @@ const deleteTag = async (id) => {
   try {
     await api.delete(`/tags/${id}`);
     fetchData();
+    toast.success('タグを削除しました');
   } catch (err) {
-    alert('Failed to delete tag');
+    toast.error('タグの削除に失敗しました');
   }
 };
 
@@ -204,10 +213,11 @@ const saveEdit = async () => {
         }
         fetchData();
         cancelEdit();
+        toast.success('更新しました');
     } catch (err) {
         console.error(err);
         const msg = err.response?.data?.error || '更新に失敗しました';
-        alert(msg);
+        toast.error(msg);
     }
 };
 
@@ -220,9 +230,10 @@ const handleReorder = async (type, list) => {
     try {
         const ids = list.map(item => item.id);
         await api.post('/master/reorder', { type, ids });
+        toast.success('並び順を保存しました');
     } catch (err) {
         console.error('Reorder failed', err);
-        alert('順序の保存に失敗しました');
+        toast.error('順序の保存に失敗しました');
     }
 };
 </script>
@@ -415,60 +426,67 @@ const handleReorder = async (type, list) => {
 <style scoped>
 .modal-overlay {
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.7);
+  inset: 0;
+  background: var(--overlay);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 1000;
-  padding: 1rem;
+  padding: var(--space-4);
 }
 
 .modal-content {
-  background: #1e293b;
-  padding: 1.5rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: var(--space-5);
   width: 100%;
   max-width: 600px;
   max-height: 85vh;
   overflow-y: auto;
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
 }
 
 h2 {
-  margin-bottom: 1rem;
-  color: var(--accent-color);
+  margin-bottom: var(--space-3);
+  font-size: var(--fs-16);
+  font-weight: 600;
+  color: var(--text);
 }
 
 /* タブバー */
 .tab-bar {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1.5rem;
-  background: rgba(0,0,0,0.2);
-  padding: 0.25rem;
-  border-radius: 10px;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  padding: 3px;
+  border-radius: var(--radius-md);
 }
 
 .tab-btn {
   flex: 1;
-  padding: 0.6rem 0.5rem;
+  padding: var(--space-2) var(--space-1);
   background: transparent;
   border: none;
-  color: var(--text-secondary);
-  font-weight: 600;
-  font-size: 0.9rem;
-  border-radius: 8px;
+  color: var(--text-2);
+  font-weight: 500;
+  font-size: var(--fs-13);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color var(--dur), color var(--dur);
 }
 
 .tab-btn:hover {
-  color: white;
+  color: var(--text);
 }
 
 .tab-btn.active {
-  background: rgba(14, 165, 233, 0.2);
-  color: var(--accent-color);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
 }
 
 /* タブコンテンツ */
@@ -478,23 +496,27 @@ h2 {
 
 .input-group {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 
 input {
   flex: 1;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-color);
-  padding: 0.6rem;
-  border-radius: 8px;
-  color: white;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 0 var(--space-2);
+  height: 32px;
+  border-radius: var(--radius-md);
+  color: var(--text);
   font-family: inherit;
+  font-size: var(--fs-13);
+  outline: none;
+  transition: border-color var(--dur);
 }
 
 input:focus {
-  outline: none;
-  border-color: var(--accent-color);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .list {
@@ -507,12 +529,12 @@ input:focus {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.6rem;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  padding: var(--space-2) var(--space-1);
+  border-bottom: 1px solid var(--border);
 }
 
 .list li:hover {
-  background: rgba(255,255,255,0.05);
+  background: var(--surface-hover);
 }
 
 .btn-icon {
@@ -522,132 +544,135 @@ input:focus {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-secondary);
-  border-radius: 6px;
+  color: var(--text-2);
+  border-radius: var(--radius-sm);
   border: none;
   cursor: pointer;
+  transition: background-color var(--dur);
 }
 
 .btn-icon:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-hover);
 }
 
 .actions {
-    display: flex;
-    gap: 0.25rem;
+  display: flex;
+  gap: var(--space-1);
 }
 
 .edit-group {
-    display: flex;
-    gap: 0.5rem;
-    flex: 1;
-    align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  flex: 1;
+  align-items: center;
 }
 
-.text-success { color: var(--success); }
-.text-danger { color: var(--danger); }
-.text-warning { color: #f59e0b; }
+.text-success { color: var(--ok); }
+.text-danger { color: var(--ng); }
+.text-warning { color: var(--warn); }
 .opacity-50 { opacity: 0.5; pointer-events: none; }
 
 .footer {
-  margin-top: 1.5rem;
+  margin-top: var(--space-4);
   display: flex;
   justify-content: flex-end;
 }
 
 .file-upload-mini {
-    display: flex;
-    align-items: center;
+  display: flex;
+  align-items: center;
 }
 
 .camera-icon {
-    font-size: 1.2rem;
-    cursor: pointer;
+  font-size: 1.2rem;
+  cursor: pointer;
 }
 
 .preview-mini {
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .list-item-content {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
 }
 
 .list-item-main {
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 .loc-thumb {
-    width: 40px;
-    height: 40px;
-    object-fit: cover;
-    border-radius: 6px;
-    border: 1px solid var(--border-color);
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
 }
 
 .loc-info {
-    display: flex;
-    flex-direction: column;
+  display: flex;
+  flex-direction: column;
 }
 
 .loc-name {
-    font-weight: 600;
+  font-weight: 500;
+  font-size: var(--fs-13);
 }
 
 .loc-desc {
-    font-size: 0.8rem;
-    color: var(--text-secondary);
+  font-size: var(--fs-11);
+  color: var(--text-3);
 }
 
 .loc-qr {
-    font-size: 0.75rem;
-    font-family: monospace;
-    color: #f59e0b;
+  font-size: var(--fs-11);
+  font-family: var(--font-mono);
+  color: var(--text-3);
 }
 
 .qr-input-row {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
 }
 
 .btn-scan {
-    background: rgba(245, 158, 11, 0.2);
-    color: #f59e0b;
-    border: 1px solid rgba(245, 158, 11, 0.3);
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 1.1rem;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  padding: 0 var(--space-2);
+  height: 32px;
 }
 
 .edit-group-col {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
 }
 
 .edit-image-row {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--fs-13);
 }
 
 .edit-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.5rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }
 
 .hidden-input {
@@ -655,16 +680,14 @@ input:focus {
 }
 
 .drag-handle {
-    cursor: grab;
-    color: var(--text-secondary);
-    margin-right: 0.5rem;
-    font-size: 1.2rem;
-    display: inline-flex;
-    align-items: center;
+  cursor: grab;
+  color: var(--text-3);
+  margin-right: var(--space-2);
+  display: inline-flex;
+  align-items: center;
 }
 
 .drag-handle:active {
-    cursor: grabbing;
+  cursor: grabbing;
 }
-
 </style>

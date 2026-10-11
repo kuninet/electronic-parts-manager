@@ -51,3 +51,9 @@ dist/
 .AppleDouble
 .LSOverride
 epm-bastion-key.pem
+
+# ==========================
+# 一時作業・検証スクリプト・スクリーンショット
+# ==========================
+scratch/
+client/scratch/

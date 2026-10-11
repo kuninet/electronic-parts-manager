@@ -22,8 +22,8 @@ export default defineConfig(({ mode }) => {
           name: '電子パーツ管理',
           short_name: 'パーツ管理',
           description: '電子部品の在庫管理アプリ',
-          theme_color: '#1e293b',
-          background_color: '#0f172a',
+          theme_color: '#0e0f12',
+          background_color: '#0e0f12',
           display: 'standalone',
           orientation: 'portrait',
           icons: [
@@ -40,7 +40,13 @@ export default defineConfig(({ mode }) => {
           ]
         },
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}']
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+          globIgnores: ['**/noto-sans-jp-*.woff2'],
+          runtimeCaching: [{
+            urlPattern: ({ url }) => /\/assets\/noto-sans-jp-.*\.woff2$/.test(url.pathname),
+            handler: 'CacheFirst',
+            options: { cacheName: 'epm-fonts-jp', expiration: { maxEntries: 400, maxAgeSeconds: 60 * 60 * 24 * 365 } }
+          }]
         }
       })
     ],

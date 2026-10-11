@@ -9,6 +9,7 @@
         "start": "concurrently \"npm run server\" \"npm run client\"",
         "server": "cd server && npm start",
         "client": "cd client && npm run dev",
+        "test": "npm run test --prefix server && npm run test --prefix client",
         "aws-auth": "node scripts/aws-auth.js"
     },
     "keywords": [],

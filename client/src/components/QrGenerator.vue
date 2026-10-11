@@ -2,7 +2,9 @@
 import { ref } from 'vue';
 import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
+import { useToast } from '../composables/useToast';
 
+const toast = useToast();
 const emit = defineEmits(['close']);
 
 // PDF Generation Settings
@@ -159,10 +161,10 @@ const generatePDF = async () => {
     const safePrefix = prefix.value ? prefix.value + '_' : '';
     const dateStr = baseDateTime ? baseDateTime + '_' : '';
     doc.save(`QR_Labels_${safePrefix}${dateStr}${String(startNumber.value).padStart(3,'0')}.pdf`);
-    
+    toast.success('QRコードPDFを生成しました');
   } catch (error) {
     console.error('Error generating PDF:', error);
-    alert('PDFの生成中にエラーが発生しました。');
+    toast.error('PDFの生成中にエラーが発生しました。');
   } finally {
     isGenerating.value = false;
   }
@@ -236,7 +238,7 @@ const generatePDF = async () => {
 .modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.7);
+  background: var(--overlay);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -245,31 +247,34 @@ const generatePDF = async () => {
 }
 
 .modal-content {
-  background: #1e293b;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
   padding: 1.5rem;
   width: 100%;
   max-width: 500px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
 }
 
 h2 {
   margin-bottom: 0.5rem;
-  color: var(--accent-color);
+  color: var(--accent);
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
 .desc {
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-size: 0.9rem;
   margin-bottom: 1.5rem;
 }
 
 .form-container {
-  background: rgba(0,0,0,0.2);
+  background: var(--surface-2);
   padding: 1rem;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   margin-bottom: 1.5rem;
 }
 
@@ -282,7 +287,7 @@ h2 {
   margin-bottom: 0.5rem;
   font-weight: bold;
   font-size: 0.95rem;
-  color: white;
+  color: var(--text);
 }
 
 .form-row {
@@ -296,17 +301,17 @@ h2 {
 
 .text-input {
   width: 100%;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-color);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   padding: 0.6rem;
-  border-radius: 6px;
-  color: white;
+  border-radius: var(--radius-sm);
+  color: var(--text);
   font-size: 1rem;
 }
 
 .text-input:focus {
   outline: none;
-  border-color: var(--accent-color);
+  border-color: var(--accent);
 }
 
 .checkbox-label {
@@ -315,19 +320,19 @@ h2 {
   gap: 0.5rem;
   font-weight: normal !important;
   cursor: pointer;
-  color: var(--text-secondary) !important;
+  color: var(--text-2) !important;
 }
 
 .checkbox-label input[type="checkbox"] {
   width: 16px;
   height: 16px;
-  accent-color: var(--accent-color);
+  accent-color: var(--accent);
 }
 
 .preview-id-box {
-  background: rgba(0,0,0,0.3);
+  background: var(--surface-2);
   padding: 0.75rem;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -335,12 +340,12 @@ h2 {
 }
 
 .preview-label {
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-size: 0.9rem;
 }
 
 .preview-value {
-  color: #f59e0b;
+  color: var(--warn-fg);
   font-family: monospace;
   font-size: 1.1rem;
   font-weight: bold;
@@ -349,42 +354,42 @@ h2 {
 .border-option {
   margin-top: 1.5rem;
   padding-top: 1rem;
-  border-top: 1px solid rgba(255,255,255,0.05);
+  border-top: 1px solid var(--border);
 }
 
 .num-input {
   width: 100%;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-color);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   padding: 0.6rem;
-  border-radius: 6px;
-  color: white;
+  border-radius: var(--radius-sm);
+  color: var(--text);
   font-size: 1.1rem;
   font-family: monospace;
 }
 
 .num-input:focus {
   outline: none;
-  border-color: var(--accent-color);
+  border-color: var(--accent);
 }
 
 small {
   display: block;
   margin-top: 0.25rem;
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-size: 0.8rem;
 }
 
 .preview-info {
-  background: rgba(14, 165, 233, 0.1);
-  border: 1px solid rgba(14, 165, 233, 0.2);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
   padding: 1rem;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   margin-bottom: 1.5rem;
 }
 
 .preview-info h3 {
-  color: #38bdf8;
+  color: var(--accent);
   font-size: 0.95rem;
   margin-bottom: 0.5rem;
 }
@@ -393,7 +398,7 @@ small {
   margin: 0;
   padding-left: 1.5rem;
   font-size: 0.85rem;
-  color: var(--text-secondary);
+  color: var(--text-2);
   line-height: 1.5;
 }
 

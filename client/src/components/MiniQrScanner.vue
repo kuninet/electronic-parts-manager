@@ -1,7 +1,9 @@
 <script setup>
 import { ref, onBeforeUnmount, onMounted, nextTick } from 'vue';
 import { Html5Qrcode } from 'html5-qrcode';
+import { useToast } from '../composables/useToast';
 
+const toast = useToast();
 const emit = defineEmits(['scanned', 'close']);
 
 const scanning = ref(false);
@@ -74,7 +76,7 @@ const startScan = async () => {
     } else {
          msg += '原因不明の場合はHTTPS環境かどうかもご確認ください。';
     }
-    alert(msg);
+    toast.error(msg);
     scanning.value = false;
   }
 };
@@ -120,7 +122,7 @@ onMounted(async () => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -128,40 +130,43 @@ onMounted(async () => {
 }
 
 .mini-scanner-modal {
-  background: #1e293b;
-  border-radius: 12px;
-  padding: 1rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: var(--space-3);
   width: 90%;
   max-width: 350px;
+  box-shadow: var(--shadow-lg);
 }
 
 .mini-scanner-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--space-2);
   font-weight: 600;
-  color: white;
+  color: var(--text);
 }
 
 .btn-close {
   background: none;
   border: none;
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-size: 1.5rem;
   cursor: pointer;
   line-height: 1;
 }
 
 .scanner-area {
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
 .scanner-hint {
   text-align: center;
   font-size: 0.8rem;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-top: 0.5rem;
 }
 </style>

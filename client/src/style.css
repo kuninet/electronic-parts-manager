@@ -1,111 +1,387 @@
+/* ========================================================
+   1. :root（テーマ非依存トークン）
+   ======================================================== */
 :root {
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-card: rgba(30, 41, 59, 0.7);
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --accent-color: #38bdf8;
-  --accent-gradient: linear-gradient(135deg, #0ea5e9 0%, #22d3ee 100%);
-  --border-color: rgba(148, 163, 184, 0.2);
-  --success: #22c55e;
-  --danger: #ef4444;
-  --warning: #f59e0b;
+  --font-sans: "Geist Variable", "Noto Sans JP", system-ui, -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", Meiryo, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* 文字サイズ */
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-20: 20px;
+
+  /* 余白 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+
+  /* 角丸 */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+
+  /* 時間・イージング */
+  --dur-fast: 80ms;
+  --dur: 150ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* レイアウト */
+  --sidebar-w: 240px;
+  --topbar-h: 52px;
+  --tabbar-h: 64px;
 }
 
+/* ========================================================
+   2. 色トークン（ダーク：デフォルト）
+   ======================================================== */
+:root,
+:root[data-theme="dark"] {
+  --bg: #0e0f12;
+  --bg-sidebar: #0b0c0f;
+  --surface: #15171c;
+  --surface-2: #1c1f25;
+  --surface-hover: #1c1f25;
+  --border: #262a31;
+  --border-strong: #3a3f4a;
+  --text: #e8eaed;
+  --text-2: #a8aebb;
+  --text-3: #8a909c;
+  --accent: #8b93ff;
+  --accent-hover: #a5abff;
+  --on-accent: #0e0f12;
+  --accent-soft: rgba(139, 147, 255, 0.16);
+  --accent-text: #b4b9ff;
+  --focus-ring: #8b93ff;
+
+  --ok: #4ade80;
+  --ok-bg: rgba(74, 222, 128, 0.12);
+  --ok-fg: #86efac;
+  --on-ok: #052e16;
+
+  --warn: #fbbf24;
+  --warn-bg: rgba(251, 191, 36, 0.12);
+  --warn-fg: #fcd34d;
+  --on-warn: #451a03;
+
+  --ng: #f87171;
+  --ng-bg: rgba(248, 113, 113, 0.14);
+  --ng-fg: #fca5a5;
+  --on-ng: #1a0606;
+
+  --overlay: rgba(0, 0, 0, 0.6);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.6);
+
+  --skeleton: #1c1f25;
+  --skeleton-hi: #252932;
+
+  --cat-0: #8b93ff;
+  --cat-1: #22d3ee;
+  --cat-2: #f59e0b;
+  --cat-3: #34d399;
+  --cat-4: #f472b6;
+  --cat-5: #a78bfa;
+  --cat-6: #f87171;
+  --cat-7: #a3a3a3;
+}
+
+/* ========================================================
+   2. 色トークン（ライト）
+   ======================================================== */
+:root[data-theme="light"] {
+  --bg: #fbfbfc;
+  --bg-sidebar: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f1f2f5;
+  --surface-hover: #e9ebf0;
+  --border: #e4e6eb;
+  --border-strong: #c9ced8;
+  --text: #111318;
+  --text-2: #4b5262;
+  --text-3: #646b7a;
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --on-accent: #ffffff;
+  --accent-soft: #e0e7ff;
+  --accent-text: #3730a3;
+  --focus-ring: #4f46e5;
+
+  --ok: #15803d;
+  --ok-bg: #dcfce7;
+  --ok-fg: #166534;
+  --on-ok: #ffffff;
+
+  --warn: #b45309;
+  --warn-bg: #fef3c7;
+  --warn-fg: #92400e;
+  --on-warn: #ffffff;
+
+  --ng: #b91c1c;
+  --ng-bg: #fee2e2;
+  --ng-fg: #991b1b;
+  --on-ng: #ffffff;
+
+  --overlay: rgba(17, 19, 24, 0.4);
+  --shadow-sm: 0 1px 2px rgba(17, 19, 24, 0.05);
+  --shadow-md: 0 4px 16px rgba(17, 19, 24, 0.08);
+  --shadow-lg: 0 16px 48px rgba(17, 19, 24, 0.16);
+
+  --skeleton: #eceef2;
+  --skeleton-hi: #f6f7f9;
+
+  --cat-0: #4f46e5;
+  --cat-1: #0891b2;
+  --cat-2: #d97706;
+  --cat-3: #059669;
+  --cat-4: #db2777;
+  --cat-5: #7c3aed;
+  --cat-6: #dc2626;
+  --cat-7: #64748b;
+}
+
+
+/* ========================================================
+   4. ベーススタイル
+   ======================================================== */
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
+html {
+  background: var(--bg);
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
+html.theme-transition * {
+  transition: background-color 150ms, color 150ms, border-color 150ms !important;
+}
+
 body {
-  font-family: var(--font-family);
-  background-color: var(--bg-primary);
-  color: var(--text-primary);
-  line-height: 1.6;
-  min-height: 100vh;
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  line-height: 1.5;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@media (max-width: 768px) {
+  body {
+    font-size: var(--fs-14);
+  }
+  input, select, textarea {
+    font-size: 16px;
+  }
 }
 
 a {
-  color: var(--accent-color);
+  color: inherit;
   text-decoration: none;
-  transition: opacity 0.2s;
 }
 
-a:hover {
-  opacity: 0.8;
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
-button {
-  cursor: pointer;
-  border: none;
-  outline: none;
-  font-family: inherit;
-}
-
-/* Utilities */
-.container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 0 1rem;
-}
-
+/* ========================================================
+   5. 共通クラス
+   ======================================================== */
 .glass-panel {
-  background: var(--bg-card);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--border-color);
-  border-radius: 16px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: none;
 }
 
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.hidden-input {
+  display: none;
+}
+
+/* ボタン */
 .btn {
-  padding: 0.75rem 1.5rem;
-  border-radius: 8px;
-  font-weight: 600;
-  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  white-space: nowrap;
+  user-select: none;
+  transition: background-color var(--dur), border-color var(--dur), color var(--dur), transform var(--dur-fast);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .btn-primary {
-  background: var(--accent-gradient);
-  color: white;
-  box-shadow: 0 4px 15px rgba(14, 165, 233, 0.3);
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
 }
 
-.btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(14, 165, 233, 0.4);
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
-.title-gradient {
-  background: var(--accent-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
 }
 
-/* Mobile Responsive */
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-2);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.btn-danger {
+  background: var(--ng-bg);
+  color: var(--ng-fg);
+  border-color: var(--ng);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--ng);
+  color: var(--on-ng);
+}
+
+.btn-sm {
+  height: 28px;
+  padding: 0 var(--space-2);
+  font-size: var(--fs-12);
+}
+
+.btn-md {
+  height: 32px;
+  padding: 0 var(--space-3);
+  font-size: var(--fs-13);
+}
+
+.btn-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--radius-md);
+}
+
 @media (max-width: 768px) {
-  .container {
-    padding: 0 0.5rem;
+  .btn, .btn-sm, .btn-md {
+    min-height: 44px;
   }
-
-  .glass-panel {
-    border-radius: 12px;
+  .btn-icon {
+    min-width: 44px;
+    min-height: 44px;
   }
+}
 
-  h1 {
-    font-size: 1.5rem;
+/* ========================================================
+   6. レイアウト基本クラス
+   ======================================================== */
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  min-height: 100dvh;
+  background: var(--bg);
+}
+
+.app-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.only-mobile {
+  display: none !important;
+}
+
+@media (max-width: 1024px) {
+  :root {
+    --sidebar-w: 200px;
   }
+}
 
-  h2 {
-    font-size: 1.3rem;
+@media (max-width: 768px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+    padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
   }
+  .only-desktop {
+    display: none !important;
+  }
+  .only-mobile {
+    display: flex !important;
+  }
+}
 
-  .btn {
-    padding: 0.5rem 1rem;
-    font-size: 0.9rem;
+/* ========================================================
+   7. アクセシビリティ・モーション軽減
+   ======================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
   }
 }

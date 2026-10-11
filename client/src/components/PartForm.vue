@@ -5,6 +5,9 @@ import api from '../api';
 import { resizeImageFile } from '../utils/imageResize';
 import TagInput from './TagInput.vue';
 import MiniQrScanner from './MiniQrScanner.vue';
+import { useToast } from '../composables/useToast';
+
+const toast = useToast();
 
 const props = defineProps({
   part: {
@@ -123,19 +126,26 @@ const handleSubmit = async () => {
   loading.value = true;
   try {
     if (props.part && isUsed.value && (!formData.value.used_for || !formData.value.used_for.trim())) {
-      alert('使用先を入力してください');
+      toast.warning('使用先を入力してください');
+      loading.value = false;
       return;
     }
 
     const wasUsed = !!props.part?.used_at;
     if (props.part && !wasUsed && isUsed.value) {
       const confirmed = confirm('この部品を使用済みにします。通常一覧から外れ、保管場所はクリアされます。よろしいですか？');
-      if (!confirmed) return;
+      if (!confirmed) {
+        loading.value = false;
+        return;
+      }
     }
 
     if (props.part && wasUsed && !isUsed.value) {
       const confirmed = confirm('この部品を通常在庫に戻します。使用日時・使用先・使用メモはクリアされます。よろしいですか？');
-      if (!confirmed) return;
+      if (!confirmed) {
+        loading.value = false;
+        return;
+      }
     }
 
     const data = new FormData();
@@ -180,8 +190,10 @@ const handleSubmit = async () => {
 
     if (props.part) {
       await api.put(`/parts/${props.part.id}`, data);
+      toast.success('パーツ情報を更新しました');
     } else {
       await api.post('/parts', data);
+      toast.success('パーツを登録しました');
     }
     
     emit('saved');
@@ -189,9 +201,9 @@ const handleSubmit = async () => {
   } catch (err) {
     console.error('Failed to save part', err);
     if (err.response && err.response.data && err.response.data.error) {
-        alert('保存に失敗しました: ' + err.response.data.error);
+        toast.error('保存に失敗しました: ' + err.response.data.error);
     } else {
-        alert('保存に失敗しました');
+        toast.error('保存に失敗しました');
     }
   } finally {
     loading.value = false;
@@ -237,7 +249,7 @@ const toggleUsedState = (nextValue) => {
               <input v-model="formData.qr_code" placeholder="QRコードID（任意）" />
               <button type="button" class="btn btn-sm btn-scan" @click="showQrScanner = true">📷</button>
             </div>
-            <small style="color: var(--text-secondary); font-size: 0.8rem;">スキャンまたは手動入力</small>
+            <small style="color: var(--text-2); font-size: 0.8rem;">スキャンまたは手動入力</small>
           </div>
 
           <MiniQrScanner
@@ -377,7 +389,7 @@ const toggleUsedState = (nextValue) => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -391,57 +403,59 @@ const toggleUsedState = (nextValue) => {
   max-height: 90vh;
   overflow-y: auto;
   padding: 0; /* Changed from 2rem to 0 for cover image */
-  background: #1e293b; /* Fallback */
-  background: rgba(30, 41, 59, 0.95);
-  border-radius: 12px; /* Ensure rounded corners */
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
 }
 
 .modal-body {
-    padding: 2rem;
+  padding: 2rem;
 }
 
 .cover-image {
-    width: 100%;
-    height: 200px;
-    background-size: cover;
-    background-position: center;
-    border-radius: 12px 12px 0 0; /* Top rounded corners */
-    position: relative;
+  width: 100%;
+  height: 200px;
+  background-size: cover;
+  background-position: center;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  position: relative;
 }
 
 .cover-image::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    height: 60px;
-    background: linear-gradient(to bottom, transparent, rgba(30, 41, 59, 0.95)); /* Seamless blend */
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 60px;
+  background: linear-gradient(to bottom, transparent, var(--surface));
 }
 
 h2 {
-  margin-bottom: 0; /* Changed from 1.5rem */
-  color: var(--accent-color);
+  margin-bottom: 0;
+  color: var(--accent);
   font-size: 1.25rem;
 }
 
 .modal-header-actions {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
 }
 
 .form-actions-top {
-    display: flex;
-    gap: 0.5rem;
+  display: flex;
+  gap: 0.5rem;
 }
 
 .btn-sm {
-    padding: 0.4rem 0.8rem;
-    font-size: 0.9rem;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.9rem;
 }
 
 .part-form {
@@ -473,23 +487,23 @@ h2 {
 
 .status-btn {
   flex: 1;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
   padding: 0.75rem 1rem;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .status-btn.active {
-  background: rgba(94, 234, 212, 0.15);
-  border-color: var(--accent-color);
-  color: var(--text-primary);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .field-note {
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-size: 0.8rem;
 }
 
@@ -498,36 +512,35 @@ h2 {
   flex-direction: column;
   gap: 1rem;
   padding: 1rem;
-  border: 1px solid rgba(94, 234, 212, 0.18);
-  border-radius: 10px;
-  background: rgba(94, 234, 212, 0.05);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
 }
 
 label {
   font-size: 0.9rem;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 input, select, textarea {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-color);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   padding: 0.75rem;
-  border-radius: 8px;
-  color: white;
+  border-radius: var(--radius-md);
+  color: var(--text);
   font-family: inherit;
 }
 
 input:focus, select:focus, textarea:focus {
   outline: none;
-  border-color: var(--accent-color);
+  border-color: var(--accent);
 }
 
 /* Fix for dropdown options visibility */
 select option {
-    background-color: #1e293b;
-    color: white;
+  background-color: var(--surface);
+  color: var(--text);
 }
-
 
 .form-actions {
   display: flex;
@@ -548,10 +561,10 @@ select option {
 }
 
 .btn-scan {
-  background: rgba(245, 158, 11, 0.2);
-  color: #f59e0b;
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  border-radius: 8px;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-md);
   padding: 0.5rem 0.75rem;
   cursor: pointer;
   font-size: 1.1rem;
@@ -559,11 +572,12 @@ select option {
 }
 
 .btn-scan:hover {
-  background: rgba(245, 158, 11, 0.3);
+  background: var(--warn-bg);
+  filter: brightness(1.1);
 }
 
 .file-link {
-  color: var(--accent-color);
+  color: var(--accent);
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -579,7 +593,7 @@ select option {
 
 .current-image-preview p {
   font-size: 0.9rem;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-bottom: 0.5rem;
 }
 
@@ -587,14 +601,14 @@ select option {
 .thumb-preview {
   max-width: 100%;
   max-height: 200px;
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
   object-fit: contain;
 }
 
 .resizing-indicator {
   margin-top: 0.5rem;
-  color: var(--accent-color, #38bdf8);
+  color: var(--accent);
   font-size: 0.9rem;
   display: flex;
   align-items: center;
