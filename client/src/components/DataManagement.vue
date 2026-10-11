@@ -2,7 +2,9 @@
 import { ref, onMounted } from 'vue';
 import axios from 'axios';
 import api from '../api';
+import { useToast } from '../composables/useToast';
 
+const toast = useToast();
 const emit = defineEmits(['close']);
 
 const importing = ref(false);
@@ -44,11 +46,12 @@ const downloadFull = async () => {
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+            toast.success('バックアップファイルをダウンロードしました');
         }
     } catch (err) {
         console.error('Export failed', err);
         exporting.value = false;
-        alert('エクスポートに失敗しました');
+        toast.error('エクスポートに失敗しました');
     }
 };
 
@@ -67,15 +70,16 @@ const pollExportStatus = (jobId) => {
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
+                toast.success('バックアップファイルをダウンロードしました');
             } else if (data.status === 'error') {
                 clearInterval(exportPollTimer);
                 exporting.value = false;
-                alert('エクスポートに失敗しました: ' + data.message);
+                toast.error('エクスポートに失敗しました: ' + data.message);
             }
         } catch (err) {
             clearInterval(exportPollTimer);
             exporting.value = false;
-            alert('エクスポートステータスの取得に失敗しました');
+            toast.error('エクスポートステータスの取得に失敗しました');
         }
     }, 2000);
 };
@@ -128,12 +132,14 @@ const handleFullImport = async (event) => {
             });
         }
         
-        alert('復元が完了しました。ページをリロードします。');
-        window.location.reload();
+        toast.success('復元が完了しました。ページを再読み込みします...');
+        setTimeout(() => {
+            window.location.reload();
+        }, 1200);
     } catch (err) {
         console.error('Full import failed', err);
         importError.value = err.response?.data?.error || 'Restore failed';
-        alert('復元に失敗しました: ' + importError.value);
+        toast.error('復元に失敗しました: ' + importError.value);
     } finally {
         importing.value = false;
         importMessage.value = '';
@@ -149,18 +155,20 @@ const handleReset = async () => {
 
     const userInput = prompt('確認のため "delete" と入力してください');
     if (userInput !== 'delete') {
-        alert('入力が一致しません。操作をキャンセルしました。');
+        toast.warning('入力が一致しません。操作をキャンセルしました。');
         return;
     }
 
     try {
         await api.post('/backup/reset');
-        alert('全てのデータを削除しました。');
+        toast.success('全てのデータを削除しました。');
         emit('close');
-        window.location.reload(); // Refresh to clear lists
+        setTimeout(() => {
+            window.location.reload(); // Refresh to clear lists
+        }, 1200);
     } catch (err) {
         console.error('Reset failed', err);
-        alert('削除に失敗しました: ' + (err.response?.data?.error || err.message));
+        toast.error('削除に失敗しました: ' + (err.response?.data?.error || err.message));
     }
 };
 </script>
@@ -228,13 +236,17 @@ const handleReset = async () => {
 }
 
 .modal-content {
-  background: #1e293b;
+  background: var(--bg-card-solid);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
   padding: 2rem;
   width: 100%;
   max-width: 500px;
   max-height: 90vh; /* Handle small screens */
   overflow-y: auto;
   position: relative;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
 }
 
 .danger-zone {

@@ -1,7 +1,9 @@
 <script setup>
 import { ref, onBeforeUnmount, onMounted, nextTick } from 'vue';
 import { Html5Qrcode } from 'html5-qrcode';
+import { useToast } from '../composables/useToast';
 
+const toast = useToast();
 const emit = defineEmits(['scanned', 'close']);
 
 const scanning = ref(false);
@@ -74,7 +76,7 @@ const startScan = async () => {
     } else {
          msg += '原因不明の場合はHTTPS環境かどうかもご確認ください。';
     }
-    alert(msg);
+    toast.error(msg);
     scanning.value = false;
   }
 };
@@ -128,11 +130,14 @@ onMounted(async () => {
 }
 
 .mini-scanner-modal {
-  background: #1e293b;
+  background: var(--bg-card-solid);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 1rem;
   width: 90%;
   max-width: 350px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
 }
 
 .mini-scanner-header {

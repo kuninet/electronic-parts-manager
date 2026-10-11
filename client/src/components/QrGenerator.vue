@@ -2,7 +2,9 @@
 import { ref } from 'vue';
 import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
+import { useToast } from '../composables/useToast';
 
+const toast = useToast();
 const emit = defineEmits(['close']);
 
 // PDF Generation Settings
@@ -159,10 +161,10 @@ const generatePDF = async () => {
     const safePrefix = prefix.value ? prefix.value + '_' : '';
     const dateStr = baseDateTime ? baseDateTime + '_' : '';
     doc.save(`QR_Labels_${safePrefix}${dateStr}${String(startNumber.value).padStart(3,'0')}.pdf`);
-    
+    toast.success('QRコードPDFを生成しました');
   } catch (error) {
     console.error('Error generating PDF:', error);
-    alert('PDFの生成中にエラーが発生しました。');
+    toast.error('PDFの生成中にエラーが発生しました。');
   } finally {
     isGenerating.value = false;
   }
@@ -245,11 +247,14 @@ const generatePDF = async () => {
 }
 
 .modal-content {
-  background: #1e293b;
+  background: var(--bg-card-solid);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
   padding: 1.5rem;
   width: 100%;
   max-width: 500px;
   border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
 }
 
 h2 {

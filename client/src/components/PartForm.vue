@@ -5,6 +5,9 @@ import api from '../api';
 import { resizeImageFile } from '../utils/imageResize';
 import TagInput from './TagInput.vue';
 import MiniQrScanner from './MiniQrScanner.vue';
+import { useToast } from '../composables/useToast';
+
+const toast = useToast();
 
 const props = defineProps({
   part: {
@@ -123,19 +126,26 @@ const handleSubmit = async () => {
   loading.value = true;
   try {
     if (props.part && isUsed.value && (!formData.value.used_for || !formData.value.used_for.trim())) {
-      alert('使用先を入力してください');
+      toast.warning('使用先を入力してください');
+      loading.value = false;
       return;
     }
 
     const wasUsed = !!props.part?.used_at;
     if (props.part && !wasUsed && isUsed.value) {
       const confirmed = confirm('この部品を使用済みにします。通常一覧から外れ、保管場所はクリアされます。よろしいですか？');
-      if (!confirmed) return;
+      if (!confirmed) {
+        loading.value = false;
+        return;
+      }
     }
 
     if (props.part && wasUsed && !isUsed.value) {
       const confirmed = confirm('この部品を通常在庫に戻します。使用日時・使用先・使用メモはクリアされます。よろしいですか？');
-      if (!confirmed) return;
+      if (!confirmed) {
+        loading.value = false;
+        return;
+      }
     }
 
     const data = new FormData();
@@ -180,8 +190,10 @@ const handleSubmit = async () => {
 
     if (props.part) {
       await api.put(`/parts/${props.part.id}`, data);
+      toast.success('パーツ情報を更新しました');
     } else {
       await api.post('/parts', data);
+      toast.success('パーツを登録しました');
     }
     
     emit('saved');
@@ -189,9 +201,9 @@ const handleSubmit = async () => {
   } catch (err) {
     console.error('Failed to save part', err);
     if (err.response && err.response.data && err.response.data.error) {
-        alert('保存に失敗しました: ' + err.response.data.error);
+        toast.error('保存に失敗しました: ' + err.response.data.error);
     } else {
-        alert('保存に失敗しました');
+        toast.error('保存に失敗しました');
     }
   } finally {
     loading.value = false;
@@ -391,9 +403,11 @@ const toggleUsedState = (nextValue) => {
   max-height: 90vh;
   overflow-y: auto;
   padding: 0; /* Changed from 2rem to 0 for cover image */
-  background: #1e293b; /* Fallback */
-  background: rgba(30, 41, 59, 0.95);
-  border-radius: 12px; /* Ensure rounded corners */
+  background: var(--bg-card-solid);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
 }
 
 .modal-body {
@@ -524,8 +538,8 @@ input:focus, select:focus, textarea:focus {
 
 /* Fix for dropdown options visibility */
 select option {
-    background-color: #1e293b;
-    color: white;
+    background-color: var(--bg-card-solid);
+    color: var(--text-main);
 }
 
 

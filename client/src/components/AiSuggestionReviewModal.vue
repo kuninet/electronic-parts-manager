@@ -1,6 +1,9 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import api from '../api';
+import { useToast } from '../composables/useToast';
+
+const toast = useToast();
 
 const props = defineProps({
   show: {
@@ -59,7 +62,7 @@ onMounted(() => {
 // 個別採用
 const handleApply = async (s) => {
   if (!s.edit_name || !s.edit_name.trim()) {
-    alert('部品名を入力してください');
+    toast.warning('部品名を入力してください');
     return;
   }
   processingId.value = s.id;
@@ -70,10 +73,11 @@ const handleApply = async (s) => {
       apply_category: s.apply_category
     });
     suggestions.value = suggestions.value.filter(item => item.id !== s.id);
+    toast.success('候補を採用しました');
     emit('updated');
   } catch (err) {
     console.error('採用処理に失敗しました', err);
-    alert(err.response?.data?.error || '採用処理に失敗しました');
+    toast.error(err.response?.data?.error || '採用処理に失敗しました');
   } finally {
     processingId.value = null;
   }
@@ -85,10 +89,11 @@ const handleReject = async (s) => {
   try {
     await api.post(`/ai-naming/reject/${s.id}`);
     suggestions.value = suggestions.value.filter(item => item.id !== s.id);
+    toast.info('候補を却下しました');
     emit('updated');
   } catch (err) {
     console.error('却下処理に失敗しました', err);
-    alert(err.response?.data?.error || '却下処理に失敗しました');
+    toast.error(err.response?.data?.error || '却下処理に失敗しました');
   } finally {
     processingId.value = null;
   }
@@ -118,10 +123,11 @@ const handleResuggest = async (s) => {
     if (index !== -1) {
       suggestions.value[index] = updated;
     }
+    toast.success('再判定が完了しました');
     emit('updated');
   } catch (err) {
     console.error('再判定に失敗しました', err);
-    alert(err.response?.data?.error || '再判定に失敗しました');
+    toast.error(err.response?.data?.error || '再判定に失敗しました');
   } finally {
     processingId.value = null;
   }
@@ -143,12 +149,12 @@ const handleApplyHighConfidence = async () => {
     }));
 
     const res = await api.post('/ai-naming/apply-batch', { items });
-    alert(`${res.data.appliedCount}件の候補を採用しました`);
+    toast.success(`${res.data.appliedCount}件の候補を採用しました`);
     await fetchSuggestions();
     emit('updated');
   } catch (err) {
     console.error('一括採用に失敗しました', err);
-    alert(err.response?.data?.error || '一括採用に失敗しました');
+    toast.error(err.response?.data?.error || '一括採用に失敗しました');
   } finally {
     batchProcessing.value = false;
   }
@@ -352,11 +358,12 @@ const getConfidenceBadgeClass = (confidence) => {
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  background: #1e293b;
+  background: var(--bg-card-solid);
+  color: var(--text-main);
   border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border-color);
 }
 
 .modal-header {

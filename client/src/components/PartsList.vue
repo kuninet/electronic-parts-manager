@@ -7,6 +7,10 @@ import TagInput from './TagInput.vue';
 import BulkEditModal from './BulkEditModal.vue';
 import MiniQrScanner from './MiniQrScanner.vue';
 import AiSuggestionReviewModal from './AiSuggestionReviewModal.vue';
+import SkeletonCard from './SkeletonCard.vue';
+import { useToast } from '../composables/useToast';
+
+const toast = useToast();
 
 const HOVER_PREVIEW_DELAY_MS = 1000;
 const HOVER_PREVIEW_WIDTH = 540;
@@ -164,6 +168,8 @@ initLazyObserver();
 onUnmounted(() => {
     if (lazyObserver) lazyObserver.disconnect();
     hideHoverPreview();
+    qtyDebounceTimers.forEach(timer => clearTimeout(timer));
+    qtyDebounceTimers.clear();
 });
 
 const fetchMetadata = async () => {
@@ -349,20 +355,20 @@ const startAiBatchExecution = async () => {
       const errMsg = err.response?.data?.error || err.message || '';
 
       if (errCode === 'DAILY_LIMIT_EXCEEDED') {
-        alert('1日の判定上限に達したため中止しました');
+        toast.warning('1日の判定上限に達したため中止しました');
         break;
       }
 
       // 致命的エラー（APIキー無効、モデル不正等）は3回待たずに即時中断
       if (errCode === 'API_KEY_INVALID' || errCode === 'INVALID_MODEL' || err.response?.status === 401 || err.response?.status === 403 || errMsg.includes('APIキー') || errMsg.includes('API key')) {
-        alert(`致命的な設定エラーが発生したため一括処理を中断しました: ${errMsg}`);
+        toast.error(`致命的な設定エラーが発生したため一括処理を中断しました: ${errMsg}`);
         aiBatchProgress.value.aborted = true;
         break;
       }
 
       // M2: 3件連続失敗で自動中断
       if (consecutiveFailures >= 3) {
-        alert('判定が3件連続で失敗したため、一括処理を自動中断しました。APIキーやネットワーク接続をご確認ください。');
+        toast.error('判定が3件連続で失敗したため、一括処理を自動中断しました。APIキーやネットワーク接続をご確認ください。');
         aiBatchProgress.value.aborted = true;
         break;
       }
@@ -430,7 +436,7 @@ const handleBulkAction = async (action) => {
         await fetchParts();
         selectedItems.value.clear();
     } catch (err) {
-        alert('操作に失敗しました');
+        toast.error('操作に失敗しました');
         console.error(err);
     } finally {
         loading.value = false;
@@ -449,11 +455,11 @@ const handleBulkUpdate = async (updates) => {
         await fetchParts();
         selectedItems.value.clear();
         showBulkEdit.value = false;
-        alert('一括変更を適用しました');
+        toast.success('一括変更を適用しました');
     } catch (err) {
         console.error(err);
         const msg = err.response?.data?.error || '変更に失敗しました';
-        alert(msg);
+        toast.error(msg);
     } finally {
         loading.value = false;
     }
@@ -479,27 +485,31 @@ const cancelInlineEdit = () => {
 
 const saveInlineEdit = async (part) => {
     try {
-        const formData = new FormData();
-        // Required fields per existing API contract
-        formData.append('name', editingForm.value.name);
-        formData.append('category_id', editingForm.value.category_id || '');
-        formData.append('location_id', editingForm.value.location_id || '');
-        formData.append('quantity', editingForm.value.quantity);
-        formData.append('qr_code', editingForm.value.qr_code || '');
-        formData.append('tags', editingForm.value.tags.join(','));
-        
-        // Preserve other fields
-        formData.append('part_number', part.part_number || '');
-        formData.append('description', part.description || '');
-        formData.append('datasheet_url', part.datasheet_url || '');
+        const payload = {
+            name: editingForm.value.name,
+            part_number: editingForm.value.part_number !== undefined ? editingForm.value.part_number : (part.part_number || ''),
+            category_id: editingForm.value.category_id || null,
+            location_id: editingForm.value.location_id || null,
+            quantity: editingForm.value.quantity,
+            qr_code: editingForm.value.qr_code || null,
+            tags: editingForm.value.tags
+        };
 
-        await api.put(`/parts/${part.id}`, formData);
-        await fetchParts(); // Refresh list
+        const res = await api.patch(`/parts/${part.id}`, payload);
+        if (res.data) {
+            const idx = parts.value.findIndex(p => p.id === part.id);
+            if (idx !== -1) {
+                parts.value[idx] = { ...parts.value[idx], ...res.data };
+            }
+        } else {
+            await fetchParts();
+        }
         cancelInlineEdit();
+        toast.success('パーツ情報を保存しました');
     } catch (err) {
         console.error(err);
-        const msg = err.response?.data?.error || 'Save failed';
-        alert(msg);
+        const msg = err.response?.data?.error || '保存に失敗しました';
+        toast.error(msg);
     }
 };
 
@@ -524,27 +534,60 @@ const editNameModel = ref('');
 const editingQtyId = ref(null);
 const editQtyModel = ref(0);
 
+// 数量即時反映（デバウンス付きオプティミスティック更新）
+const qtyDebounceTimers = new Map();
+const originalQuantities = new Map();
+
+const adjustQuantity = (part, delta) => {
+    const currentQty = Number(part.quantity) || 0;
+    const nextQty = Math.max(0, currentQty + delta);
+    if (nextQty === currentQty) return;
+
+    if (!originalQuantities.has(part.id)) {
+        originalQuantities.set(part.id, currentQty);
+    }
+
+    part.quantity = nextQty;
+
+    if (qtyDebounceTimers.has(part.id)) {
+        clearTimeout(qtyDebounceTimers.get(part.id));
+    }
+
+    const timer = setTimeout(async () => {
+        qtyDebounceTimers.delete(part.id);
+        const original = originalQuantities.get(part.id);
+        originalQuantities.delete(part.id);
+        try {
+            await api.patch(`/parts/${part.id}`, { quantity: nextQty });
+        } catch (err) {
+            console.error(err);
+            part.quantity = original;
+            const msg = err.response?.data?.error || '数量の更新に失敗しました';
+            toast.error(msg);
+        }
+    }, 400);
+
+    qtyDebounceTimers.set(part.id, timer);
+};
+
 const quickUpdatePart = async (part, changes) => {
     try {
-        const formData = new FormData();
-        // Construct full object from part + changes
-        const merged = { ...part, ...changes };
-        
-        formData.append('name', merged.name);
-        formData.append('part_number', merged.part_number || '');
-        formData.append('quantity', merged.quantity);
-        formData.append('category_id', merged.category_id || '');
-        formData.append('location_id', merged.location_id || '');
-        formData.append('tags', merged.tags || '');
-        formData.append('description', merged.description || '');
-        formData.append('datasheet_url', merged.datasheet_url || '');
-
-        await api.put(`/parts/${part.id}`, formData);
-        await fetchParts(); // Refresh
+        // PATCH /api/parts/:id で必要な差分のみ送信（qr_codeやpart_number等の消失を防止）
+        const res = await api.patch(`/parts/${part.id}`, changes);
+        if (res.data) {
+            const idx = parts.value.findIndex(p => p.id === part.id);
+            if (idx !== -1) {
+                parts.value[idx] = { ...parts.value[idx], ...res.data };
+            }
+        } else {
+            await fetchParts();
+        }
+        toast.success('更新しました');
     } catch (err) {
         console.error(err);
-        const msg = err.response?.data?.error || 'Update failed';
-        alert(msg);
+        const msg = err.response?.data?.error || '更新に失敗しました';
+        toast.error(msg);
+        await fetchParts();
     }
 };
 
@@ -863,7 +906,7 @@ defineExpose({ fetchParts });
       </div>
     </div>
 
-    <div v-if="loading" class="loading">読み込み中...</div>
+    <SkeletonCard v-if="loading" :type="viewMode" :count="viewMode === 'grid' ? 8 : 6" />
     <div v-else-if="error" class="error">{{ error }}</div>
     
     <div v-else>
@@ -928,18 +971,33 @@ defineExpose({ fetchParts });
                 <p class="category" v-if="part.category_name">{{ part.category_name }}</p>
                 
                 <!-- Quick Edit: Quantity -->
-                <div v-if="editingQtyId === part.id" class="stock-badge editing" @click.stop>
-                     <input 
-                        type="number"
-                        v-model="editQtyModel" 
-                        @blur="saveQtyEdit(part)" 
-                        @keydown.enter="onEnter($event, () => saveQtyEdit(part))"
-                        class="quick-edit-input-qty"
-                        v-focus
-                    />
-                </div>
-                <div v-else class="stock-badge editable-badge" :class="{ 'low-stock': part.quantity < 5 }" @click.stop="startQtyEdit(part)" title="クリックで編集">
-                  {{ part.quantity }} pcs
+                <div class="quantity-control" @click.stop>
+                  <button 
+                    type="button" 
+                    class="qty-btn qty-btn-minus" 
+                    :disabled="part.quantity <= 0" 
+                    @click="adjustQuantity(part, -1)" 
+                    title="1個減らす"
+                  >−</button>
+                  <div v-if="editingQtyId === part.id" class="stock-badge editing">
+                       <input 
+                          type="number"
+                          v-model="editQtyModel" 
+                          @blur="saveQtyEdit(part)" 
+                          @keydown.enter="onEnter($event, () => saveQtyEdit(part))"
+                          class="quick-edit-input-qty"
+                          v-focus
+                      />
+                  </div>
+                  <div v-else class="stock-badge editable-badge" :class="{ 'low-stock': part.quantity < 5 }" @click="startQtyEdit(part)" title="クリックで編集">
+                    {{ part.quantity }} pcs
+                  </div>
+                  <button 
+                    type="button" 
+                    class="qty-btn qty-btn-plus" 
+                    @click="adjustQuantity(part, 1)" 
+                    title="1個増やす"
+                  >+</button>
                 </div>
 
                 <p class="location" v-if="part.location_name">📍 {{ part.location_name }}</p>
@@ -1104,9 +1162,24 @@ defineExpose({ fetchParts });
               </td>
               <td>
                   <template v-if="editingPartId !== part.id">
-                    <span class="qty-badge" :class="{ 'low-stock': part.quantity < 5 }">
-                      {{ part.quantity }}
-                    </span>
+                    <div class="list-qty-control" @click.stop>
+                      <button 
+                        type="button" 
+                        class="qty-btn-inline" 
+                        :disabled="part.quantity <= 0" 
+                        @click="adjustQuantity(part, -1)" 
+                        title="1個減らす"
+                      >−</button>
+                      <span class="qty-badge" :class="{ 'low-stock': part.quantity < 5 }">
+                        {{ part.quantity }}
+                      </span>
+                      <button 
+                        type="button" 
+                        class="qty-btn-inline" 
+                        @click="adjustQuantity(part, 1)" 
+                        title="1個増やす"
+                      >+</button>
+                    </div>
                   </template>
                   <!-- Edit Mode: Quantity -->
                   <div v-else @click.stop>
@@ -1230,12 +1303,13 @@ select option {
 
 .part-card {
   overflow: hidden;
-  transition: transform 0.2s;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
   cursor: pointer;
 }
 
 .part-card:hover {
-  transform: translateY(-5px);
+  transform: translateY(-3px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.25);
 }
 
 .part-image {
@@ -1339,10 +1413,94 @@ mark {
   margin-bottom: 0.5rem;
 }
 
-.stock-badge {
+.quantity-control {
   position: absolute;
   top: 1rem;
   right: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  z-index: 2;
+}
+
+.quantity-control .stock-badge {
+  position: static;
+  margin: 0;
+}
+
+.qty-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-main);
+  font-size: 0.9rem;
+  font-weight: bold;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: all 0.15s ease;
+}
+
+.qty-btn:hover:not(:disabled) {
+  background: var(--accent-color);
+  color: #0f172a;
+  transform: scale(1.1);
+}
+
+.qty-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.qty-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.list-qty-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.qty-btn-inline {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-main);
+  font-size: 0.8rem;
+  font-weight: bold;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  transition: all 0.15s ease;
+}
+
+.qty-btn-inline:hover:not(:disabled) {
+  background: var(--accent-color);
+  color: #0f172a;
+}
+
+.qty-btn-inline:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.qty-btn-inline:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.stock-badge {
   background: var(--success);
   color: white;
   padding: 0.2rem 0.6rem;

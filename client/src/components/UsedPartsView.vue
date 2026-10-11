@@ -1,7 +1,9 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue';
 import api from '../api';
+import { useToast } from '../composables/useToast';
 
+const toast = useToast();
 const emit = defineEmits(['edit']);
 
 const usedParts = ref([]);
@@ -54,10 +56,11 @@ const restorePart = async (part) => {
   try {
     await api.post(`/parts/${part.id}/unuse`);
     await fetchParts();
+    toast.success(`部品「${part.name}」を通常在庫へ復帰しました`);
   } catch (err) {
     console.error(err);
     const message = err.response?.data?.error || '通常在庫への復帰に失敗しました';
-    alert(message);
+    toast.error(message);
   }
 };
 

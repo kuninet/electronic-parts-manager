@@ -4,6 +4,9 @@ import api from '../api';
 import draggable from 'vuedraggable';
 import MiniQrScanner from './MiniQrScanner.vue';
 import { resizeImageFile } from '../utils/imageResize';
+import { useToast } from '../composables/useToast';
+
+const toast = useToast();
 
 const props = defineProps({
     initialLocationEditId: {
@@ -62,8 +65,9 @@ const addCategory = async () => {
     await api.post('/categories', { name: newCategory.value });
     newCategory.value = '';
     fetchData();
+    toast.success('カテゴリを追加しました');
   } catch (err) {
-    alert('Failed to add category');
+    toast.error('カテゴリの追加に失敗しました');
   }
 };
 
@@ -72,9 +76,10 @@ const deleteCategory = async (id) => {
   try {
     await api.delete(`/categories/${id}`);
     fetchData();
+    toast.success('カテゴリを削除しました');
   } catch (err) {
-    const msg = err.response?.data?.error || 'Failed to delete category';
-    alert(msg);
+    const msg = err.response?.data?.error || 'カテゴリの削除に失敗しました';
+    toast.error(msg);
   }
 };
 
@@ -127,8 +132,9 @@ const addLocation = async () => {
     newLocation.value = '';
     newLocationImage.value = null;
     fetchData();
+    toast.success('保管場所を追加しました');
   } catch (err) {
-    alert('Failed to add location');
+    toast.error('保管場所の追加に失敗しました');
   }
 };
 
@@ -137,9 +143,10 @@ const deleteLocation = async (id) => {
   try {
     await api.delete(`/locations/${id}`);
     fetchData();
+    toast.success('保管場所を削除しました');
   } catch (err) {
-    const msg = err.response?.data?.error || 'Failed to delete location';
-    alert(msg);
+    const msg = err.response?.data?.error || '保管場所の削除に失敗しました';
+    toast.error(msg);
   }
 };
 
@@ -149,8 +156,9 @@ const addTag = async () => {
     await api.post('/tags', { name: newTag.value });
     newTag.value = '';
     fetchData();
+    toast.success('タグを追加しました');
   } catch (err) {
-    alert('Failed to add tag');
+    toast.error('タグの追加に失敗しました');
   }
 };
 
@@ -159,8 +167,9 @@ const deleteTag = async (id) => {
   try {
     await api.delete(`/tags/${id}`);
     fetchData();
+    toast.success('タグを削除しました');
   } catch (err) {
-    alert('Failed to delete tag');
+    toast.error('タグの削除に失敗しました');
   }
 };
 
@@ -204,10 +213,11 @@ const saveEdit = async () => {
         }
         fetchData();
         cancelEdit();
+        toast.success('更新しました');
     } catch (err) {
         console.error(err);
         const msg = err.response?.data?.error || '更新に失敗しました';
-        alert(msg);
+        toast.error(msg);
     }
 };
 
@@ -220,9 +230,10 @@ const handleReorder = async (type, list) => {
     try {
         const ids = list.map(item => item.id);
         await api.post('/master/reorder', { type, ids });
+        toast.success('並び順を保存しました');
     } catch (err) {
         console.error('Reorder failed', err);
-        alert('順序の保存に失敗しました');
+        toast.error('順序の保存に失敗しました');
     }
 };
 </script>
@@ -425,13 +436,16 @@ const handleReorder = async (type, list) => {
 }
 
 .modal-content {
-  background: #1e293b;
+  background: var(--bg-card-solid);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
   padding: 1.5rem;
   width: 100%;
   max-width: 600px;
   max-height: 85vh;
   overflow-y: auto;
   border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
 }
 
 h2 {

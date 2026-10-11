@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import PartsList from './components/PartsList.vue';
 import PartForm from './components/PartForm.vue';
 import DataManagement from './components/DataManagement.vue';
@@ -11,6 +11,24 @@ import QrGenerator from './components/QrGenerator.vue';
 
 import api from './api';
 import { resizeImageFile } from './utils/imageResize';
+import { useTheme } from './composables/useTheme';
+import { useToast } from './composables/useToast';
+import ToastHost from './components/ToastHost.vue';
+
+const { theme, effectiveTheme, cycleTheme } = useTheme();
+const toast = useToast();
+
+const themeIcon = computed(() => {
+  if (theme.value === 'dark') return '🌙';
+  if (theme.value === 'light') return '☀️';
+  return '💻';
+});
+
+const themeLabel = computed(() => {
+  if (theme.value === 'dark') return 'ダーク';
+  if (theme.value === 'light') return 'ライト';
+  return 'システム連動';
+});
 
 const showModal = ref(false);
 const showDataModal = ref(false);
@@ -167,9 +185,10 @@ const onCameraFileChange = async (event) => {
 
 
 
+         toast.success('カメラから部品を登録しました');
     } catch (err) {
         console.error(err);
-        alert('登録に失敗しました');
+        toast.error('登録に失敗しました');
     } finally {
         uploadingCameraFile.value = false;
         event.target.value = ''; // Reset input
@@ -245,6 +264,15 @@ const onCameraFileChange = async (event) => {
             </div>
           </div>
 
+          <button 
+            type="button" 
+            class="btn btn-outline btn-sm theme-btn" 
+            :title="`テーマ切替: ${themeLabel} (クリックで切替)`"
+            @click="cycleTheme"
+          >
+            {{ themeIcon }}
+          </button>
+
           <button v-if="currentView === 'parts'" class="btn btn-primary" @click="openAddModal">+ パーツ追加</button>
         </nav>
       </div>
@@ -298,6 +326,9 @@ const onCameraFileChange = async (event) => {
       @close="showQrGenerator = false"
     />
   </div>
+
+  <!-- トースト通知ホスト -->
+  <ToastHost />
 </template>
 
 <style scoped>
@@ -320,6 +351,12 @@ const onCameraFileChange = async (event) => {
   border-color: var(--accent-color);
 }
 
+.theme-btn {
+  font-size: 1.1rem;
+  padding: 0.4rem 0.75rem;
+  min-width: 40px;
+}
+
 .dropdown-container {
   position: relative;
   display: inline-block;
@@ -330,10 +367,11 @@ const onCameraFileChange = async (event) => {
   top: 100%;
   right: 0;
   margin-top: 0.5rem;
-  background: #1e293b;
+  background: var(--bg-dropdown);
   min-width: 160px;
   border-radius: 8px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-modal);
   z-index: 200;
   overflow: hidden;
   display: flex;
@@ -352,7 +390,7 @@ const onCameraFileChange = async (event) => {
 }
 
 .dropdown-item:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-hover);
 }
 
 .app-container {
@@ -412,7 +450,7 @@ const onCameraFileChange = async (event) => {
 
 .view-switcher {
     display: flex;
-    background: rgba(0,0,0,0.2);
+    background: var(--bg-hover);
     padding: 0.25rem;
     border-radius: 8px;
     gap: 0.5rem;
@@ -430,8 +468,8 @@ const onCameraFileChange = async (event) => {
 }
 
 .btn-tab:hover {
-    color: white;
-    background: rgba(255,255,255,0.05);
+    color: var(--text-primary);
+    background: var(--bg-hover);
 }
 
 .btn-tab.active {
