@@ -68,6 +68,7 @@
           :visible="visibleParts.has(part.id)"
           mode="stack"
           @edit="$emit('edit', part)"
+          @preview="$emit('preview', part)"
           @toggle-select="toggleSelect(part.id)"
         />
       </div>
@@ -86,6 +87,7 @@
           :visible="visibleParts.has(part.id)"
           :selection-mode="selectedParts.length > 0"
           @edit="$emit('edit', part)"
+          @preview="$emit('preview', part)"
           @toggle-select="toggleSelect(part.id)"
           @quick-update="quickUpdatePart(part.id, $event)"
         />
@@ -123,6 +125,7 @@
               :visible="visibleParts.has(part.id)"
               mode="table"
               @edit="$emit('edit', part)"
+              @preview="$emit('preview', part)"
               @toggle-select="toggleSelect(part.id)"
             />
           </tbody>
@@ -292,7 +295,7 @@ import PartRow from './parts/PartRow.vue';
 import PartCardSkeleton from './parts/PartCardSkeleton.vue';
 import BulkEditModal from './BulkEditModal.vue';
 
-const emit = defineEmits(['add', 'edit', 'open-ai-review']);
+const emit = defineEmits(['add', 'edit', 'preview', 'open-ai-review']);
 
 const toast = useToast();
 const filters = usePartsFilters();

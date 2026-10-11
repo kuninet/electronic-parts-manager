@@ -9,6 +9,7 @@ import UsedPartsView from './components/UsedPartsView.vue';
 import QrScanner from './components/QrScanner.vue';
 import QrGenerator from './components/QrGenerator.vue';
 import AiSuggestionReviewModal from './components/AiSuggestionReviewModal.vue';
+import PhotoLightboxModal from './components/PhotoLightboxModal.vue';
 import ToastHost from './components/ToastHost.vue';
 
 import AppSidebar from './components/layout/AppSidebar.vue';
@@ -19,6 +20,7 @@ import MobileMoreSheet from './components/layout/MobileMoreSheet.vue';
 
 import api from './api';
 import { resizeImageFile } from './utils/imageResize';
+import { hasPreviewablePhoto } from './utils/photoPreview';
 import { useToast } from './composables/useToast';
 import { usePartsStats } from './composables/usePartsStats';
 import { usePartsFilters } from './composables/usePartsFilters';
@@ -35,6 +37,7 @@ const showQrGenerator = ref(false);
 const showAiReview = ref(false);
 const showMoreSheet = ref(false);
 const editingPart = ref(null);
+const previewPart = ref(null);
 const editingMasterLocationId = ref(null);
 
 const partsListRef = ref(null);
@@ -60,6 +63,7 @@ onUnmounted(() => {
 });
 
 const switchView = (view) => {
+  previewPart.value = null;
   currentView.value = view;
 };
 
@@ -81,6 +85,23 @@ const openEditModal = (part) => {
 const closeModal = () => {
   showModal.value = false;
   editingPart.value = null;
+};
+
+const openPhotoPreview = (part) => {
+  if (!hasPreviewablePhoto(part)) {
+    openEditModal(part);
+    return;
+  }
+  previewPart.value = part;
+};
+
+const closePhotoPreview = () => {
+  previewPart.value = null;
+};
+
+const onPreviewEdit = (part) => {
+  previewPart.value = null;
+  openEditModal(part);
 };
 
 const openMasterModal = (location = null) => {
@@ -123,6 +144,7 @@ useShortcuts({
   onSearch: handleSearchFocus,
   onNew: openAddModal,
   isBlocked: () =>
+    !!previewPart.value ||
     showModal.value ||
     showDataModal.value ||
     showMasterModal.value ||
@@ -219,6 +241,7 @@ const onCameraFileChange = async (event) => {
           ref="partsListRef"
           @add="openAddModal"
           @edit="openEditModal"
+          @preview="openPhotoPreview"
           @open-ai-review="showAiReview = true"
         />
         <UsedPartsView
@@ -273,6 +296,13 @@ const onCameraFileChange = async (event) => {
       v-if="showAiReview"
       @close="onAiReviewClosed"
       @updated="onAiReviewUpdated"
+    />
+
+    <PhotoLightboxModal
+      v-if="previewPart"
+      :part="previewPart"
+      @close="closePhotoPreview"
+      @edit="onPreviewEdit"
     />
 
     <PartForm

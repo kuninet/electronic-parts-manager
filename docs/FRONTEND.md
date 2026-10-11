@@ -146,3 +146,10 @@ PC 環境での高速操作を支援するキーバインドが提供されて�
 - `layout/MobileMoreSheet.vue`: モバイル「その他」ボトムシート。
 - `layout/CameraFab.vue`: モバイル用カメラ起動フローティングアクションボタン。
 - `layout/ThemeSwitch.vue`: システム / ダーク / ライトの 3 択セグメントスイッチ。
+
+### モーダル・詳細
+- `PhotoLightboxModal.vue`: 写真の拡大表示（ライトボックス）。テーマ非依存の暗いクローム、Esc・背景/余白クリック・× ボタンで閉じる。「詳細・編集」ボタンから PartForm へ遷移。ダイアログ a11y（`role="dialog"`, `aria-modal="true"`）およびフォーカストラップ・復帰制御を実装。
+- `PartForm.vue`: パーツの新規追加および詳細・編集モーダル。
+
+### 写真クリックの挙動
+一覧（PartCard / PartRow）の写真サムネイルをクリック（タップ）した際、`hasPreviewablePhoto` により写真が登録されている部品は `PhotoLightboxModal` が開き高解像度プレビューが表示されます。写真が未設定の部品をクリックした場合は直接 `PartForm`（編集モーダル）が開きます。ライトボックス内の「詳細・編集」ボタンからも編集モーダルへ遷移可能です。
