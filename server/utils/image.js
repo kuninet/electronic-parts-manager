@@ -1,20 +1,30 @@
 const sharp = require('sharp');
 
-async function resizeImageBuffer(buffer, maxWidth = 1000) {
+async function resizeImageBuffer(buffer, maxWidth = 1200, quality = 80) {
     try {
         const metadata = await sharp(buffer).metadata();
         // スマホなどのカメラで撮影された画像のEXIF(Orientation)情報をもとに正しい向きに自動回転させる
-        const pipeline = sharp(buffer).rotate();
+        let pipeline = sharp(buffer).rotate();
 
-        if (metadata.width > maxWidth) {
-            const resized = await pipeline
-                .resize({ width: maxWidth, withoutEnlargement: true })
-                .toBuffer();
-            console.log(`Resized and auto-rotated image buffer (${metadata.width}px -> ${maxWidth}px)`);
-            return resized;
+        const width = metadata.width || 0;
+        const height = metadata.height || 0;
+        const maxDim = Math.max(width, height);
+
+        if (maxDim > maxWidth) {
+            if (width >= height) {
+                pipeline = pipeline.resize({ width: maxWidth, withoutEnlargement: true });
+            } else {
+                pipeline = pipeline.resize({ height: maxWidth, withoutEnlargement: true });
+            }
         }
 
-        // リサイズ不要な場合でも回転だけは適用して返す
+        // クライアント側と基準を統一（長辺1200px・JPEG品質80%）
+        if (metadata.format === 'jpeg') {
+            pipeline = pipeline.jpeg({ quality, mozjpeg: true });
+        } else if (metadata.format === 'webp') {
+            pipeline = pipeline.webp({ quality });
+        }
+
         return await pipeline.toBuffer();
     } catch (err) {
         console.error('Failed to resize image:', err);

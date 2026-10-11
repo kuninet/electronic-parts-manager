@@ -2,6 +2,7 @@
 import { ref, computed, onUnmounted } from 'vue';
 import { Html5Qrcode } from 'html5-qrcode';
 import api from '../api';
+import { resizeImageFile } from '../utils/imageResize';
 
 // --- 状態管理 ---
 const currentMode = ref('menu'); // 'menu' | 'scan-location' | 'scan-part' | 'scan-store-location' | 'scan-store-part' | 'register-location' | 'register-part' | 'location-info' | 'part-info' | 'store-done' | 'print'
@@ -14,12 +15,14 @@ const statusType = ref(''); // 'success' | 'error' | 'info'
 const locationForm = ref({ name: '', description: '' });
 const locationImage = ref(null);
 const locationImagePreview = ref(null);
+const resizingLocationImage = ref(false);
 
 // 部品登録フォーム
 const partForm = ref({ name: '', part_number: '', description: '', quantity: 1 });
 const partImage = ref(null);
 const partImagePreview = ref(null);
 const registeringPart = ref(false);
+const resizingPartImage = ref(false);
 
 // カテゴリ・ロケーション
 const categories = ref([]);
@@ -457,19 +460,43 @@ const generatePdf = async () => {
 };
 
 // --- 画像処理 ---
-const onLocationImageChange = (event) => {
-    const file = event.target.files[0];
+const onLocationImageChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (locationImagePreview.value) {
+        URL.revokeObjectURL(locationImagePreview.value);
+        locationImagePreview.value = null;
+    }
     if (file) {
-        locationImage.value = file;
-        locationImagePreview.value = URL.createObjectURL(file);
+        resizingLocationImage.value = true;
+        try {
+            const resized = await resizeImageFile(file);
+            locationImage.value = resized;
+            locationImagePreview.value = URL.createObjectURL(resized);
+        } finally {
+            resizingLocationImage.value = false;
+        }
+    } else {
+        locationImage.value = null;
     }
 };
 
-const onPartImageChange = (event) => {
-    const file = event.target.files[0];
+const onPartImageChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (partImagePreview.value) {
+        URL.revokeObjectURL(partImagePreview.value);
+        partImagePreview.value = null;
+    }
     if (file) {
-        partImage.value = file;
-        partImagePreview.value = URL.createObjectURL(file);
+        resizingPartImage.value = true;
+        try {
+            const resized = await resizeImageFile(file);
+            partImage.value = resized;
+            partImagePreview.value = URL.createObjectURL(resized);
+        } finally {
+            resizingPartImage.value = false;
+        }
+    } else {
+        partImage.value = null;
     }
 };
 
@@ -495,6 +522,14 @@ const getImageUrl = (imagePath) => {
 // クリーンアップ
 onUnmounted(() => {
     stopScanner();
+    if (locationImagePreview.value) {
+        URL.revokeObjectURL(locationImagePreview.value);
+        locationImagePreview.value = null;
+    }
+    if (partImagePreview.value) {
+        URL.revokeObjectURL(partImagePreview.value);
+        partImagePreview.value = null;
+    }
 });
 </script>
 
@@ -582,12 +617,13 @@ onUnmounted(() => {
 
       <div class="form-group">
         <label>📷 写真（任意）</label>
-        <input type="file" accept="image/*" @change="onLocationImageChange" class="form-input-file" />
-        <img v-if="locationImagePreview" :src="locationImagePreview" class="image-preview" />
+        <input type="file" accept="image/*" @change="onLocationImageChange" class="form-input-file" :disabled="resizingLocationImage" />
+        <p v-if="resizingLocationImage" class="resizing-text" style="color: var(--accent-color, #38bdf8); font-size: 0.85rem; margin-top: 0.3rem;">⏳ 画像を最適化中...</p>
+        <img v-if="locationImagePreview && !resizingLocationImage" :src="locationImagePreview" class="image-preview" />
       </div>
 
       <div class="form-actions">
-        <button class="btn btn-primary" @click="registerLocation">登録する</button>
+        <button class="btn btn-primary" @click="registerLocation" :disabled="resizingLocationImage">登録する</button>
         <button class="btn btn-cancel" @click="backToMenu">キャンセル</button>
       </div>
     </div>
@@ -596,8 +632,8 @@ onUnmounted(() => {
     <div v-if="currentMode === 'register-part'" class="form-container glass-panel">
       <div class="form-header">
         <h2>🔧 部品を登録</h2>
-        <button class="btn btn-primary btn-header-action" @click="registerPart" :disabled="registeringPart">
-          {{ registeringPart ? '登録中...' : '登録する' }}
+        <button class="btn btn-primary btn-header-action" @click="registerPart" :disabled="registeringPart || resizingPartImage">
+          {{ registeringPart ? '登録中...' : (resizingPartImage ? '画像最適化中...' : '登録する') }}
         </button>
       </div>
       <p class="qr-id-display">QR: {{ scannedQrCode }}</p>
@@ -625,9 +661,11 @@ onUnmounted(() => {
           capture="environment"
           @change="onPartImageChange"
           class="form-input-file"
+          :disabled="resizingPartImage"
         />
         <p class="form-hint">スマホやiPadではカメラが優先して開きます。</p>
-        <img v-if="partImagePreview" :src="partImagePreview" class="image-preview" />
+        <p v-if="resizingPartImage" class="resizing-text" style="color: var(--accent-color, #38bdf8); font-size: 0.85rem; margin-top: 0.3rem;">⏳ 画像を最適化中...</p>
+        <img v-if="partImagePreview && !resizingPartImage" :src="partImagePreview" class="image-preview" />
       </div>
 
       <div class="form-group">

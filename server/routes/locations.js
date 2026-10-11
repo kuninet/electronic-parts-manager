@@ -10,7 +10,12 @@ const fs = require('fs');
 
 // Configure Multer (memoryStorage for S3 support)
 const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+const upload = multer({
+    storage: storage,
+    limits: { fileSize: 50 * 1024 * 1024 }
+});
+
+const MAX_IMAGE_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
 const s3Images = new S3Client({ region: process.env.AWS_REGION || 'ap-northeast-1' });
 const IMAGES_BUCKET = process.env.S3_IMAGES_BUCKET;
@@ -55,6 +60,9 @@ router.post('/', upload.single('image'), async (req, res) => {
         let image_path = null;
         if (req.file) {
             const file = req.file;
+            if (file.size > MAX_IMAGE_FILE_SIZE) {
+                return res.status(413).json({ error: '画像ファイルサイズは20MB以下にしてください' });
+            }
             const validationError = await ensureValidImage(file);
             if (validationError) return res.status(400).json({ error: validationError });
             const filename = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
@@ -103,6 +111,9 @@ router.put('/:id', upload.single('image'), async (req, res) => {
 
         if (req.file) {
             const file = req.file;
+            if (file.size > MAX_IMAGE_FILE_SIZE) {
+                return res.status(413).json({ error: '画像ファイルサイズは20MB以下にしてください' });
+            }
             const validationError = await ensureValidImage(file);
             if (validationError) return res.status(400).json({ error: validationError });
             const filename = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
@@ -184,5 +195,8 @@ router.delete('/:id', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+const { multerErrorHandler } = require('../utils/multerErrorHandler');
+router.use(multerErrorHandler);
 
 module.exports = router;

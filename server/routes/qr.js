@@ -9,7 +9,11 @@ const { resizeImageBuffer, validateImage } = require('../utils/image');
 
 // 画像アップロード設定（メモリ上でリサイズしてから保存）
 const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+const upload = multer({
+    storage: storage,
+    limits: { fileSize: 50 * 1024 * 1024 }
+});
+const MAX_IMAGE_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
 
@@ -138,6 +142,9 @@ router.post('/register-location', upload.single('image'), async (req, res) => {
         const db = getDb();
         const { qr_code, name, description } = req.body;
         if (req.file) {
+            if (req.file.size > MAX_IMAGE_FILE_SIZE) {
+                return res.status(413).json({ error: '画像ファイルサイズは20MB以下にしてください' });
+            }
             const validationError = await ensureValidImage(req.file);
             if (validationError) return res.status(400).json({ error: validationError });
         }
@@ -181,6 +188,9 @@ router.post('/register-part', upload.single('image'), async (req, res) => {
         }
 
         if (req.file) {
+            if (req.file.size > MAX_IMAGE_FILE_SIZE) {
+                return res.status(413).json({ error: '画像ファイルサイズは20MB以下にしてください' });
+            }
             const validationError = await ensureValidImage(req.file);
             if (validationError) return res.status(400).json({ error: validationError });
         }
@@ -274,5 +284,8 @@ router.get('/storage-logs', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+const { multerErrorHandler } = require('../utils/multerErrorHandler');
+router.use(multerErrorHandler);
 
 module.exports = router;

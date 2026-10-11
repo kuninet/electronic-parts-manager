@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue';
 import api from '../api';
 import draggable from 'vuedraggable';
 import MiniQrScanner from './MiniQrScanner.vue';
+import { resizeImageFile } from '../utils/imageResize';
 
 const props = defineProps({
     initialLocationEditId: {
@@ -79,9 +80,41 @@ const deleteCategory = async (id) => {
 
 const newLocationImage = ref(null);
 const editingImage = ref(null);
+const resizingLocationImage = ref(false);
+const resizingEditImage = ref(false);
+
+const handleNewLocationImageChange = async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  resizingLocationImage.value = true;
+  try {
+    newLocationImage.value = await resizeImageFile(file);
+  } catch (err) {
+    console.error('画像リサイズ失敗:', err);
+    newLocationImage.value = file;
+  } finally {
+    resizingLocationImage.value = false;
+    e.target.value = '';
+  }
+};
+
+const handleEditImageChange = async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  resizingEditImage.value = true;
+  try {
+    editingImage.value = await resizeImageFile(file);
+  } catch (err) {
+    console.error('画像リサイズ失敗:', err);
+    editingImage.value = file;
+  } finally {
+    resizingEditImage.value = false;
+    e.target.value = '';
+  }
+};
 
 const addLocation = async () => {
-  if (!newLocation.value) return;
+  if (!newLocation.value || resizingLocationImage.value) return;
   try {
     const formData = new FormData();
     formData.append('name', newLocation.value);
@@ -149,10 +182,11 @@ const cancelEdit = () => {
     editingDesc.value = '';
     editingQrCode.value = '';
     editingImage.value = null;
+    resizingEditImage.value = false;
 };
 
 const saveEdit = async () => {
-    if (!editingName.value) return;
+    if (!editingName.value || resizingEditImage.value) return;
     try {
         if (editingType.value === 'category') {
             await api.put(`/categories/${editingId.value}`, { name: editingName.value });
@@ -222,15 +256,18 @@ const handleReorder = async (type, list) => {
         <div class="input-group">
           <input v-model="newLocation" placeholder="新しい保管場所" @keydown.enter="onEnter($event, addLocation)" />
           <div class="file-upload-mini">
-            <label class="btn-icon camera-icon">
+            <label class="btn-icon camera-icon" :class="{ 'opacity-50': resizingLocationImage }">
               📷
-              <input type="file" accept="image/*" class="hidden-input" @change="e => newLocationImage = e.target.files[0]">
+              <input type="file" accept="image/*" class="hidden-input" :disabled="resizingLocationImage" @change="handleNewLocationImageChange">
             </label>
           </div>
-          <button class="btn btn-primary" @click="addLocation">+</button>
+          <button class="btn btn-primary" :disabled="resizingLocationImage" @click="addLocation">+</button>
         </div>
-        <div v-if="newLocationImage" class="preview-mini">
-            <span>画像選択中: {{ newLocationImage.name }}</span>
+        <div v-if="resizingLocationImage" class="preview-mini text-warning">
+            <span>🔄 画像を最適化中...</span>
+        </div>
+        <div v-else-if="newLocationImage" class="preview-mini">
+            <span>画像選択中: {{ newLocationImage.name }} ({{ Math.round(newLocationImage.size / 1024) }} KB)</span>
             <button @click="newLocationImage = null" class="btn-icon text-danger">×</button>
         </div>
 
@@ -260,15 +297,16 @@ const handleReorder = async (type, list) => {
                         />
                         
                         <div class="edit-image-row">
-                            <label class="btn btn-sm btn-outline">
+                            <label class="btn btn-sm btn-outline" :class="{ 'opacity-50': resizingEditImage }">
                               画像変更
-                              <input type="file" accept="image/*" class="hidden-input" @change="e => editingImage = e.target.files[0]">
+                              <input type="file" accept="image/*" class="hidden-input" :disabled="resizingEditImage" @change="handleEditImageChange">
                             </label>
-                            <span v-if="editingImage" class="text-success">変更あり</span>
+                            <span v-if="resizingEditImage" class="text-warning">🔄 最適化中...</span>
+                            <span v-else-if="editingImage" class="text-success">変更あり ({{ Math.round(editingImage.size / 1024) }} KB)</span>
                         </div>
   
                         <div class="edit-actions">
-                            <button class="btn-icon text-success" @click="saveEdit">✅</button>
+                            <button class="btn-icon text-success" :disabled="resizingEditImage" @click="saveEdit">✅</button>
                             <button class="btn-icon text-danger" @click="cancelEdit">❌</button>
                         </div>
                      </div>
@@ -508,6 +546,8 @@ input:focus {
 
 .text-success { color: var(--success); }
 .text-danger { color: var(--danger); }
+.text-warning { color: #f59e0b; }
+.opacity-50 { opacity: 0.5; pointer-events: none; }
 
 .footer {
   margin-top: 1.5rem;

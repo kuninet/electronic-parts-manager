@@ -8,7 +8,9 @@
   },
   "scripts": {
     "start": "node index.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "optimize-images": "node scripts/optimize-existing-images.js",
+    "optimize-images:apply": "node scripts/optimize-existing-images.js --apply"
   },
   "keywords": [],
   "author": "",

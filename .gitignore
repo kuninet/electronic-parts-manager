@@ -3,6 +3,7 @@ node_modules
 uploads
 dist
 server/database.sqlite
+server/backups/
 
 # ==========================
 # 環境変数・シークレット

@@ -71,6 +71,24 @@ app.use('/api/backup', backupRouter);
 app.use('/api/qr', require('./routes/qr'));
 app.use('/api/ai-naming', require('./routes/aiNaming'));
 
+// Multer and general error handling middleware
+const multer = require('multer');
+app.use((err, req, res, next) => {
+    if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(413).json({ error: 'ファイルサイズが大きすぎます (最大50MB)' });
+        }
+        return res.status(400).json({ error: `ファイルアップロードエラー: ${err.message}` });
+    }
+    if (err) {
+        console.error('Unhandled error:', err);
+        const status = err.status || 500;
+        const message = status === 500 ? 'サーバー内部エラーが発生しました' : (err.message || 'エラーが発生しました');
+        return res.status(status).json({ error: message });
+    }
+    next();
+});
+
 // Initialize DB and start server
 initDb().then(() => {
     app.listen(PORT, () => {
