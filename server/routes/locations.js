@@ -157,23 +157,49 @@ router.put('/:id', upload.single('image'), async (req, res) => {
 });
 
 // DELETE /api/locations/:id
+// ゴミ箱外（通常・使用済み）のパーツが無ければ削除できる。
+// ゴミ箱内パーツの location_id は NULL に外し、この場所への入庫ログ（storage_logs）は削除する。
 router.delete('/:id', async (req, res) => {
     try {
-        const db = getDb();
-
-        // Check if used in parts
-        const usage = await db.get('SELECT COUNT(*) as count FROM parts WHERE location_id = ?', [req.params.id]);
-        if (usage.count > 0) {
-            return res.status(400).json({ error: 'この保管場所は使用されているため削除できません' });
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(400).json({ error: 'Invalid ID' });
         }
 
-        // Get image path first
-        const loc = await db.get('SELECT image_path FROM locations WHERE id = ?', [req.params.id]);
+        const db = getDb();
 
-        // Delete from DB first
-        await db.run('DELETE FROM locations WHERE id = ?', [req.params.id]);
+        const loc = await db.get('SELECT id, image_path FROM locations WHERE id = ?', [id]);
+        if (!loc) {
+            return res.status(404).json({ error: '保管場所が見つかりません' });
+        }
 
-        // If DB delete successful, delete image
+        // ゴミ箱内のパーツは「使用中」と数えない
+        const usage = await db.get('SELECT COUNT(*) as count FROM parts WHERE location_id = ? AND deleted_at IS NULL', [id]);
+        if (usage.count > 0) {
+            return res.status(400).json({ error: `この保管場所には ${usage.count} 件のパーツがあるため削除できません（使用済みを含む）` });
+        }
+
+        // parts.location_id / storage_logs.location_id は ON DELETE CASCADE ではないため、先に参照を外す。
+        // node-sqlite3 は接続を共有するため、トランザクションはベストエフォート。
+        let detachedTrashedParts = 0;
+        let deletedLogs = 0;
+        await db.exec('BEGIN');
+        try {
+            const detached = await db.run(
+                'UPDATE parts SET location_id = NULL WHERE location_id = ? AND deleted_at IS NOT NULL',
+                [id]
+            );
+            detachedTrashedParts = detached.changes;
+            const logs = await db.run('DELETE FROM storage_logs WHERE location_id = ?', [id]);
+            deletedLogs = logs.changes;
+            await db.run('DELETE FROM locations WHERE id = ?', [id]);
+            await db.exec('COMMIT');
+        } catch (err) {
+            await db.exec('ROLLBACK').catch(e => console.error('Rollback failed:', e));
+            throw err;
+        }
+
+        // DB の削除が確定してから画像を削除する
         if (loc && loc.image_path) {
             if (IMAGES_BUCKET) {
                 const key = loc.image_path.replace(/^\//, '');
@@ -190,7 +216,7 @@ router.delete('/:id', async (req, res) => {
             }
         }
 
-        res.json({ message: 'Location deleted' });
+        res.json({ message: 'Location deleted', detachedTrashedParts, deletedLogs });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

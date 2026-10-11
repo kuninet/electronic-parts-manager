@@ -24,6 +24,82 @@ const MAX_IMAGE_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 const s3Images = new S3Client({ region: process.env.AWS_REGION || 'ap-northeast-1' });
 const IMAGES_BUCKET = process.env.S3_IMAGES_BUCKET;
 
+// 一括操作で受け付ける ID の上限（client/src/constants.js の BULK_MAX_IDS と一致させること）
+const BULK_MAX_IDS = 500;
+
+const placeholders = (n) => Array(n).fill('?').join(',');
+
+// 正の整数に変換し、重複を除いて返す。不正なら null
+function normalizeIds(raw) {
+    if (!Array.isArray(raw) || raw.length === 0 || raw.length > BULK_MAX_IDS) return null;
+    const out = new Set();
+    for (const v of raw) {
+        const n = Number(v);
+        if (!Number.isInteger(n) || n <= 0) return null;
+        out.add(n);
+    }
+    return [...out];
+}
+
+// パスパラメータの ID を検証する。不正なら null
+function parseId(raw) {
+    const ids = normalizeIds([raw]);
+    return ids ? ids[0] : null;
+}
+
+// 画像・データシートのファイルを削除する（完了を待たない。失敗はログのみ）
+function removePartFiles(parts) {
+    for (const part of parts) {
+        if (part.image_path) {
+            if (IMAGES_BUCKET) {
+                const key = part.image_path.replace(/^\//, '');
+                s3Images.send(new DeleteObjectCommand({ Bucket: IMAGES_BUCKET, Key: key }))
+                    .catch(e => console.error('Failed to delete image from S3:', e));
+            } else {
+                fs.unlink(path.join(__dirname, '../../', part.image_path), (err) => {
+                    if (err) console.error('Failed to delete image:', err);
+                });
+            }
+        }
+        if (part.datasheet_path) {
+            fs.unlink(path.join(__dirname, '../../', part.datasheet_path), (err) => {
+                if (err) console.error('Failed to delete datasheet:', err);
+            });
+        }
+    }
+}
+
+// ゴミ箱内のパーツを完全削除する。
+// DB の削除が確定してからファイルを消す（外部キー違反などで DB 削除が失敗したときにファイルだけ消えるのを防ぐ）。
+// node-sqlite3 は接続を共有するため、トランザクションはベストエフォート。安全性は処理順序で担保する。
+async function permanentlyDeleteParts(db, ids) {
+    const targets = await db.all(
+        `SELECT id, image_path, datasheet_path FROM parts WHERE id IN (${placeholders(ids.length)}) AND deleted_at IS NOT NULL`,
+        ids
+    );
+    if (targets.length === 0) return { affected: 0 };
+
+    const targetIds = targets.map(t => t.id);
+    const ph = placeholders(targetIds.length);
+    let affected = 0;
+
+    await db.exec('BEGIN');
+    try {
+        // storage_logs.part_id は ON DELETE CASCADE ではないため明示的に削除する
+        await db.run(`DELETE FROM storage_logs WHERE part_id IN (${ph})`, targetIds);
+        // part_tags / ai_name_suggestions は ON DELETE CASCADE で削除される
+        const result = await db.run(`DELETE FROM parts WHERE id IN (${ph}) AND deleted_at IS NOT NULL`, targetIds);
+        affected = result.changes;
+        await db.exec('COMMIT');
+    } catch (err) {
+        await db.exec('ROLLBACK').catch(e => console.error('Rollback failed:', e));
+        throw err;
+    }
+
+    removePartFiles(targets);
+    return { affected };
+}
+
 // GET /api/parts - List parts with filters
 router.get('/', async (req, res) => {
     try {
@@ -238,7 +314,7 @@ router.put('/:id', upload, async (req, res) => {
     try {
         const db = getDb();
         const { name, description, category_id, location_id, quantity, datasheet_url, qr_code, used_at, used_for, used_note } = req.body;
-        const id = req.params.id; console.log("req.body:", req.body);
+        const id = req.params.id;
 
         const safeCategoryId = (category_id === '' || category_id === 'null' || category_id === undefined) ? null : category_id;
         const safeUsedAt = (used_at === '' || used_at === 'null' || used_at === undefined) ? null : used_at;
@@ -449,56 +525,58 @@ router.patch('/:id', async (req, res) => {
     }
 });
 
-// DELETE /api/parts/:id - Soft Delete part
+// DELETE /api/parts/:id - Soft Delete part（ゴミ箱へ移動）
 router.delete('/:id', async (req, res) => {
     try {
+        const id = parseId(req.params.id);
+        if (!id) return res.status(400).json({ error: 'Invalid ID' });
+
         const db = getDb();
-        // ソフトデリート時にQRコードを解放（再利用可能にする）
-        await db.run('UPDATE parts SET deleted_at = CURRENT_TIMESTAMP, qr_code = NULL WHERE id = ?', [req.params.id]);
-        res.json({ message: 'Moved to trash' });
+        // ソフトデリート時にQRコードを解放（再利用可能にする。復元しても戻らない）
+        const result = await db.run(
+            'UPDATE parts SET deleted_at = CURRENT_TIMESTAMP, qr_code = NULL WHERE id = ? AND deleted_at IS NULL',
+            [id]
+        );
+        if (result.changes === 0) {
+            return res.status(404).json({ error: 'パーツが見つからないか、既にゴミ箱にあります' });
+        }
+        res.json({ message: 'Moved to trash', id });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// DELETE /api/parts/:id/permanent - Permanent Delete
+// DELETE /api/parts/:id/permanent - Permanent Delete（ゴミ箱内のパーツのみ）
 router.delete('/:id/permanent', async (req, res) => {
     try {
-        const db = getDb();
-        const id = req.params.id; console.log("req.body:", req.body);
+        const id = parseId(req.params.id);
+        if (!id) return res.status(400).json({ error: 'Invalid ID' });
 
-        // Fetch current file paths to delete files
-        const currentPart = await db.get('SELECT image_path, datasheet_path FROM parts WHERE id = ?', [id]);
-
-        if (currentPart) {
-            if (currentPart.image_path) {
-                if (IMAGES_BUCKET) {
-                    const key = currentPart.image_path.replace(/^\//, '');
-                    s3Images.send(new DeleteObjectCommand({ Bucket: IMAGES_BUCKET, Key: key })).catch(e => console.error('Failed to delete image from S3:', e));
-                } else {
-                    const oldPath = path.join(__dirname, '../../', currentPart.image_path);
-                    fs.unlink(oldPath, (err) => { if (err) console.error('Failed to delete image:', err); });
-                }
-            }
-            if (currentPart.datasheet_path) {
-                const oldPath = path.join(__dirname, '../../', currentPart.datasheet_path);
-                fs.unlink(oldPath, (err) => { if (err) console.error('Failed to delete datasheet:', err); });
-            }
+        const { affected } = await permanentlyDeleteParts(getDb(), [id]);
+        if (affected === 0) {
+            return res.status(404).json({ error: 'パーツが見つからないか、ゴミ箱にありません' });
         }
-
-        await db.run('DELETE FROM parts WHERE id = ?', [id]);
-        res.json({ message: 'Permanently deleted' });
+        res.json({ message: 'Permanently deleted', affected });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// POST /api/parts/:id/restore - Restore part
+// POST /api/parts/:id/restore - Restore part（ゴミ箱から復元）
 router.post('/:id/restore', async (req, res) => {
     try {
+        const id = parseId(req.params.id);
+        if (!id) return res.status(400).json({ error: 'Invalid ID' });
+
         const db = getDb();
-        await db.run('UPDATE parts SET deleted_at = NULL WHERE id = ?', [req.params.id]);
-        res.json({ message: 'Restored successfully' });
+        const result = await db.run(
+            'UPDATE parts SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL',
+            [id]
+        );
+        if (result.changes === 0) {
+            return res.status(404).json({ error: 'パーツが見つからないか、ゴミ箱にありません' });
+        }
+        res.json({ message: 'Restored successfully', id });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -518,43 +596,36 @@ router.post('/:id/unuse', async (req, res) => {
     }
 });
 
-// POST /api/parts/bulk - Bulk actions
+// POST /api/parts/bulk/action - Bulk actions
+// action: 'trash'（ゴミ箱へ移動） / 'restore'（ゴミ箱から復元） / 'delete'（完全削除。取り消し不可）
 router.post('/bulk/action', async (req, res) => {
     try {
         const db = getDb();
-        const { ids, action } = req.body; // action: 'trash', 'restore', 'delete'
+        const { action } = req.body;
+        const ids = normalizeIds(req.body.ids);
 
-        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+        if (!ids) {
             return res.status(400).json({ error: 'Invalid IDs' });
         }
 
-        const placeholders = ids.map(() => '?').join(',');
+        const ph = placeholders(ids.length);
 
         if (action === 'trash') {
             // ソフトデリート時にQRコードを解放（再利用可能にする）
-            await db.run(`UPDATE parts SET deleted_at = CURRENT_TIMESTAMP, qr_code = NULL WHERE id IN (${placeholders})`, ids);
-            res.json({ message: `Moved ${ids.length} items to trash` });
+            const result = await db.run(
+                `UPDATE parts SET deleted_at = CURRENT_TIMESTAMP, qr_code = NULL WHERE id IN (${ph}) AND deleted_at IS NULL`,
+                ids
+            );
+            res.json({ message: `Moved ${result.changes} items to trash`, affected: result.changes });
         } else if (action === 'restore') {
-            await db.run(`UPDATE parts SET deleted_at = NULL WHERE id IN (${placeholders})`, ids);
-            res.json({ message: `Restored ${ids.length} items` });
+            const result = await db.run(
+                `UPDATE parts SET deleted_at = NULL WHERE id IN (${ph}) AND deleted_at IS NOT NULL`,
+                ids
+            );
+            res.json({ message: `Restored ${result.changes} items`, affected: result.changes });
         } else if (action === 'delete') {
-            // Permanent delete - need to handle file cleanup for each
-            const parts = await db.all(`SELECT image_path, datasheet_path FROM parts WHERE id IN (${placeholders})`, ids);
-            parts.forEach(part => {
-                if (part.image_path) {
-                    if (IMAGES_BUCKET) {
-                        const key = part.image_path.replace(/^\//, '');
-                        s3Images.send(new DeleteObjectCommand({ Bucket: IMAGES_BUCKET, Key: key })).catch(() => { });
-                    } else {
-                        fs.unlink(path.join(__dirname, '../../', part.image_path), () => { });
-                    }
-                }
-                if (part.datasheet_path) {
-                    fs.unlink(path.join(__dirname, '../../', part.datasheet_path), () => { });
-                }
-            });
-            await db.run(`DELETE FROM parts WHERE id IN (${placeholders})`, ids);
-            res.json({ message: `Permanently deleted ${ids.length} items` });
+            const { affected } = await permanentlyDeleteParts(db, ids);
+            res.json({ message: `Permanently deleted ${affected} items`, affected });
         } else {
             res.status(400).json({ error: 'Invalid action' });
         }
@@ -567,9 +638,10 @@ router.post('/bulk/action', async (req, res) => {
 router.post('/bulk/update', async (req, res) => {
     try {
         const db = getDb();
-        const { ids, updates } = req.body;
+        const { updates } = req.body;
+        const ids = normalizeIds(req.body.ids);
 
-        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+        if (!ids) {
             return res.status(400).json({ error: 'Invalid IDs' });
         }
 
@@ -600,8 +672,7 @@ router.post('/bulk/update', async (req, res) => {
         if (fieldsToUpdate.length > 0) {
             fieldsToUpdate.push('updated_at = CURRENT_TIMESTAMP');
 
-            const placeholders = ids.map(() => '?').join(',');
-            const sql = `UPDATE parts SET ${fieldsToUpdate.join(', ')} WHERE id IN (${placeholders})`;
+            const sql = `UPDATE parts SET ${fieldsToUpdate.join(', ')} WHERE id IN (${placeholders(ids.length)})`;
 
             // params so far + ids
             await db.run(sql, [...params, ...ids]);
@@ -636,8 +707,7 @@ router.post('/bulk/update', async (req, res) => {
                 if (!tagName) continue;
                 const tag = await db.get('SELECT id FROM tags WHERE name = ?', [tagName]);
                 if (tag) {
-                    const placeholders = ids.map(() => '?').join(',');
-                    await db.run(`DELETE FROM part_tags WHERE tag_id = ? AND part_id IN (${placeholders})`, [tag.id, ...ids]);
+                    await db.run(`DELETE FROM part_tags WHERE tag_id = ? AND part_id IN (${placeholders(ids.length)})`, [tag.id, ...ids]);
                 }
             }
         }
@@ -654,7 +724,7 @@ router.put('/:id/qr', async (req, res) => {
     try {
         const db = getDb();
         const { qr_code } = req.body;
-        const id = req.params.id; console.log("req.body:", req.body);
+        const id = req.params.id;
 
         // QRコード重複チェック
         const existing = await db.get('SELECT id FROM parts WHERE qr_code = ? AND id != ?', [qr_code, id]);

@@ -45,21 +45,45 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /api/categories/:id
+// ゴミ箱外（通常・使用済み）のパーツが無ければ削除できる。ゴミ箱内パーツの category_id は NULL（未分類）に外す。
 router.delete('/:id', async (req, res) => {
     try {
-        const db = getDb();
-
-        // Check if used in parts
-        const id = parseInt(req.params.id);
-
-        const usage = await db.get('SELECT COUNT(*) as count FROM parts WHERE category_id = ?', [id]);
-
-        if (usage && usage.count > 0) {
-            return res.status(400).json({ error: 'このカテゴリは使用されているため削除できません' });
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(400).json({ error: 'Invalid ID' });
         }
 
-        await db.run('DELETE FROM categories WHERE id = ?', [req.params.id]);
-        res.json({ message: 'Category deleted' });
+        const db = getDb();
+
+        const category = await db.get('SELECT id FROM categories WHERE id = ?', [id]);
+        if (!category) {
+            return res.status(404).json({ error: 'カテゴリが見つかりません' });
+        }
+
+        // ゴミ箱内のパーツは「使用中」と数えない
+        const usage = await db.get('SELECT COUNT(*) as count FROM parts WHERE category_id = ? AND deleted_at IS NULL', [id]);
+        if (usage.count > 0) {
+            return res.status(400).json({ error: `このカテゴリには ${usage.count} 件のパーツがあるため削除できません（使用済みを含む）` });
+        }
+
+        // parts.category_id は ON DELETE CASCADE ではないため、先に参照を外す。
+        // node-sqlite3 は接続を共有するため、トランザクションはベストエフォート。
+        let detachedTrashedParts = 0;
+        await db.exec('BEGIN');
+        try {
+            const detached = await db.run(
+                'UPDATE parts SET category_id = NULL WHERE category_id = ? AND deleted_at IS NOT NULL',
+                [id]
+            );
+            detachedTrashedParts = detached.changes;
+            await db.run('DELETE FROM categories WHERE id = ?', [id]);
+            await db.exec('COMMIT');
+        } catch (err) {
+            await db.exec('ROLLBACK').catch(e => console.error('Rollback failed:', e));
+            throw err;
+        }
+
+        res.json({ message: 'Category deleted', detachedTrashedParts });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

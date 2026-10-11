@@ -38,6 +38,7 @@ async function flush(id) {
   }
   try {
     const res = await api.patch(`/parts/${id}`, { quantity: r.send });
+    if (!entries.get(id)) return;
     const serverValue = Number(res.data?.quantity ?? r.send);
     entries.set(id, Q.onSuccess(entries.get(id), serverValue));
     listeners.forEach((fn) => fn(res.data));
@@ -47,12 +48,21 @@ async function flush(id) {
       cleanup(id);
     }
   } catch (err) {
+    if (!entries.get(id)) return;
     entries.set(id, Q.onFailure(entries.get(id)));
     useToast().error(
       err.response?.data?.error || '数量の更新に失敗しました。元の値に戻しました'
     );
     cleanup(id);
   }
+}
+
+function discard(id) {
+  if (timers.has(id)) {
+    clearTimeout(timers.get(id));
+    timers.delete(id);
+  }
+  entries.delete(id);
 }
 
 function cleanup(id) {
@@ -135,6 +145,7 @@ export function useQuantitySync() {
     },
     flushAll,
     hasPending,
+    discard,
     onConfirmed(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);

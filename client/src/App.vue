@@ -310,6 +310,8 @@ const onCameraFileChange = async (event) => {
       :part="editingPart"
       @close="closeModal"
       @saved="handleSaved"
+      @deleted="handleSaved"
+      @restored="handleSaved"
     />
 
     <DataManagement
