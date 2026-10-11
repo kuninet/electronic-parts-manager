@@ -42,6 +42,9 @@ lambda-invoke-output.json
 # ビルド成果物
 # ==========================
 dist/
+client/dist.next/
+client/dist.prev/
+logs/
 *.zip
 
 # ==========================
@@ -53,7 +56,8 @@ dist/
 epm-bastion-key.pem
 
 # ==========================
-# 一時作業・検証スクリプト・スクリーンショット
+# 一時作業・計画書・検証スクリプト・スクリーンショット
 # ==========================
 scratch/
 client/scratch/
+docs/*-plan.md

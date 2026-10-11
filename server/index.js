@@ -57,6 +57,7 @@ if (!process.env.S3_IMAGES_BUCKET) {
 }
 
 // Routes
+app.use('/api/health', require('./routes/health'));
 const partsRouter = require('./routes/parts');
 const categoriesRouter = require('./routes/categories');
 const locationsRouter = require('./routes/locations');

@@ -43,6 +43,8 @@ npm install
 
 ## 起動方法
 
+Windows PC で常駐運用する場合は [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md) を参照してください。`start_app.bat` / `start_app.sh` は開発用です。
+
 ### 1. サーバーの起動
 バックエンドAPIサーバーを起動します。
 
@@ -74,6 +76,8 @@ npm run dev
 │   ├── database.js      # SQLite接続設定
 │   ├── index.js         # サーバーエントリーポイント
 │   └── database.sqlite  # データベースファイル (自動生成)
+├── scripts/             # Windows 運用・自動更新・サービス登録スクリプト
+├── logs/                # 更新ログおよび PM2 ログ (git 管理外)
 ├── uploads/             # アップロードされた画像やPDFの保存先
 └── README.md            # このファイル
 ```
