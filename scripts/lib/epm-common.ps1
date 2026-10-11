@@ -224,30 +224,44 @@ function Test-Prerequisites {
 }
 
 function Get-Pm2Apps {
-    # pm2 jlist の複数行JSONパース (従来の Select-Object -Last 1 では整形JSONの1行目しか拾えず不具合となるため [ と ] のインデックスで抽出)
-    try {
-        $raw = (cmd /c "pm2 jlist 2>nul") -join "`n"
-        if (-not $raw) { return ,@() }
-        $match = [regex]::Match($raw, '\[\s*[\{\]]')
-        if (-not $match.Success) { return ,@() }
-        $startIdx = $match.Index
-        $endIdx = $raw.LastIndexOf(']')
-        if ($startIdx -ge 0 -and $endIdx -ge $startIdx) {
-            $jsonStr = $raw.Substring($startIdx, $endIdx - $startIdx + 1)
-            $parsed = $jsonStr | ConvertFrom-Json
-            $result = @()
-            foreach ($app in $parsed) {
-                $result += [pscustomobject]@{
-                    name   = $app.name
-                    status = $app.pm2_env.status
-                }
-            }
-            return ,([object[]]$result)
-        }
-        return ,@()
-    } catch {
-        return ,@()
+    $libDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+    if (-not $libDir -and $script:RepoRoot) { $libDir = Join-Path $script:RepoRoot 'scripts\lib' }
+    $helperScript = Join-Path $libDir 'pm2-apps.js'
+
+    if (-not (Test-Path -LiteralPath $helperScript)) {
+        throw ("PM2 状態取得スクリプトが見つかりません: {0}" -f $helperScript)
     }
+
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $lines = & node $helperScript 2>&1
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevPref
+    }
+
+    if ($null -eq $code) { $code = 0 }
+    if ($code -ne 0) {
+        $errText = ($lines | Where-Object { $_ -is [string] -or $_ -is [System.Management.Automation.ErrorRecord] }) -join "`n"
+        throw ("PM2 状態取得失敗 (exit {0}): {1}" -f $code, $errText)
+    }
+
+    $result = @()
+    if ($lines) {
+        foreach ($line in $lines) {
+            $lineStr = [string]$line
+            if (-not $lineStr.Trim()) { continue }
+            $parts = $lineStr -split "`t", 2
+            $appName = $parts[0]
+            $appStatus = if ($parts.Length -gt 1) { $parts[1] } else { '' }
+            $result += [pscustomobject]@{
+                name   = $appName
+                status = $appStatus
+            }
+        }
+    }
+    return ,([object[]]$result)
 }
 
 function Stop-EpmApps {
@@ -284,10 +298,15 @@ function Wait-EpmHealthy {
         }
 
         # (b) PM2 online 確認
-        $apps = Get-Pm2Apps
-        $serverApp = $apps | Where-Object { $_.name -eq 'epm-server' }
-        $webApp = $apps | Where-Object { $_.name -eq 'epm-web' }
-        $pm2Ok = ($null -ne $serverApp -and $serverApp.status -eq 'online' -and $null -ne $webApp -and $webApp.status -eq 'online')
+        $pm2Ok = $false
+        try {
+            $apps = Get-Pm2Apps
+            $serverApp = $apps | Where-Object { $_.name -eq 'epm-server' }
+            $webApp = $apps | Where-Object { $_.name -eq 'epm-web' }
+            $pm2Ok = ($null -ne $serverApp -and $serverApp.status -eq 'online' -and $null -ne $webApp -and $webApp.status -eq 'online')
+        } catch {
+            $pm2Ok = $false
+        }
 
         # (c) Webポート (5173) 疎通確認（プロキシ経由 API 疎通確認、curl 不可時は TCP 疎通にフォールバック）
         $webOk = $false
@@ -327,12 +346,6 @@ function Wait-EpmHealthy {
             } finally {
                 $tcp.Close()
             }
-        }
-
-        # PM2 jlist からの取得が空配列等で判定できない場合のフォールバック
-        # API と WebPort の両方で通信可能であれば、実質的に正常稼働とみなす
-        if (-not $pm2Ok -and ($apps.Count -eq 0 -or $null -eq $apps) -and $apiOk -and $webOk) {
-            $pm2Ok = $true
         }
 
         if ($apiOk -and $pm2Ok -and $webOk) {

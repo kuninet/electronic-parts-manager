@@ -65,7 +65,13 @@ try {
         $exitCode = 1
         return
     }
-    $currentApps = Get-Pm2Apps
+    try {
+        $currentApps = Get-Pm2Apps
+    } catch {
+        Write-EpmLog -Level ERR -Message ("PM2 の状態を取得できませんでした: {0}" -f $_.Exception.Message)
+        $exitCode = 1
+        return
+    }
     $hasServer = $null -ne ($currentApps | Where-Object { $_.name -eq 'epm-server' })
     $hasWeb = $null -ne ($currentApps | Where-Object { $_.name -eq 'epm-web' })
     if (-not $hasServer -or -not $hasWeb) {
