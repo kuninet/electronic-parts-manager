@@ -138,4 +138,124 @@ test('/api/ai-naming ルートのテスト', async (t) => {
     const data = await res.json();
     assert.equal(data.status, 'rejected');
   });
+
+  await t.test('A-1: 型番なし部品とpart_numberあり候補でbodyにpart_numberなしで/apply/:id -> 候補の型番が反映される', async () => {
+    const p = await db.run("INSERT INTO parts (name, image_path, part_number) VALUES ('Timer IC', ?, NULL)", [dummyImage.imagePath]);
+    const s = await db.run("INSERT INTO ai_name_suggestions (part_id, image_path, suggested_name, part_number, status) VALUES (?, ?, 'NE555 タイマー', 'NE555P', 'pending')", [p.lastID, dummyImage.imagePath]);
+
+    const res = await fetch(`${baseUrl}/apply/${s.lastID}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.part.part_number, 'NE555P');
+
+    const updatedPart = await db.get('SELECT * FROM parts WHERE id = ?', [p.lastID]);
+    assert.equal(updatedPart.part_number, 'NE555P');
+  });
+
+  await t.test('A-2: /apply/:id で body.part_number を指定 -> ユーザー入力が優先反映される', async () => {
+    const p = await db.run("INSERT INTO parts (name, image_path, part_number) VALUES ('Timer IC', ?, NULL)", [dummyImage.imagePath]);
+    const s = await db.run("INSERT INTO ai_name_suggestions (part_id, image_path, suggested_name, part_number, status) VALUES (?, ?, 'NE555 タイマー', 'NE555P', 'pending')", [p.lastID, dummyImage.imagePath]);
+
+    const res = await fetch(`${baseUrl}/apply/${s.lastID}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ part_number: 'NE555P-TI' })
+    });
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.part.part_number, 'NE555P-TI');
+
+    const updatedPart = await db.get('SELECT * FROM parts WHERE id = ?', [p.lastID]);
+    assert.equal(updatedPart.part_number, 'NE555P-TI');
+  });
+
+  await t.test('A-3: 手入力型番 LM358N を持つ部品と空型番の候補で /apply/:id（body指定なし）-> LM358N が保持される (D5)', async () => {
+    const p = await db.run("INSERT INTO parts (name, image_path, part_number) VALUES ('OpAmp', ?, 'LM358N')", [dummyImage.imagePath]);
+    const s = await db.run("INSERT INTO ai_name_suggestions (part_id, image_path, suggested_name, part_number, status) VALUES (?, ?, 'デュアルオペアンプ', '', 'pending')", [p.lastID, dummyImage.imagePath]);
+
+    const res = await fetch(`${baseUrl}/apply/${s.lastID}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.part.part_number, 'LM358N');
+
+    const updatedPart = await db.get('SELECT * FROM parts WHERE id = ?', [p.lastID]);
+    assert.equal(updatedPart.part_number, 'LM358N');
+  });
+
+  await t.test('A-4: 手入力型番 LM358N の部品に対し、/apply/:id で body に空文字を指定 -> LM358N が保持される', async () => {
+    const p = await db.run("INSERT INTO parts (name, image_path, part_number) VALUES ('OpAmp', ?, 'LM358N')", [dummyImage.imagePath]);
+    const s = await db.run("INSERT INTO ai_name_suggestions (part_id, image_path, suggested_name, part_number, status) VALUES (?, ?, 'デュアルオペアンプ', 'LM358', 'pending')", [p.lastID, dummyImage.imagePath]);
+
+    const res = await fetch(`${baseUrl}/apply/${s.lastID}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ part_number: '' })
+    });
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.part.part_number, 'LM358N');
+
+    const updatedPart = await db.get('SELECT * FROM parts WHERE id = ?', [p.lastID]);
+    assert.equal(updatedPart.part_number, 'LM358N');
+  });
+
+  await t.test('A-5: /apply-batch の items にそれぞれ別の part_number を指定 -> 各部品に個別に反映される', async () => {
+    const p1 = await db.run("INSERT INTO parts (name, image_path) VALUES ('Part 1', ?)", [dummyImage.imagePath]);
+    const p2 = await db.run("INSERT INTO parts (name, image_path) VALUES ('Part 2', ?)", [dummyImage.imagePath]);
+
+    const s1 = await db.run("INSERT INTO ai_name_suggestions (part_id, image_path, suggested_name, confidence, status) VALUES (?, ?, 'S1', 0.9, 'pending')", [p1.lastID, dummyImage.imagePath]);
+    const s2 = await db.run("INSERT INTO ai_name_suggestions (part_id, image_path, suggested_name, confidence, status) VALUES (?, ?, 'S2', 0.9, 'pending')", [p2.lastID, dummyImage.imagePath]);
+
+    const res = await fetch(`${baseUrl}/apply-batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: [
+          { id: s1.lastID, name: 'Part 1 New', part_number: 'PN-001' },
+          { id: s2.lastID, name: 'Part 2 New', part_number: 'PN-002' }
+        ]
+      })
+    });
+    assert.equal(res.status, 200);
+
+    const updatedP1 = await db.get('SELECT * FROM parts WHERE id = ?', [p1.lastID]);
+    const updatedP2 = await db.get('SELECT * FROM parts WHERE id = ?', [p2.lastID]);
+    assert.equal(updatedP1.part_number, 'PN-001');
+    assert.equal(updatedP2.part_number, 'PN-002');
+  });
+
+  await t.test('A-6: GET /suggestions で current_part_number が返されること', async () => {
+    const p = await db.run("INSERT INTO parts (name, image_path, part_number) VALUES ('ABC Part', ?, 'ABC')", [dummyImage.imagePath]);
+    await db.run("INSERT INTO ai_name_suggestions (part_id, image_path, suggested_name, status) VALUES (?, ?, 'ABC Suggestion', 'pending')", [p.lastID, dummyImage.imagePath]);
+
+    const res = await fetch(`${baseUrl}/suggestions`);
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    const item = data.find(s => s.part_id === p.lastID);
+    assert.ok(item);
+    assert.equal(item.current_part_number, 'ABC');
+  });
+
+  await t.test('A-7: min_confidence で一括採用時に候補の part_number が反映されること', async () => {
+    const p = await db.run("INSERT INTO parts (name, image_path) VALUES ('Part Conf', ?)", [dummyImage.imagePath]);
+    const s = await db.run("INSERT INTO ai_name_suggestions (part_id, image_path, suggested_name, part_number, confidence, status) VALUES (?, ?, 'Conf High', 'CONF-800', 0.95, 'pending')", [p.lastID, dummyImage.imagePath]);
+
+    const res = await fetch(`${baseUrl}/apply-batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ min_confidence: 0.8 })
+    });
+    assert.equal(res.status, 200);
+
+    const updatedP = await db.get('SELECT * FROM parts WHERE id = ?', [p.lastID]);
+    assert.equal(updatedP.part_number, 'CONF-800');
+  });
 });

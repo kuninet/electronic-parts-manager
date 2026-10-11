@@ -16,6 +16,7 @@ const emit = defineEmits(['close', 'saved']);
 
 const formData = ref({
   name: '',
+  part_number: '',
   description: '',
   category_id: '',
   location_id: '',
@@ -68,6 +69,7 @@ onMounted(async () => {
       } else if (!formData.value.tags) {
           formData.value.tags = [];
       }
+      formData.value.part_number = props.part.part_number || '';
       formData.value.used_at = props.part.used_at || '';
       formData.value.used_for = props.part.used_for || '';
       formData.value.used_note = props.part.used_note || '';
@@ -217,6 +219,11 @@ const toggleUsedState = (nextValue) => {
           <div class="form-group">
             <label>パーツ名</label>
             <input v-model="formData.name" placeholder="未入力で自動生成" />
+          </div>
+
+          <div class="form-group">
+            <label>型番 (Part Number)</label>
+            <input v-model="formData.part_number" placeholder="例: NE555P（任意）" maxlength="100" autocapitalize="characters" spellcheck="false" />
           </div>
 
           <div v-if="part" class="form-group status-group">

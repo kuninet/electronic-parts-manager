@@ -3,6 +3,7 @@ const fs = require('fs');
 const sharp = require('sharp');
 const { GoogleGenAI, Type } = require('@google/genai');
 const { getDb } = require('../database');
+const { normalizePartNumber } = require('../utils/partNumber');
 const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 
 // 許可されたGeminiモデル一覧（ホワイトリスト）
@@ -629,12 +630,22 @@ async function applySuggestion(suggestionId, options = {}) {
     }
   }
 
-  // 部品情報を更新（QRコード・数量・保管場所等の既存値は保持）
+  // 型番の決定（D5: options.part_number が undefined なら suggestion.part_number を候補にする）
+  const candidatePartNumber = options.part_number !== undefined ? options.part_number : suggestion.part_number;
+  const partNumberResult = normalizePartNumber(candidatePartNumber);
+  if (partNumberResult.error) {
+    const err = new Error(partNumberResult.error);
+    err.status = 400;
+    throw err;
+  }
+  const partNumberToSet = partNumberResult.value ?? null;
+
+  // 部品情報を更新（QRコード・数量・保管場所等の既存値は保持、型番は非空なら上書き・空なら保持）
   await db.run(`
     UPDATE parts
-    SET name = ?, category_id = ?, updated_at = CURRENT_TIMESTAMP
+    SET name = ?, category_id = ?, part_number = COALESCE(?, part_number), updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
-  `, [finalName.trim(), categoryIdToSet, part.id]);
+  `, [finalName.trim(), categoryIdToSet, partNumberToSet, part.id]);
 
   // 候補ステータスを applied に更新
   await db.run(`
@@ -687,6 +698,7 @@ async function getPendingSuggestions(db = null) {
     SELECT
       s.*,
       p.name as current_part_name,
+      p.part_number as current_part_number,
       p.image_path as current_part_image_path,
       p.category_id as current_category_id,
       c.name as current_category_name

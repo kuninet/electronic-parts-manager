@@ -40,6 +40,7 @@ const fetchSuggestions = async () => {
     suggestions.value = res.data.map(item => ({
       ...item,
       edit_name: item.suggested_name || '',
+      edit_part_number: item.current_part_number ? item.current_part_number : (item.part_number || ''),
       // 既存カテゴリの上書き防止: 既に手動でカテゴリ設定済みの部品はデフォルトOFF、未設定のみON
       apply_category: !item.current_category_id && !item.category_id && !item.current_category_name
     }));
@@ -65,6 +66,7 @@ const handleApply = async (s) => {
   try {
     await api.post(`/ai-naming/apply/${s.id}`, {
       name: s.edit_name.trim(),
+      part_number: (s.edit_part_number || '').trim(),
       apply_category: s.apply_category
     });
     suggestions.value = suggestions.value.filter(item => item.id !== s.id);
@@ -104,10 +106,12 @@ const handleResuggest = async (s) => {
     const updated = {
       ...res.data,
       current_part_name: s.current_part_name,
+      current_part_number: s.current_part_number,
       current_part_image_path: s.current_part_image_path,
       current_category_id: s.current_category_id,
       current_category_name: s.current_category_name,
       edit_name: res.data.suggested_name || '',
+      edit_part_number: s.current_part_number ? s.current_part_number : (res.data.part_number || ''),
       apply_category: !s.current_category_id && !s.category_id && !s.current_category_name
     };
     const index = suggestions.value.findIndex(item => item.id === s.id);
@@ -134,6 +138,7 @@ const handleApplyHighConfidence = async () => {
     const items = targets.map(s => ({
       id: s.id,
       name: s.edit_name && s.edit_name.trim() ? s.edit_name.trim() : s.suggested_name,
+      part_number: (s.edit_part_number || '').trim(),
       apply_category: s.apply_category
     }));
 
@@ -245,11 +250,23 @@ const getConfidenceBadgeClass = (confidence) => {
                 />
               </div>
 
+              <!-- 型番の編集 -->
+              <div class="form-row-name">
+                <label class="field-label">型番 (編集可):</label>
+                <input
+                  v-model="s.edit_part_number"
+                  type="text"
+                  class="edit-name-input"
+                  placeholder="型番（空欄なら現在値を保持）"
+                  :disabled="isImageMismatched(s) || processingId === s.id"
+                />
+                <small v-if="s.current_part_number && s.current_part_number !== s.edit_part_number" class="field-note">
+                  現在の型番: {{ s.current_part_number }}（採用すると上書き）
+                </small>
+              </div>
+
               <!-- メタデータタグ群 -->
               <div class="meta-tags-grid">
-                <div v-if="s.part_number" class="meta-tag">
-                  <span class="tag-k">型番:</span> {{ s.part_number }}
-                </div>
                 <div v-if="s.manufacturer" class="meta-tag">
                   <span class="tag-k">メーカー:</span> {{ s.manufacturer }}
                 </div>

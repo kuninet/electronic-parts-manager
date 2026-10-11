@@ -134,6 +134,14 @@ async function initDb() {
     await db.run('ALTER TABLE parts ADD COLUMN used_note TEXT');
   } catch (e) { }
 
+  // Migration: partsテーブルに型番カラム追加
+  try {
+    await db.run('ALTER TABLE parts ADD COLUMN part_number TEXT');
+  } catch (e) { }
+  try {
+    await db.run('CREATE INDEX IF NOT EXISTS idx_parts_part_number ON parts(part_number)');
+  } catch (e) { }
+
   // Migration: AI部品名判定候補テーブル作成
   await db.exec(`
     CREATE TABLE IF NOT EXISTS ai_name_suggestions (

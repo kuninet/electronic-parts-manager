@@ -4,6 +4,7 @@ const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const { getDb } = require('../database');
+const { normalizePartNumber } = require('../utils/partNumber');
 const { resizeImageBuffer, validateImage } = require('../utils/image');
 
 // 画像アップロード設定（メモリ上でリサイズしてから保存）
@@ -73,7 +74,7 @@ router.get('/lookup/:qrCode', async (req, res) => {
         if (location) {
             // 保管場所に入っているパーツも取得
             const parts = await db.all(`
-                SELECT p.id, p.name, p.description, p.image_path, p.qr_code, p.quantity,
+                SELECT p.id, p.name, p.part_number, p.description, p.image_path, p.qr_code, p.quantity,
                        c.name as category_name
                 FROM parts p
                 LEFT JOIN categories c ON p.category_id = c.id
@@ -164,12 +165,13 @@ router.post('/register-location', upload.single('image'), async (req, res) => {
 router.post('/register-part', upload.single('image'), async (req, res) => {
     try {
         const db = getDb();
-        const { qr_code, name, description, quantity, category_id, location_id } = req.body;
-        if (req.file) {
-            const validationError = await ensureValidImage(req.file);
-            if (validationError) return res.status(400).json({ error: validationError });
+        const { qr_code, name, description, quantity, category_id, location_id, part_number } = req.body;
+
+        const partNumberResult = normalizePartNumber(part_number);
+        if (partNumberResult.error) {
+            return res.status(400).json({ error: partNumberResult.error });
         }
-        const image_path = req.file ? await saveUploadedImage(req.file) : null;
+        const safePartNumber = partNumberResult.value ?? null;
 
         // QRコード重複チェック（locations + parts横断）
         const dup = await checkQrCodeDuplicate(db, qr_code, null, null);
@@ -178,9 +180,15 @@ router.post('/register-part', upload.single('image'), async (req, res) => {
             return res.status(409).json({ error: `このQRコードは${typeLabel}「${dup.name}」に既に登録されています` });
         }
 
+        if (req.file) {
+            const validationError = await ensureValidImage(req.file);
+            if (validationError) return res.status(400).json({ error: validationError });
+        }
+        const image_path = req.file ? await saveUploadedImage(req.file) : null;
+
         const result = await db.run(
-            'INSERT INTO parts (name, description, quantity, category_id, location_id, qr_code, image_path) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [name, description || '', quantity || 0, category_id || null, location_id || null, qr_code, image_path]
+            'INSERT INTO parts (name, description, quantity, category_id, location_id, qr_code, image_path, part_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [name, description || '', quantity || 0, category_id || null, location_id || null, qr_code, image_path, safePartNumber]
         );
 
         res.status(201).json({ id: result.lastID, qr_code, name });

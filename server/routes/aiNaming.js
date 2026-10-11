@@ -76,11 +76,12 @@ router.post('/suggest/:id', async (req, res) => {
 // POST /api/ai-naming/apply/:id - 候補の採用（写真変更チェック付き）
 router.post('/apply/:id', async (req, res) => {
   try {
-    const { name, category_id, apply_category } = req.body;
+    const { name, category_id, apply_category, part_number } = req.body;
     const result = await applySuggestion(req.params.id, {
       name,
       category_id,
-      apply_category
+      apply_category,
+      part_number
     });
     res.json(result);
   } catch (err) {
@@ -98,7 +99,7 @@ router.post('/apply-batch', async (req, res) => {
     const db = getDb();
     const { items, suggestion_ids, min_confidence, apply_category } = req.body;
 
-    let targets = []; // 各要素: { id, name, category_id, apply_category }
+    let targets = []; // 各要素: { id, name, category_id, apply_category, part_number }
 
     if (Array.isArray(items) && items.length > 0) {
       // M4: 手直しされた名前・個別設定を含む items 配列
@@ -106,7 +107,8 @@ router.post('/apply-batch', async (req, res) => {
         id: item.id,
         name: item.name,
         category_id: item.category_id,
-        apply_category: item.apply_category !== undefined ? item.apply_category : apply_category
+        apply_category: item.apply_category !== undefined ? item.apply_category : apply_category,
+        part_number: item.part_number
       }));
     } else if (Array.isArray(suggestion_ids) && suggestion_ids.length > 0) {
       targets = suggestion_ids.map(id => ({ id, apply_category }));
@@ -128,7 +130,8 @@ router.post('/apply-batch', async (req, res) => {
         const resApply = await applySuggestion(target.id, {
           name: target.name,
           category_id: target.category_id,
-          apply_category: target.apply_category
+          apply_category: target.apply_category,
+          part_number: target.part_number
         });
         applied.push(resApply);
       } catch (err) {
