@@ -68,6 +68,7 @@ async function createTestDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       part_id INTEGER NOT NULL,
       location_id INTEGER NOT NULL,
+      previous_location_id INTEGER DEFAULT NULL,
       memo TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(part_id) REFERENCES parts(id),

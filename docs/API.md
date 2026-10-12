@@ -443,7 +443,7 @@
 - **副作用**: なし
 
 #### `POST /api/qr/store`
-- **用途**: パーツを保管場所に「しまう」（紐付け）し、入庫ログ（`storage_logs`）を記録します。
+- **用途**: パーツを保管場所に「しまう」（紐付け）し、入庫ログ（`storage_logs`）を記録します。すでに同じ保管場所にある場合は更新・ログ追加を行わず `unchanged: true` を返します。
 - **リクエスト**: `application/json`
   ```json
   {
@@ -452,9 +452,61 @@
     "memo": "棚の左奥に収納"
   }
   ```
-- **レスポンス**: 200 OK `{ "message": "保管場所にしまいました" }`
-- **エラー**: 400（`part_id` または `location_id` 欠落）、500
-- **副作用**: パーツの `location_id` と `updated_at` の更新、`storage_logs` への履歴行追加
+- **レスポンス**: 200 OK
+  - 新規移動時:
+    ```json
+    {
+      "message": "保管場所にしまいました",
+      "log_id": 123,
+      "part_id": 1,
+      "location_id": 2,
+      "previous_location_id": 1,
+      "previous_location_name": "棚A",
+      "unchanged": false
+    }
+    ```
+  - 同一保管場所時:
+    ```json
+    {
+      "message": "既にこの保管場所にあります",
+      "log_id": null,
+      "part_id": 1,
+      "location_id": 2,
+      "previous_location_id": 2,
+      "previous_location_name": "棚B",
+      "unchanged": true
+    }
+    ```
+- **エラー**:
+  - 400（`part_id` または `location_id` が正の整数でない、または欠落）
+  - 404（部品が見つからない［ゴミ箱・使用済みを含む］、または保管場所が見つからない）
+  - 500
+- **副作用**: パーツの `location_id` と `updated_at` の更新、`storage_logs` への履歴行追加（同一保管場所時は副作用なし）
+
+#### `POST /api/qr/store/undo`
+- **用途**: 直前の「しまう」操作を取り消し、部品を元の保管場所に戻します（入庫ログは削除）。
+- **リクエスト**: `application/json`
+  ```json
+  {
+    "log_id": 123
+  }
+  ```
+- **レスポンス**: 200 OK
+  ```json
+  {
+    "message": "取り消しました",
+    "part_id": 1,
+    "restored_location_id": 1,
+    "restored_location_name": "棚A",
+    "previous_location_missing": false
+  }
+  ```
+- **エラー**:
+  - 400（`log_id` が正の整数でない、または欠落）
+  - 404（ログが存在しない、既に取り消し済み、または部品が見つからない）
+  - 409（部品の現在の保管場所がログの移動先と異なる場合：その後に別の場所へ移されているため取り消し不可）
+  - 500
+- **副作用**: パーツの `location_id` と `updated_at` を移動前の保管場所に復元、`storage_logs` の該当ログレコードを削除
 
 #### `POST /api/qr/register-location`
 - **用途**: QRスキャン画面から保管場所を新規登録します（画像添付対応）。

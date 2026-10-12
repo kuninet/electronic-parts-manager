@@ -79,6 +79,7 @@ async function initDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       part_id INTEGER NOT NULL,
       location_id INTEGER NOT NULL,
+      previous_location_id INTEGER DEFAULT NULL,
       memo TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(part_id) REFERENCES parts(id),
@@ -140,6 +141,11 @@ async function initDb() {
   } catch (e) { }
   try {
     await db.run('CREATE INDEX IF NOT EXISTS idx_parts_part_number ON parts(part_number)');
+  } catch (e) { }
+
+  // Migration: storage_logs.previous_location_id（「戻す」で元の保管場所に戻すため。外部キーは付けない）
+  try {
+    await db.run('ALTER TABLE storage_logs ADD COLUMN previous_location_id INTEGER DEFAULT NULL');
   } catch (e) { }
 
   // Migration: AI部品名判定候補テーブル作成
