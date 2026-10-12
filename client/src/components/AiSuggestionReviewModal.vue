@@ -1,9 +1,23 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import api from '../api';
 import { useToast } from '../composables/useToast';
+import { useHoverImagePreview } from '../composables/useHoverImagePreview.js';
+import ImageZoomDialog from './ImageZoomDialog.vue';
 
 const toast = useToast();
+const hoverZoom = useHoverImagePreview();
+const zoomTarget = ref(null);
+const bodyRef = ref(null);
+
+const openZoom = (s) => {
+  hoverZoom.hide();
+  zoomTarget.value = {
+    src: resolveImageUrl(s.image_path),
+    alt: `${s.current_part_name} の写真`,
+    caption: `判定時の写真 · ${s.current_part_name}`
+  };
+};
 
 const props = defineProps({
   show: {
@@ -59,8 +73,16 @@ onMounted(() => {
   fetchSuggestions();
 });
 
+watch(
+  () => suggestions.value.length,
+  () => {
+    hoverZoom.hide();
+  }
+);
+
 // 個別採用
 const handleApply = async (s) => {
+  hoverZoom.hide();
   if (!s.edit_name || !s.edit_name.trim()) {
     toast.warning('部品名を入力してください');
     return;
@@ -85,6 +107,7 @@ const handleApply = async (s) => {
 
 // 個別却下
 const handleReject = async (s) => {
+  hoverZoom.hide();
   processingId.value = s.id;
   try {
     await api.post(`/ai-naming/reject/${s.id}`);
@@ -101,6 +124,7 @@ const handleReject = async (s) => {
 
 // 個別再判定
 const handleResuggest = async (s) => {
+  hoverZoom.hide();
   processingId.value = s.id;
   try {
     const res = await api.post(`/ai-naming/suggest/${s.part_id}`, {
@@ -135,6 +159,7 @@ const handleResuggest = async (s) => {
 
 // 信頼度0.8以上を一括採用（M4: 手直し名前・個別設定の保持）
 const handleApplyHighConfidence = async () => {
+  hoverZoom.hide();
   const targets = suggestions.value.filter(s => (s.confidence || 0) >= 0.8 && !isImageMismatched(s));
   if (targets.length === 0) return;
   if (!confirm(`信頼度0.8以上の候補（${targets.length}件）を一括採用しますか？`)) return;
@@ -192,7 +217,12 @@ const getConfidenceBadgeClass = (confidence) => {
         </button>
       </div>
 
-      <div class="modal-body">
+      <div
+        ref="bodyRef"
+        class="modal-body"
+        @scroll="hoverZoom.hide()"
+        @wheel.passive="hoverZoom.hide()"
+      >
         <div v-if="loading" class="state-message">
           <div class="loading-spinner">⏳</div>
           <p>候補を読み込み中...</p>
@@ -217,12 +247,22 @@ const getConfidenceBadgeClass = (confidence) => {
           >
             <!-- 画像セクション -->
             <div class="card-image-col">
-              <img
+              <button
                 v-if="s.image_path"
-                :src="resolveImageUrl(s.image_path)"
-                alt="部品写真"
-                class="thumb-img"
-              />
+                type="button"
+                class="thumb-btn"
+                :aria-label="`${s.current_part_name} の写真を拡大`"
+                @mouseenter="hoverZoom.schedule($event, { src: resolveImageUrl(s.image_path), caption: `判定時の写真 · ${s.current_part_name}` })"
+                @mouseleave="hoverZoom.hide()"
+                @mousedown="hoverZoom.hide()"
+                @click="openZoom(s)"
+              >
+                <img
+                  :src="resolveImageUrl(s.image_path)"
+                  alt="部品写真"
+                  class="thumb-img"
+                />
+              </button>
               <div v-else class="no-img-box">No Image</div>
               <span class="model-badge" :title="'使用モデル: ' + s.model">{{ s.model }}</span>
             </div>
@@ -337,6 +377,34 @@ const getConfidenceBadgeClass = (confidence) => {
         <button class="btn btn-secondary" @click="$emit('close')">閉じる</button>
       </div>
     </div>
+
+    <!-- ホバー拡大ポップアップ -->
+    <Teleport to="body">
+      <div
+        v-if="hoverZoom.preview.visible"
+        class="hover-zoom"
+        :class="`side-${hoverZoom.preview.side}`"
+        :style="{
+          left: `${hoverZoom.preview.left}px`,
+          top: `${hoverZoom.preview.top}px`,
+          width: `${hoverZoom.preview.width}px`,
+          height: `${hoverZoom.preview.height}px`
+        }"
+        aria-hidden="true"
+      >
+        <img :src="hoverZoom.preview.src" alt="" class="hover-zoom-img" />
+        <span v-if="hoverZoom.preview.caption" class="hover-zoom-caption">{{ hoverZoom.preview.caption }}</span>
+      </div>
+    </Teleport>
+
+    <!-- 写真拡大ダイアログ -->
+    <ImageZoomDialog
+      v-if="zoomTarget"
+      :src="zoomTarget.src"
+      :alt="zoomTarget.alt"
+      :caption="zoomTarget.caption"
+      @close="zoomTarget = null"
+    />
   </div>
 </template>
 
@@ -656,5 +724,50 @@ const getConfidenceBadgeClass = (confidence) => {
   .card-actions-col {
     flex-direction: row;
   }
+}
+
+.thumb-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: zoom-in;
+  display: block;
+  line-height: 0;
+  border-radius: var(--radius-sm);
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.thumb-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.hover-zoom {
+  position: fixed;
+  z-index: 2500;
+  pointer-events: none;
+  padding: var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  box-sizing: border-box;
+}
+
+.hover-zoom-img {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+}
+
+.hover-zoom-caption {
+  font-size: var(--fs-12);
+  color: var(--text-2);
 }
 </style>
