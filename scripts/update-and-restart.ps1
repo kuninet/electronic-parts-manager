@@ -126,11 +126,8 @@ try {
     $remoteRef = ("origin/{0}" -f $currentBranch)
     $remoteCommit = @(Get-GitOutput @('rev-parse', $remoteRef))[0].Trim()
 
-    if (($localCommit -eq $remoteCommit) -and -not $Force -and -not $Reinstall) {
-        $shortLocal = $localCommit.Substring(0, [System.Math]::Min(7, $localCommit.Length))
-        Write-EpmLog -Level OK -Message ("既に最新です ({0})。更新処理をスキップします。" -f $shortLocal)
-        $exitCode = 0
-        return
+    if ($localCommit -eq $remoteCommit) {
+        Write-EpmLog -Level INFO -Message "リモートコミットの差分はありませんが、再ビルド・再起動処理を継続します。"
     }
 
     # merge-base --is-ancestor チェック
@@ -162,13 +159,15 @@ try {
         return
     }
 
-    $needBuild = ($changedFiles -match '^client/') -or $ciClient -or (-not (Test-Path (Join-Path $paths.ClientDir 'dist'))) -or $Force -or $Reinstall
+    $needBuild = ($changedFiles -match '^client/') -or $ciClient -or (-not (Test-Path (Join-Path $paths.ClientDir 'dist'))) -or $Force -or $Reinstall -or ($localCommit -eq $remoteCommit)
+    $needRestart = $true
 
     Write-EpmLog -Level INFO -Message "【作業計画】"
     Write-EpmLog -Level INFO -Message ("  npm ci (server): {0}" -f ($(if ($ciServer) { '実行' } else { '不要' })))
     Write-EpmLog -Level INFO -Message ("  npm ci (client): {0}" -f ($(if ($ciClient) { '実行' } else { '不要' })))
     Write-EpmLog -Level INFO -Message ("  npm ci (root)  : {0}" -f ($(if ($ciRoot) { '実行' } else { '不要' })))
     Write-EpmLog -Level INFO -Message ("  client build   : {0}" -f ($(if ($needBuild) { '実行' } else { '不要' })))
+    Write-EpmLog -Level INFO -Message ("  pm2 restart    : {0}" -f ($(if ($needRestart) { '実行' } else { '不要' })))
 
     $commits = @(Get-GitOutput @('log', '--oneline', ("HEAD..{0}" -f $remoteRef)))
     if ($commits.Count -gt 0) {
