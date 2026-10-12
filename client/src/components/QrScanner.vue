@@ -3,6 +3,15 @@ import { ref, computed, onUnmounted } from 'vue';
 import { Html5Qrcode } from 'html5-qrcode';
 import api from '../api';
 import { resizeImageFile } from '../utils/imageResize';
+import StoredPartCard from './qr/StoredPartCard.vue';
+import {
+    addStoreResult,
+    markUndoing,
+    markUndone,
+    markUndoError,
+    activeCount,
+    shouldIgnoreScan
+} from '../utils/storeSession';
 
 // --- 状態管理 ---
 const currentMode = ref('menu'); // 'menu' | 'scan-location' | 'scan-part' | 'scan-store-location' | 'scan-store-part' | 'register-location' | 'register-part' | 'location-info' | 'part-info' | 'store-done' | 'print'
@@ -37,7 +46,10 @@ const partInfo = ref(null);
 // 箱にしまうフロー
 const storeLocationId = ref(null);
 const storeLocationName = ref('');
-const storedParts = ref([]);
+const storeEntries = ref([]);
+const storeActiveCount = computed(() => activeCount(storeEntries.value));
+const lastScannedText = ref(null);
+const lastScannedAt = ref(0);
 
 // QR印刷
 const printPrefix = ref('BOX');
@@ -183,17 +195,43 @@ const stopScanner = async () => {
 };
 
 const onScanSuccess = async (decodedText) => {
-    await stopScanner();
     scannedQrCode.value = decodedText;
 
     // モードに応じた処理
     if (currentMode.value === 'scan-location') {
+        await stopScanner();
         await handleLocationScan(decodedText);
     } else if (currentMode.value === 'scan-part') {
+        await stopScanner();
         await handlePartScan(decodedText);
     } else if (currentMode.value === 'scan-store-location') {
+        await stopScanner();
         await handleStoreLocationScan(decodedText);
     } else if (currentMode.value === 'scan-store-part') {
+        // B-1: 3秒以内の同一QRコード再読取をpause前に早期無視（映像のちらつきと無駄なAPI呼出を防止）
+        const now = Date.now();
+        if (shouldIgnoreScan({
+            text: decodedText,
+            lastText: lastScannedText.value,
+            lastAt: lastScannedAt.value,
+            now
+        })) {
+            return;
+        }
+        lastScannedText.value = decodedText;
+        lastScannedAt.value = now;
+
+        // D8: 連続スキャン時はカメラを破棄せず一時停止（映像も止める）
+        if (html5QrCode && typeof html5QrCode.pause === 'function') {
+            try {
+                html5QrCode.pause(true);
+            } catch (e) {
+                console.warn('html5QrCode.pause failed, stopping scanner instead:', e);
+                await stopScanner();
+            }
+        } else {
+            await stopScanner();
+        }
         await handleStorePartScan(decodedText);
     }
 };
@@ -324,7 +362,9 @@ const startStoreScan = () => {
     currentMode.value = 'scan-store-location';
     storeLocationId.value = null;
     storeLocationName.value = '';
-    storedParts.value = [];
+    storeEntries.value = [];
+    lastScannedText.value = null;
+    lastScannedAt.value = 0;
     statusMessage.value = '';
     startScanner();
 };
@@ -335,6 +375,9 @@ const handleStoreLocationScan = async (qrCode) => {
         if (res.data.type === 'location') {
             storeLocationId.value = res.data.data.id;
             storeLocationName.value = res.data.data.name;
+            // B-1: 保管場所QRを記録し、直後に同じ箱QRを読み直してエラーになるのを防止
+            lastScannedText.value = qrCode;
+            lastScannedAt.value = Date.now();
             showStatus(`保管場所「${res.data.data.name}」を選択しました。部品をスキャンしてください`, 'info');
             currentMode.value = 'scan-store-part';
             startScanner();
@@ -351,33 +394,79 @@ const handleStoreLocationScan = async (qrCode) => {
     }
 };
 
+// D8: 一時停止から再開、または再起動
+const resumeScanner = async () => {
+    try {
+        if (html5QrCode && typeof html5QrCode.resume === 'function') {
+            html5QrCode.resume();
+        } else {
+            await startScanner();
+        }
+    } catch (e) {
+        console.warn('resume failed, falling back to startScanner:', e);
+        await startScanner();
+    }
+};
+
 const handleStorePartScan = async (qrCode) => {
     try {
         const res = await api.get(`/qr/lookup/${encodeURIComponent(qrCode)}`);
+        // m-1: 非同期通信後に画面モードが変わっていれば中断
+        if (currentMode.value !== 'scan-store-part') return;
+
         if (res.data.type === 'part') {
+            const partData = res.data.data;
             // パーツを保管場所に紐付け
-            await api.post('/qr/store', {
-                part_id: res.data.data.id,
+            const storeRes = await api.post('/qr/store', {
+                part_id: partData.id,
                 location_id: storeLocationId.value
             });
-            storedParts.value.push(res.data.data.name);
-            showStatus(`「${res.data.data.name}」をしまいました`, 'success');
+            // m-1: 非同期通信後に画面モードが変わっていれば中断
+            if (currentMode.value !== 'scan-store-part') return;
+
+            storeEntries.value = addStoreResult(storeEntries.value, {
+                part: partData,
+                response: storeRes.data
+            });
+
+            if (storeRes.data.unchanged) {
+                showStatus(`「${partData.name}」は既にこの保管場所にあります`, 'info');
+            } else {
+                const prevLoc = storeRes.data.previous_location_name || '未設定';
+                showStatus(`「${partData.name}」をしまいました（元: ${prevLoc}）`, 'success');
+            }
             // 続けてスキャン
-            currentMode.value = 'scan-store-part';
-            startScanner();
+            await resumeScanner();
         } else if (res.data.type === 'location') {
             showStatus('これは保管場所のQRコードです。部品をスキャンしてください', 'error');
-            currentMode.value = 'scan-store-part';
-            startScanner();
+            await resumeScanner();
         } else {
             showStatus('この部品は未登録です。先に部品登録を行ってください', 'error');
-            currentMode.value = 'scan-store-part';
-            startScanner();
+            await resumeScanner();
         }
     } catch (err) {
+        if (currentMode.value !== 'scan-store-part') return;
         showStatus('紐付けエラー: ' + (err.response?.data?.error || err.message), 'error');
-        currentMode.value = 'scan-store-part';
-        startScanner();
+        await resumeScanner();
+    }
+};
+
+const undoStore = async (entry) => {
+    if (!entry || !entry.logId) return;
+    storeEntries.value = markUndoing(storeEntries.value, entry.key);
+    try {
+        const res = await api.post('/qr/store/undo', { log_id: entry.logId });
+        storeEntries.value = markUndone(storeEntries.value, entry.key, res.data);
+        const restoredName = res.data.restored_location_name || '未設定';
+        showStatus(`「${entry.part.name}」の格納を取り消しました（元: ${restoredName}）`, 'success');
+    } catch (err) {
+        const isConflict = err.response?.status === 409;
+        const msg = err.response?.data?.error || err.message || '取り消しに失敗しました';
+        storeEntries.value = markUndoError(storeEntries.value, entry.key, {
+            message: msg,
+            retryable: !isConflict
+        });
+        showStatus(`取り消しエラー: ${msg}`, 'error');
     }
 };
 
@@ -516,6 +605,9 @@ const showStatus = (message, type) => {
 
 const backToMenu = async () => {
     await stopScanner();
+    storeEntries.value = [];
+    lastScannedText.value = null;
+    lastScannedAt.value = 0;
     currentMode.value = 'menu';
     statusMessage.value = '';
 };
@@ -594,18 +686,26 @@ onUnmounted(() => {
         <template v-else-if="currentMode === 'scan-part'">🔧 部品のQRコードをスキャンしてください</template>
         <template v-else-if="currentMode === 'scan-store-location'">📦 まず保管場所のQRコードをスキャンしてください</template>
         <template v-else-if="currentMode === 'scan-store-part'">
-          🔧 「{{ storeLocationName }}」に入れる部品をスキャン
-          <div v-if="storedParts.length > 0" class="stored-list">
-            <span>登録済み: {{ storedParts.join(', ') }}</span>
-          </div>
+          🔧 「{{ storeLocationName }}」に入れる部品をスキャン ・ しまった部品: {{ storeActiveCount }} 件
         </template>
       </div>
       <div id="qr-reader" class="qr-reader"></div>
       <div class="scan-actions">
-        <button v-if="currentMode === 'scan-store-part' && storedParts.length > 0" class="btn btn-primary" @click="finishStoring">
+        <button v-if="currentMode === 'scan-store-part' && storeEntries.length > 0" class="btn btn-primary" @click="finishStoring">
           ✅ 完了
         </button>
         <button class="btn btn-cancel" @click="backToMenu">← 戻る</button>
+      </div>
+      <div v-if="currentMode === 'scan-store-part' && storeEntries.length > 0" class="stored-cards-section">
+        <h3 class="stored-cards-title">この箱にしまった部品</h3>
+        <div class="stored-cards-list">
+          <StoredPartCard
+            v-for="entry in storeEntries"
+            :key="entry.key"
+            :item="entry"
+            @undo="undoStore"
+          />
+        </div>
       </div>
     </div>
 
@@ -763,9 +863,14 @@ onUnmounted(() => {
       <h2>✅ 登録完了</h2>
       <div class="store-result">
         <p>「<strong>{{ storeLocationName }}</strong>」に以下を登録しました:</p>
-        <ul class="stored-result-list">
-          <li v-for="(name, i) in storedParts" :key="i">{{ name }}</li>
-        </ul>
+        <div v-if="storeEntries.length > 0" class="stored-cards-list done-cards-list">
+          <StoredPartCard
+            v-for="entry in storeEntries"
+            :key="entry.key"
+            :item="entry"
+            @undo="undoStore"
+          />
+        </div>
       </div>
       <div class="form-actions">
         <button class="btn btn-primary" @click="startStoreScan">続けて登録</button>
@@ -936,21 +1041,42 @@ onUnmounted(() => {
     border: 1px solid var(--border);
 }
 
-.stored-list {
-    margin-top: 0.5rem;
-    font-size: 0.8rem;
-    color: var(--text-2);
-}
-
 .qr-reader {
     border-radius: var(--radius-md);
     overflow: hidden;
+    min-height: 240px;
 }
 
 .scan-actions {
     display: flex;
     gap: 0.75rem;
     justify-content: center;
+}
+
+.stored-cards-section {
+    width: 100%;
+    max-width: 400px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.stored-cards-title {
+    font-size: var(--fs-13);
+    font-weight: 600;
+    color: var(--text-2);
+    margin: 0;
+}
+
+.stored-cards-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.done-cards-list {
+    margin-top: var(--space-2);
 }
 
 /* フォーム */
@@ -1165,19 +1291,6 @@ onUnmounted(() => {
     background: var(--ok-bg);
     border-radius: var(--radius-md);
     border: 1px solid var(--ok);
-}
-
-.stored-result-list {
-    list-style: none;
-    padding: 0;
-    margin-top: 0.5rem;
-}
-.stored-result-list li {
-    padding: 0.4rem 0;
-    border-bottom: 1px solid var(--border);
-}
-.stored-result-list li::before {
-    content: '✅ ';
 }
 
 /* 印刷プレビュー */

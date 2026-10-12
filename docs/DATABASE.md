@@ -103,3 +103,15 @@ erDiagram
 | `tag_id` | INTEGER | `tags.id` への外部キー |
 -   複合主キー: `(part_id, tag_id)`
 -   `ON DELETE CASCADE` により、親データ削除時に自動的に紐付けも削除されます。
+
+### `storage_logs` (入庫・保管場所移動履歴)
+QR「しまう」操作等による保管場所への移動履歴を記録します。
+| カラム名 | 型 | 説明 |
+| --- | --- | --- |
+| `id` | INTEGER | 主キー (AUTOINCREMENT) |
+| `part_id` | INTEGER | `parts.id` への外部キー |
+| `location_id` | INTEGER | 移動先の `locations.id` への外部キー |
+| `previous_location_id` | INTEGER | 移動前の保管場所ID（NULL可。保管場所削除を妨げないため外部キー制約は付けない） |
+| `memo` | TEXT | メモ |
+| `created_at` | DATETIME | 作成日時 |
+
