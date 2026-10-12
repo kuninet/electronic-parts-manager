@@ -79,6 +79,10 @@ test('Windows スクリプト静的検査 (S-1 〜 S-8)', async (t) => {
             const psLine = lines.find(l => l.includes('powershell.exe'));
             assert.ok(psLine, `${path.basename(file)} に powershell.exe 呼び出し行が存在すること`);
             assert.ok(psLine.includes('pause'), `${path.basename(file)} で powershell.exe と pause は同一行にあること`);
+
+            if (path.basename(file) === 'update-and-restart.bat') {
+                assert.match(content, /-Force\b/, 'update-and-restart.bat は既定で -Force を渡すこと');
+            }
         }
     });
 
@@ -122,6 +126,8 @@ test('Windows スクリプト静的検査 (S-1 〜 S-8)', async (t) => {
         assert.match(content, /dist\.next/);
         assert.match(content, /\/api\/health/);
         assert.match(content, /\bfinally\b/);
+        assert.match(content, /\$needRestart\s*=\s*\$true/, 'update-and-restart.ps1 で $needRestart が担保されていること');
+        assert.match(content, /リモートコミットの差分はありませんが、再ビルド・再起動処理を継続します/, 'コミット差分なし時の継続ログが含まれていること');
     });
 
     await t.test('S-6: scripts/lib/epm-common.ps1 に必須関数と仕様が含まれていること', () => {
