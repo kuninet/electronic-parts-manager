@@ -12,7 +12,9 @@
         :checked="selected"
         :aria-label="`${part.name} を選択`"
         class="select-checkbox"
-        @change="$emit('toggle-select')"
+        @click="$emit('toggle-select', { shiftKey: $event.shiftKey, event: $event })"
+        @mousedown="onCheckboxMouseDown"
+        @pointerdown="$emit('select-pointerdown', $event)"
       />
     </td>
     <td class="col-thumb">
@@ -149,7 +151,13 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['edit', 'toggle-select', 'preview']);
+const emit = defineEmits(['edit', 'toggle-select', 'preview', 'select-pointerdown']);
+
+const onCheckboxMouseDown = (event) => {
+  if (event.shiftKey) {
+    event.preventDefault();
+  }
+};
 
 const onPhotoClick = () => {
   if (hasPreviewablePhoto(props.part)) emit('preview');
@@ -202,6 +210,7 @@ const statusLabel = computed(() => {
 .col-check {
   width: 32px;
   text-align: center;
+  user-select: none;
 }
 
 .select-checkbox {

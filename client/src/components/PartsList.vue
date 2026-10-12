@@ -1,5 +1,5 @@
 <template>
-  <div class="parts-list-view">
+  <div class="parts-list-view" :class="{ 'is-drag-selecting': dragSelect.isDragging.value }">
     <!-- フィルタ・コントロールバー -->
     <FilterBar
       :categories="categories"
@@ -69,7 +69,7 @@
           mode="stack"
           @edit="$emit('edit', part)"
           @preview="$emit('preview', part)"
-          @toggle-select="toggleSelect(part.id)"
+          @toggle-select="onToggleSelect(part.id, $event)"
         />
       </div>
 
@@ -88,7 +88,8 @@
           :selection-mode="selectedParts.length > 0"
           @edit="$emit('edit', part)"
           @preview="$emit('preview', part)"
-          @toggle-select="toggleSelect(part.id)"
+          @toggle-select="onToggleSelect(part.id, $event)"
+          @select-pointerdown="dragSelect.start($event, part.id)"
           @quick-update="quickUpdatePart(part.id, $event)"
         />
       </div>
@@ -126,7 +127,8 @@
               mode="table"
               @edit="$emit('edit', part)"
               @preview="$emit('preview', part)"
-              @toggle-select="toggleSelect(part.id)"
+              @toggle-select="onToggleSelect(part.id, $event)"
+              @select-pointerdown="dragSelect.start($event, part.id)"
             />
           </tbody>
         </table>
@@ -294,6 +296,8 @@ import PartCard from './parts/PartCard.vue';
 import PartRow from './parts/PartRow.vue';
 import PartCardSkeleton from './parts/PartCardSkeleton.vue';
 import BulkEditModal from './BulkEditModal.vue';
+import { applyRangeSelection } from '../utils/rangeSelect.js';
+import { useDragSelect } from '../composables/useDragSelect.js';
 
 const emit = defineEmits(['add', 'edit', 'preview', 'open-ai-review']);
 
@@ -310,6 +314,7 @@ const loading = ref(true);
 const showTrash = ref(false);
 
 const selectedParts = ref([]);
+const selectionAnchorId = ref(null);
 const bulkBusy = ref(false);
 const showBulkEditModal = ref(false);
 
@@ -433,19 +438,32 @@ const displayedParts = computed(() => {
   return parts.value;
 });
 
+// 選択およびドラッグ選択
+const dragSelect = useDragSelect({
+  getOrderedIds: () => displayedParts.value.map((p) => p.id),
+  selectedParts,
+  selectionAnchorId,
+  isMobileView
+});
+
+const clearSelection = () => {
+  selectedParts.value = [];
+  selectionAnchorId.value = null;
+  dragSelect.cancel();
+};
+
 // 選択状態
 const isAllSelected = computed(() => {
-  return (
-    displayedParts.value.length > 0 &&
-    selectedParts.value.length === displayedParts.value.length
-  );
+  if (displayedParts.value.length === 0) return false;
+  const selectedSet = new Set(selectedParts.value);
+  return displayedParts.value.every((p) => selectedSet.has(p.id));
 });
 
 const isPartialSelected = computed(() => {
-  return (
-    selectedParts.value.length > 0 &&
-    selectedParts.value.length < displayedParts.value.length
-  );
+  if (displayedParts.value.length === 0) return false;
+  const selectedSet = new Set(selectedParts.value);
+  const matchCount = displayedParts.value.filter((p) => selectedSet.has(p.id)).length;
+  return matchCount > 0 && matchCount < displayedParts.value.length;
 });
 
 const toggleSelect = (id) => {
@@ -459,10 +477,31 @@ const toggleSelect = (id) => {
 
 const toggleSelectAll = () => {
   if (isAllSelected.value) {
-    selectedParts.value = [];
+    clearSelection();
   } else {
     selectedParts.value = displayedParts.value.map((p) => p.id);
+    selectionAnchorId.value = null;
   }
+};
+
+const onToggleSelect = (id, { shiftKey = false, event = null } = {}) => {
+  if (dragSelect.consumeSuppressedClick()) {
+    event?.preventDefault();
+    return;
+  }
+  const willSelect = !selectedParts.value.includes(id);
+  if (shiftKey) {
+    selectedParts.value = applyRangeSelection({
+      orderedIds: displayedParts.value.map((p) => p.id),
+      selectedIds: selectedParts.value,
+      anchorId: selectionAnchorId.value,
+      targetId: id,
+      select: willSelect
+    });
+  } else {
+    toggleSelect(id);
+  }
+  selectionAnchorId.value = id;
 };
 
 // 単一部品のインライン更新差し替え
@@ -509,7 +548,7 @@ const handleBulkAction = async (action) => {
     const label = { trash: 'ゴミ箱へ移動しました', restore: '復元しました', delete: '完全に削除しました' }[action];
     toast.success(`${affected} 件を${label}`);
     if (affected < ids.length) toast.info(`${ids.length - affected} 件は対象外のため処理されませんでした`);
-    selectedParts.value = [];
+    clearSelection();
     await fetchParts();
     stats.refresh();
   } catch (err) {
@@ -529,7 +568,7 @@ const handleBulkUpdate = async (updateData) => {
       updates: updateData
     });
     showBulkEditModal.value = false;
-    selectedParts.value = [];
+    clearSelection();
     toast.success('一括変更を適用しました');
     await fetchParts();
     stats.refresh();
@@ -614,7 +653,7 @@ watch(
     filters.order
   ],
   () => {
-    selectedParts.value = [];
+    clearSelection();
     fetchParts();
   }
 );
@@ -951,5 +990,10 @@ defineExpose({
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+.is-drag-selecting {
+  user-select: none;
+  cursor: default;
 }
 </style>

@@ -27,13 +27,20 @@
       </button>
 
       <!-- チェックボックス（ホバー時または選択モード時に表示） -->
-      <label class="select-label" :class="{ 'always-visible': selectionMode }">
+      <label
+        class="select-label"
+        :class="{ 'always-visible': selectionMode }"
+        @mousedown="onCheckboxMouseDown"
+        @pointerdown="$emit('select-pointerdown', $event)"
+      >
         <input
           type="checkbox"
           :checked="selected"
           :aria-label="`${part.name} を選択`"
           class="select-checkbox"
-          @change="$emit('toggle-select')"
+          @click="$emit('toggle-select', { shiftKey: $event.shiftKey, event: $event })"
+          @mousedown="onCheckboxMouseDown"
+          @pointerdown.stop="$emit('select-pointerdown', $event)"
         />
       </label>
 
@@ -141,7 +148,13 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['edit', 'toggle-select', 'quick-update', 'preview']);
+const emit = defineEmits(['edit', 'toggle-select', 'quick-update', 'preview', 'select-pointerdown']);
+
+const onCheckboxMouseDown = (event) => {
+  if (event.shiftKey) {
+    event.preventDefault();
+  }
+};
 
 const onPhotoClick = () => {
   if (hasPreviewablePhoto(props.part)) emit('preview');
@@ -280,6 +293,7 @@ const hl = (text) => {
   opacity: 0;
   transition: opacity var(--dur);
   box-shadow: var(--shadow-sm);
+  user-select: none;
 }
 
 .part-card:hover .select-label,
