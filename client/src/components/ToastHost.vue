@@ -18,6 +18,14 @@
           </div>
           <span class="toast-message">{{ toast.message }}</span>
           <button
+            v-if="toast.action"
+            type="button"
+            class="btn btn-primary btn-sm toast-action-btn"
+            @click="handleAction(toast)"
+          >
+            {{ toast.action.label }}
+          </button>
+          <button
             type="button"
             class="toast-close-btn"
             aria-label="通知を閉じる"
@@ -46,6 +54,14 @@
             <AppIcon :name="getIconName(toast.type)" size="16" />
           </div>
           <span class="toast-message">{{ toast.message }}</span>
+          <button
+            v-if="toast.action"
+            type="button"
+            class="btn btn-primary btn-sm toast-action-btn"
+            @click="handleAction(toast)"
+          >
+            {{ toast.action.label }}
+          </button>
           <button
             type="button"
             class="toast-close-btn"
@@ -86,6 +102,13 @@ const getIconName = (type) => {
     default:
       return 'info';
   }
+};
+
+const handleAction = (toast) => {
+  if (toast.action && typeof toast.action.onClick === 'function') {
+    toast.action.onClick();
+  }
+  dismiss(toast.id);
 };
 </script>
 
@@ -151,6 +174,10 @@ const getIconName = (type) => {
   font-size: var(--fs-13);
   color: var(--text);
   line-height: 1.4;
+}
+
+.toast-action-btn {
+  flex-shrink: 0;
 }
 
 .toast-close-btn {

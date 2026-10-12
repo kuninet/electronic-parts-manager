@@ -19,7 +19,11 @@ describe('Lightbox Wiring Consistency Tests', () => {
     const content = fs.readFileSync(appVuePath, 'utf-8');
     const isBlockedMatch = content.match(/isBlocked\s*:\s*\(\)\s*=>\s*([\s\S]*?)(?:,\s*\n|\n\s*\}\);)/);
     assert.ok(isBlockedMatch, 'isBlocked definition found in App.vue');
-    assert.match(isBlockedMatch[1], /previewPart/);
+    if (/isAnyDialogOpen/.test(isBlockedMatch[1])) {
+      assert.match(content, /const isAnyDialogOpen = \(\) =>[\s\S]*?previewPart/);
+    } else {
+      assert.match(isBlockedMatch[1], /previewPart/);
+    }
   });
 
   test('W-2: App.vue renders PhotoLightboxModal with required props/events and wires PartsList @preview', () => {

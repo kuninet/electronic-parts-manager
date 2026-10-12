@@ -360,7 +360,20 @@ cd ..
 
 # S3 へアップロード
 echo "  S3へアップロード中..."
-aws s3 sync client/dist s3://$BUCKET_NAME/ --delete
+# 1) ハッシュ付きアセット（assets/*, workbox-*.js）: 1 年・immutable
+aws s3 sync client/dist s3://$BUCKET_NAME/ --delete \
+  --exclude "*" --include "assets/*" --include "workbox-*.js" \
+  --cache-control "public, max-age=31536000, immutable"
+# 2) ルート直下の一般静的ファイル（favicon, アイコン類等）: 1 日
+aws s3 sync client/dist s3://$BUCKET_NAME/ --delete \
+  --exclude "assets/*" --exclude "workbox-*.js" \
+  --exclude "index.html" --exclude "sw.js" --exclude "manifest.webmanifest" --exclude "version.json" \
+  --cache-control "public, max-age=86400"
+# 3) シェル類: no-store（sync は変更の無いファイルを飛ばすため cp で毎回上書きする）
+for f in index.html sw.js manifest.webmanifest version.json; do
+  aws s3 cp "client/dist/$f" "s3://$BUCKET_NAME/$f" \
+    --cache-control "no-cache, no-store, must-revalidate" --metadata-directive REPLACE
+done
 
 # ==========================================
 # 7. CloudFront キャッシュ削除

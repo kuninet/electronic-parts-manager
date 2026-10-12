@@ -119,6 +119,10 @@ aws lambda add-permission \
    - S3の403/404 → `index.html` (HTTP 200) にリダイレクト（SPAルーティング用）
    - APIリクエストはキャッシュ無効（MinTTL=0, DefaultTTL=0）
    - 画像リクエストはキャッシュ有効（長期キャッシュ）
+   - **S3フロントエンド Cache-Control 分離**:
+     - ハッシュ付き静的アセット（`assets/*`、`workbox-*.js`）: `public, max-age=31536000, immutable`（長期キャッシュ）
+     - ルート直下の一般静的ファイル（`favicon.ico`, `apple-touch-icon.png`, `pwa-*.png`, `vite.svg` 等）: `public, max-age=86400`（1日キャッシュ）
+     - シェル類（`index.html`, `sw.js`, `manifest.webmanifest`, `version.json`）: `no-cache, no-store, must-revalidate`（PWA standalone での古いキャッシュ残存を防止）
 
 > **既存環境からの移行**: EFSに既存の画像がある場合は、`scripts/aws/migrate-images-to-s3.sh` を実行してS3に移行できます。
 

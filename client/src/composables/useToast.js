@@ -30,6 +30,7 @@ function show(options) {
     message: opts.message || '',
     type,
     duration,
+    action: opts.action || null,
     remainingTime: duration,
     startTime: Date.now(),
     timer: null
