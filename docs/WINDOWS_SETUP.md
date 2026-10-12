@@ -182,6 +182,8 @@ PC 起動後、Windows にサインインしたタイミングで自動的にバ
   ```powershell
   .\scripts\update-and-restart.ps1 -Force
   ```
+- **`vite.config.js` の設定変更を反映したい**:
+  `client/vite.config.js` の設定を変更した場合は `epm-web` の再起動が必要です（`update-and-restart.ps1` は更新時に毎回両プロセスを再起動するため、通常の自動更新フローでは自動的に反映されます）。手動で再起動する場合は `pm2 restart epm-web` を実行してください。
 
 ### サービスの手動起動・停止・再起動バッチ
 

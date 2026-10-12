@@ -137,6 +137,10 @@ const handleEditPart = (part) => {
     emit('edit-part', part);
     closePreview();
 };
+
+defineExpose({
+    isBusy: () => !!previewLocation.value
+});
 </script>
 
 <template>

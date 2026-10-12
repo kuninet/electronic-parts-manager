@@ -648,7 +648,12 @@ onBeforeUnmount(() => {
 });
 
 defineExpose({
-  fetchParts
+  fetchParts,
+  isBusy: () =>
+    showBulkEditModal.value ||
+    showAiBatchModal.value ||
+    aiBatchProgress.value.running ||
+    selectedParts.value.length > 0
 });
 </script>
 

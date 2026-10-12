@@ -25,10 +25,13 @@ import { useToast } from './composables/useToast';
 import { usePartsStats } from './composables/usePartsStats';
 import { usePartsFilters } from './composables/usePartsFilters';
 import { useShortcuts } from './composables/useShortcuts';
+import { useAppUpdate } from './composables/useAppUpdate';
+import { useQuantitySync } from './composables/useQuantitySync';
 
 const toast = useToast();
 const stats = usePartsStats();
 const filters = usePartsFilters();
+const qtySync = useQuantitySync();
 
 const showModal = ref(false);
 const showDataModal = ref(false);
@@ -41,6 +44,7 @@ const previewPart = ref(null);
 const editingMasterLocationId = ref(null);
 
 const partsListRef = ref(null);
+const locationGridRef = ref(null);
 const topBarRef = ref(null);
 const cameraInput = ref(null);
 const uploadingCameraFile = ref(false);
@@ -157,17 +161,30 @@ const handleSearchFocus = () => {
   });
 };
 
+const isAnyDialogOpen = () =>
+  !!previewPart.value ||
+  showModal.value ||
+  showDataModal.value ||
+  showMasterModal.value ||
+  showQrGenerator.value ||
+  showAiReview.value ||
+  showMoreSheet.value;
+
+const isAppBusy = () =>
+  isAnyDialogOpen() ||
+  currentPage.value === 'qr' ||
+  qtySync.hasPending() ||
+  !!partsListRef.value?.isBusy?.() ||
+  !!locationGridRef.value?.isBusy?.();
+
 useShortcuts({
   onSearch: handleSearchFocus,
   onNew: openAddModal,
-  isBlocked: () =>
-    !!previewPart.value ||
-    showModal.value ||
-    showDataModal.value ||
-    showMasterModal.value ||
-    showQrGenerator.value ||
-    showAiReview.value ||
-    showMoreSheet.value
+  isBlocked: () => isAnyDialogOpen()
+});
+
+useAppUpdate({
+  isBusy: isAppBusy
 });
 
 const handleCameraClick = () => {
@@ -268,6 +285,7 @@ const onCameraFileChange = async (event) => {
         />
         <LocationGridView
           v-else
+          ref="locationGridRef"
           @select="handleLocationSelect"
           @edit-location="openMasterModal"
           @edit-part="openEditModal"
