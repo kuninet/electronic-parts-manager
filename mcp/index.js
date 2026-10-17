@@ -26,23 +26,12 @@ async function main() {
     }
 
     const apiClient = createApiClient(config);
-    const server = createMcpServer({ apiClient, version });
+    const server = createMcpServer({ apiClient, version, readOnly: config.readOnly });
 
     const transport = new StdioServerTransport();
     await server.connect(transport);
 
-    let authType = 'none';
-    if (config.authHeader) {
-        if (config.authHeader.startsWith('Basic ')) {
-            authType = 'basic';
-        } else if (config.authHeader.startsWith('Bearer ')) {
-            authType = 'bearer';
-        } else {
-            authType = 'custom';
-        }
-    }
-
-    console.error(`[epm-mcp] started (api: ${config.apiUrl}, auth: ${authType})`);
+    console.error(`[epm-mcp] started (api: ${config.apiUrl}, auth: ${config.authType})`);
 
     const cleanup = async () => {
         try {

@@ -11,50 +11,67 @@ describe('MCP API Client Unit Tests (A-1 ~ A-11)', () => {
 
     before(async () => {
         server = http.createServer((req, res) => {
-            lastRequest = {
-                method: req.method,
-                url: req.url,
-                headers: req.headers,
-            };
+            let bodyStr = '';
+            req.on('data', (chunk) => { bodyStr += chunk; });
+            req.on('end', () => {
+                lastRequest = {
+                    method: req.method,
+                    url: req.url,
+                    headers: req.headers,
+                    body: bodyStr,
+                };
 
-            if (handlerMode === 'hang') {
-                // 応答を返さずに放置（タイムアウト検証用）
-                return;
-            }
+                if (handlerMode === 'hang') {
+                    // 応答を返さずに放置（タイムアウト検証用）
+                    return;
+                }
 
-            if (handlerMode === 'html') {
-                res.writeHead(200, { 'Content-Type': 'text/html' });
-                res.end('<!doctype html><html><body>Error</body></html>');
-                return;
-            }
+                if (handlerMode === 'html') {
+                    res.writeHead(200, { 'Content-Type': 'text/html' });
+                    res.end('<!doctype html><html><body>Error</body></html>');
+                    return;
+                }
 
-            if (handlerMode === '401') {
-                res.writeHead(401, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Unauthorized' }));
-                return;
-            }
+                if (handlerMode === '400') {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: '部品名は必須です' }));
+                    return;
+                }
 
-            if (handlerMode === '403') {
-                res.writeHead(403, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Forbidden' }));
-                return;
-            }
+                if (handlerMode === '401') {
+                    res.writeHead(401, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Unauthorized' }));
+                    return;
+                }
 
-            if (handlerMode === '404') {
-                res.writeHead(404, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Part not found' }));
-                return;
-            }
+                if (handlerMode === '403') {
+                    res.writeHead(403, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Forbidden' }));
+                    return;
+                }
 
-            if (handlerMode === '500') {
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'SQLITE_BUSY' }));
-                return;
-            }
+                if (handlerMode === '404') {
+                    res.writeHead(404, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: '保管場所が見つかりません' }));
+                    return;
+                }
 
-            // デフォルト応答
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify([]));
+                if (handlerMode === '409') {
+                    res.writeHead(409, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'QRコードが重複しています' }));
+                    return;
+                }
+
+                if (handlerMode === '500') {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'SQLITE_BUSY' }));
+                    return;
+                }
+
+                // デフォルト応答
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(req.method === 'POST' ? { id: 1 } : []));
+            });
         });
 
         await new Promise((resolve) => {
@@ -234,6 +251,171 @@ describe('MCP API Client Unit Tests (A-1 ~ A-11)', () => {
                 assert.doesNotMatch(err.message, /secretuser/);
                 assert.doesNotMatch(err.message, /secretpass/);
                 assert.doesNotMatch(err.message, /c2VjcmV0/);
+                return true;
+            }
+        );
+    });
+
+    test('A-12: POST リクエストで Content-Type: application/json と JSON 文字列化された body が送信される', async () => {
+        handlerMode = 'default';
+        const client = createApiClient({
+            apiUrl: baseUrl,
+            authHeader: 'Bearer testtoken',
+            timeoutMs: 3000
+        });
+        const res = await client.post('/api/parts', { name: 'R' });
+        assert.deepEqual(res, { id: 1 });
+        assert.equal(lastRequest.method, 'POST');
+        assert.equal(lastRequest.headers['content-type'], 'application/json');
+        assert.equal(lastRequest.headers['authorization'], 'Bearer testtoken');
+        assert.equal(lastRequest.body, JSON.stringify({ name: 'R' }));
+    });
+
+    test('A-13: 400 レスポンス時は ApiError(bad_request, 400) を投げ、エラー詳細を含む', async () => {
+        handlerMode = '400';
+        const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 3000 });
+        await assert.rejects(
+            async () => {
+                await client.post('/api/parts', {});
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'bad_request');
+                assert.equal(err.status, 400);
+                assert.match(err.message, /部品名は必須です/);
+                return true;
+            }
+        );
+    });
+
+    test('A-14: 404 レスポンス時は ApiError(not_found, 404) を投げ、本文のエラー詳細を保持する', async () => {
+        handlerMode = '404';
+        const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 3000 });
+        await assert.rejects(
+            async () => {
+                await client.post('/api/qr/store', { part_id: 1, location_id: 999 });
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'not_found');
+                assert.equal(err.status, 404);
+                assert.match(err.message, /保管場所が見つかりません/);
+                return true;
+            }
+        );
+    });
+
+    test('A-15: 409 レスポンス時は ApiError(conflict, 409) を投げる', async () => {
+        handlerMode = '409';
+        const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 3000 });
+        await assert.rejects(
+            async () => {
+                await client.post('/api/parts', { qr_code: 'DUP' });
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'conflict');
+                assert.equal(err.status, 409);
+                assert.match(err.message, /QRコードが重複しています/);
+                return true;
+            }
+        );
+    });
+
+    test('A-16: authType: "none" で 401 の場合、EPM_AUTH_TOKEN の設定を案内するメッセージを返す', async () => {
+        handlerMode = '401';
+        const client = createApiClient({
+            apiUrl: baseUrl,
+            authHeader: null,
+            authType: 'none',
+            timeoutMs: 3000
+        });
+        await assert.rejects(
+            async () => {
+                await client.get('/api/parts');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'unauthorized');
+                assert.equal(err.status, 401);
+                assert.match(err.message, /EPM_AUTH_TOKEN/);
+                assert.match(err.message, /EPM_API_TOKEN/);
+                return true;
+            }
+        );
+    });
+
+    test('A-17: authType: "bearer" で 401 の場合、「一致しません」と EPM_AUTH_TOKEN を含むメッセージを返す', async () => {
+        handlerMode = '401';
+        const client = createApiClient({
+            apiUrl: baseUrl,
+            authHeader: 'Bearer wrongtoken',
+            authType: 'bearer',
+            timeoutMs: 3000
+        });
+        await assert.rejects(
+            async () => {
+                await client.get('/api/parts');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'unauthorized');
+                assert.equal(err.status, 401);
+                assert.match(err.message, /一致しません/);
+                assert.match(err.message, /EPM_AUTH_TOKEN/);
+                return true;
+            }
+        );
+    });
+
+    test('A-18: authType: "basic" で 401 の場合、EPM_BASIC_AUTH を含むメッセージを返す', async () => {
+        handlerMode = '401';
+        const client = createApiClient({
+            apiUrl: baseUrl,
+            authHeader: 'Basic dXNlcjp3cm9uZw==',
+            authType: 'basic',
+            timeoutMs: 3000
+        });
+        await assert.rejects(
+            async () => {
+                await client.get('/api/parts');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'unauthorized');
+                assert.equal(err.status, 401);
+                assert.match(err.message, /EPM_BASIC_AUTH/);
+                return true;
+            }
+        );
+    });
+
+    test('A-19: POST リクエストがタイムアウトした場合、unknownOutcome: true が付与され、GET では偽となる', async () => {
+        handlerMode = 'hang';
+        const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 100 });
+
+        // POST のタイムアウト
+        await assert.rejects(
+            async () => {
+                await client.post('/api/parts', { name: 'LED' });
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'timeout');
+                assert.equal(err.unknownOutcome, true);
+                return true;
+            }
+        );
+
+        // GET のタイムアウト
+        await assert.rejects(
+            async () => {
+                await client.get('/api/parts');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'timeout');
+                assert.equal(err.unknownOutcome, false);
                 return true;
             }
         );

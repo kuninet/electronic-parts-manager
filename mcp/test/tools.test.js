@@ -23,17 +23,31 @@ describe('MCP Tools Unit Tests (T-1 ~ T-14)', () => {
         return { client, server, apiClient };
     }
 
-    test('T-1: 3ツールが登録され、すべて readOnlyHint が true', async () => {
+    test('T-1: 6ツールが登録され、参照系は readOnlyHint: true、書き込み系は false', async () => {
         const { client } = await createClientWithMock();
         const toolsResult = await client.listTools();
         const tools = toolsResult.tools;
 
-        assert.equal(tools.length, 3);
+        assert.equal(tools.length, 6);
         const names = tools.map((t) => t.name).sort();
-        assert.deepEqual(names, ['get_part_detail', 'list_master_data', 'search_parts']);
+        assert.deepEqual(names, [
+            'create_part',
+            'get_part_detail',
+            'list_master_data',
+            'search_parts',
+            'store_part_location',
+            'update_part_quantity',
+        ]);
+
+        const readOnlyTools = ['get_part_detail', 'list_master_data', 'search_parts'];
+        const writeTools = ['create_part', 'store_part_location', 'update_part_quantity'];
 
         for (const tool of tools) {
-            assert.equal(tool.annotations?.readOnlyHint, true);
+            if (readOnlyTools.includes(tool.name)) {
+                assert.equal(tool.annotations?.readOnlyHint, true, `${tool.name} should have readOnlyHint: true`);
+            } else if (writeTools.includes(tool.name)) {
+                assert.equal(tool.annotations?.readOnlyHint, false, `${tool.name} should have readOnlyHint: false`);
+            }
         }
     });
 

@@ -10,6 +10,7 @@ import QrScanner from './components/QrScanner.vue';
 import QrGenerator from './components/QrGenerator.vue';
 import AiSuggestionReviewModal from './components/AiSuggestionReviewModal.vue';
 import PhotoLightboxModal from './components/PhotoLightboxModal.vue';
+import ApiTokenDialog from './components/ApiTokenDialog.vue';
 import ToastHost from './components/ToastHost.vue';
 
 import AppSidebar from './components/layout/AppSidebar.vue';
@@ -27,11 +28,13 @@ import { usePartsFilters } from './composables/usePartsFilters';
 import { useShortcuts } from './composables/useShortcuts';
 import { useAppUpdate } from './composables/useAppUpdate';
 import { useQuantitySync } from './composables/useQuantitySync';
+import { useApiTokenPrompt } from './composables/useApiTokenPrompt.js';
 
 const toast = useToast();
 const stats = usePartsStats();
 const filters = usePartsFilters();
 const qtySync = useQuantitySync();
+const apiTokenPrompt = useApiTokenPrompt();
 
 const showModal = ref(false);
 const showDataModal = ref(false);
@@ -168,7 +171,8 @@ const isAnyDialogOpen = () =>
   showMasterModal.value ||
   showQrGenerator.value ||
   showAiReview.value ||
-  showMoreSheet.value;
+  showMoreSheet.value ||
+  apiTokenPrompt.state.open;
 
 const isAppBusy = () =>
   isAnyDialogOpen() ||
@@ -366,5 +370,6 @@ const onCameraFileChange = async (event) => {
     @more="onTabMore"
   />
 
+  <ApiTokenDialog />
   <ToastHost />
 </template>

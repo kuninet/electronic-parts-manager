@@ -16,6 +16,7 @@ if (Number.isNaN(nodeMajor) || nodeMajor < 18 || nodeMajor > 22) {
 }
 
 const { initDb } = require('./database');
+const { createApiTokenAuth } = require('./middleware/apiTokenAuth');
 
 // Origin verification (Basic Auth bypass prevention)
 // CloudFront からの x-origin-verify ヘッダーを検証し、直接アクセスを遮断する
@@ -25,6 +26,9 @@ const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
 if (isLambda && !originSecret) {
     console.error('FATAL: ORIGIN_VERIFY_SECRET is not set in Lambda environment');
     process.exit(1);
+}
+if (isLambda && process.env.EPM_API_TOKEN && process.env.EPM_API_TOKEN.trim()) {
+    console.error('Warning: EPM_API_TOKEN is set in Lambda environment, but cannot be used with CloudFront Basic Auth (see docs/API.md)');
 }
 if (originSecret) {
     app.use((req, res, next) => {
@@ -45,6 +49,12 @@ if (originSecret) {
 // Middleware
 const corsOrigin = process.env.CORS_ALLOW_ORIGIN || '*';
 app.use(cors({ origin: corsOrigin }));
+
+// API token authentication (LAN / MCP)
+if (process.env.EPM_API_TOKEN && process.env.EPM_API_TOKEN.trim()) {
+    console.log('API token auth: enabled');
+}
+app.use('/api', createApiTokenAuth({ token: process.env.EPM_API_TOKEN, isLambda }));
 
 app.use(express.json({ limit: '200mb' }));
 app.use(express.urlencoded({ limit: '200mb', extended: true }));

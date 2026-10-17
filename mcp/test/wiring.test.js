@@ -107,4 +107,42 @@ describe('MCP Static Wiring and Safety Verification (W-1 ~ W-5)', () => {
         assert.ok(docContent.includes('EPM_AUTH_TOKEN'), 'docs/MCP.md must document EPM_AUTH_TOKEN');
         assert.ok(docContent.includes('npm run mcp'), 'docs/MCP.md must warn against using npm run mcp in client config');
     });
+
+    test('W-6: mcp/tools/ の書き込み系 3 ファイルに readOnlyHint: false があること', () => {
+        const writeToolFiles = ['createPart.js', 'updatePartQuantity.js', 'storePartLocation.js'];
+        for (const file of writeToolFiles) {
+            const filePath = path.resolve(mcpDir, 'tools', file);
+            assert.ok(fs.existsSync(filePath), `${file} must exist`);
+            const content = fs.readFileSync(filePath, 'utf-8');
+            assert.match(content, /readOnlyHint:\s*false/, `${file} must have readOnlyHint: false`);
+        }
+    });
+
+    test('W-7: mcp/apiClient.js に POST の自動再送（ループの中での fetch）が無いこと', () => {
+        const apiClientPath = path.resolve(mcpDir, 'apiClient.js');
+        const content = fs.readFileSync(apiClientPath, 'utf-8');
+
+        // while や for ループの中で fetchImpl / fetch を呼ぶパターンが存在しないこと
+        assert.doesNotMatch(content, /while\s*\([^)]*\)\s*\{[^{}]*fetchImpl/, 'No retry loop around fetchImpl');
+        assert.doesNotMatch(content, /for\s*\([^)]*\)\s*\{[^{}]*fetchImpl/, 'No for loop around fetchImpl');
+    });
+
+    test('W-8: docs/MCP.md に EPM_API_TOKEN、EPM_MCP_READONLY、create_part、update_part_quantity、store_part_location があること', () => {
+        const mcpDocPath = path.resolve(rootDir, 'docs/MCP.md');
+        const docContent = fs.readFileSync(mcpDocPath, 'utf-8');
+
+        assert.ok(docContent.includes('EPM_API_TOKEN'), 'docs/MCP.md must include EPM_API_TOKEN');
+        assert.ok(docContent.includes('EPM_MCP_READONLY'), 'docs/MCP.md must include EPM_MCP_READONLY');
+        assert.ok(docContent.includes('create_part'), 'docs/MCP.md must include create_part');
+        assert.ok(docContent.includes('update_part_quantity'), 'docs/MCP.md must include update_part_quantity');
+        assert.ok(docContent.includes('store_part_location'), 'docs/MCP.md must include store_part_location');
+    });
+
+    test('W-9: docs/API.md に EPM_API_TOKEN と API_TOKEN_REQUIRED があること', () => {
+        const apiDocPath = path.resolve(rootDir, 'docs/API.md');
+        const docContent = fs.readFileSync(apiDocPath, 'utf-8');
+
+        assert.ok(docContent.includes('EPM_API_TOKEN'), 'docs/API.md must include EPM_API_TOKEN');
+        assert.ok(docContent.includes('API_TOKEN_REQUIRED'), 'docs/API.md must include API_TOKEN_REQUIRED');
+    });
 });
