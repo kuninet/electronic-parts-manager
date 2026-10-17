@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-describe('MCP Static Wiring and Safety Verification (W-1 ~ W-5)', () => {
+describe('MCP Static Wiring and Safety Verification (W-1 ~ W-12)', () => {
     const rootDir = path.resolve(__dirname, '../..');
     const mcpDir = path.resolve(rootDir, 'mcp');
 
@@ -144,5 +144,30 @@ describe('MCP Static Wiring and Safety Verification (W-1 ~ W-5)', () => {
 
         assert.ok(docContent.includes('EPM_API_TOKEN'), 'docs/API.md must include EPM_API_TOKEN');
         assert.ok(docContent.includes('API_TOKEN_REQUIRED'), 'docs/API.md must include API_TOKEN_REQUIRED');
+    });
+
+    test('W-10: mcp/tools/getPartImage.js に readOnlyHint: true があり、console. を使っていないこと', () => {
+        const filePath = path.resolve(mcpDir, 'tools/getPartImage.js');
+        assert.ok(fs.existsSync(filePath), 'getPartImage.js must exist');
+        const content = fs.readFileSync(filePath, 'utf-8');
+        assert.match(content, /readOnlyHint:\s*true/, 'must have readOnlyHint: true');
+        assert.doesNotMatch(content, /console\./, 'must not use console.');
+    });
+
+    test('W-11: mcp/server.js で registerGetPartImageTool の呼び出しが if (!readOnly) より前にあること', () => {
+        const serverPath = path.resolve(mcpDir, 'server.js');
+        const content = fs.readFileSync(serverPath, 'utf-8');
+        const callIndex = content.indexOf('registerGetPartImageTool(');
+        const ifIndex = content.indexOf('if (!readOnly)');
+        assert.ok(callIndex !== -1, 'registerGetPartImageTool must be called');
+        assert.ok(ifIndex !== -1, 'if (!readOnly) must exist');
+        assert.ok(callIndex < ifIndex, 'registerGetPartImageTool must be called before if (!readOnly)');
+    });
+
+    test('W-12: docs/MCP.md に get_part_image と EPM_IMAGE_MAX_BYTES が含まれていること', () => {
+        const mcpDocPath = path.resolve(rootDir, 'docs/MCP.md');
+        const docContent = fs.readFileSync(mcpDocPath, 'utf-8');
+        assert.ok(docContent.includes('get_part_image'), 'docs/MCP.md must include get_part_image');
+        assert.ok(docContent.includes('EPM_IMAGE_MAX_BYTES'), 'docs/MCP.md must include EPM_IMAGE_MAX_BYTES');
     });
 });
