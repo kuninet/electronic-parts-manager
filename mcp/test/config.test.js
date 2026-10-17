@@ -2,7 +2,7 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const { loadConfig } = require('../config.js');
 
-describe('MCP Config Unit Tests (C-1 ~ C-9)', () => {
+describe('MCP Config Unit Tests (C-1 ~ C-15)', () => {
     test('C-1: env が空の場合、デフォルト設定を返す', () => {
         const config = loadConfig({});
         assert.equal(config.apiUrl, 'http://localhost:3001');
@@ -155,5 +155,27 @@ describe('MCP Config Unit Tests (C-1 ~ C-9)', () => {
         assert.equal(loadConfig({ EPM_MCP_READONLY: '0' }).readOnly, false);
         assert.equal(loadConfig({ EPM_MCP_READONLY: 'false' }).readOnly, false);
         assert.equal(loadConfig({ EPM_MCP_READONLY: 'anything' }).readOnly, false);
+    });
+
+    test('C-13: EPM_IMAGE_MAX_BYTES が未設定の場合、既定値 10485760 (10MB) を返す', () => {
+        const config = loadConfig({});
+        assert.equal(config.imageMaxBytes, 10485760);
+    });
+
+    test('C-14: EPM_IMAGE_MAX_BYTES=2000000 で設定した場合、数値 2000000 を返す', () => {
+        const config = loadConfig({ EPM_IMAGE_MAX_BYTES: '2000000' });
+        assert.equal(config.imageMaxBytes, 2000000);
+    });
+
+    test('C-15: EPM_IMAGE_MAX_BYTES の異常値 (0, -1, abc, 1.5, 52428801) は例外を投げ EPM_IMAGE_MAX_BYTES を含む', () => {
+        const badValues = ['0', '-1', 'abc', '1.5', '52428801'];
+        for (const val of badValues) {
+            assert.throws(() => {
+                loadConfig({ EPM_IMAGE_MAX_BYTES: val });
+            }, (err) => {
+                assert.match(err.message, /EPM_IMAGE_MAX_BYTES/);
+                return true;
+            });
+        }
     });
 });

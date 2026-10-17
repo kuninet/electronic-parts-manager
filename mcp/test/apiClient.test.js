@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const { createApiClient, ApiError } = require('../apiClient.js');
 
-describe('MCP API Client Unit Tests (A-1 ~ A-11)', () => {
+describe('MCP API Client Unit Tests (A-1 ~ A-34)', () => {
     let server;
     let baseUrl;
     let lastRequest = null;
@@ -65,6 +65,72 @@ describe('MCP API Client Unit Tests (A-1 ~ A-11)', () => {
                 if (handlerMode === '500') {
                     res.writeHead(500, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ error: 'SQLITE_BUSY' }));
+                    return;
+                }
+
+                if (handlerMode === 'image-png') {
+                    const pngBytes = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02]);
+                    res.writeHead(200, {
+                        'Content-Type': 'image/png',
+                        'Content-Length': String(pngBytes.length),
+                    });
+                    res.end(pngBytes);
+                    return;
+                }
+
+                if (handlerMode === 'image-empty') {
+                    res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': '0' });
+                    res.end();
+                    return;
+                }
+
+                if (handlerMode === 'image-html') {
+                    res.writeHead(200, { 'Content-Type': 'text/html' });
+                    res.end('<!doctype html><html><body>Error</body></html>');
+                    return;
+                }
+
+                if (handlerMode === 'image-404-html') {
+                    res.writeHead(404, { 'Content-Type': 'text/html' });
+                    res.end('<!DOCTYPE html><html lang="en"><head><title>Error</title></head><body>Cannot GET /uploads/notfound.jpg</body></html>');
+                    return;
+                }
+
+                if (handlerMode === 'image-too-large-cl') {
+                    const bigBuf = Buffer.alloc(5000, 0xAA);
+                    res.writeHead(200, {
+                        'Content-Type': 'image/png',
+                        'Content-Length': '5000',
+                    });
+                    res.end(bigBuf);
+                    return;
+                }
+
+                if (handlerMode === 'image-chunked-too-large') {
+                    res.writeHead(200, {
+                        'Content-Type': 'image/png',
+                    });
+                    const chunk = Buffer.alloc(600, 0xBB);
+                    res.write(chunk);
+                    res.write(chunk);
+                    res.write(chunk);
+                    res.end();
+                    return;
+                }
+
+                if (handlerMode === 'image-exact-limit') {
+                    const exactBuf = Buffer.alloc(1000, 0xCC);
+                    res.writeHead(200, {
+                        'Content-Type': 'image/png',
+                        'Content-Length': '1000',
+                    });
+                    res.end(exactBuf);
+                    return;
+                }
+
+                if (handlerMode === 'redirect-302') {
+                    res.writeHead(302, { 'Location': 'http://127.0.0.1:9999/other' });
+                    res.end();
                     return;
                 }
 
@@ -416,6 +482,247 @@ describe('MCP API Client Unit Tests (A-1 ~ A-11)', () => {
                 assert.ok(err instanceof ApiError);
                 assert.equal(err.kind, 'timeout');
                 assert.equal(err.unknownOutcome, false);
+                return true;
+            }
+        );
+    });
+
+    test('A-21: getImage(/uploads/a.png) が PNG バイト列、contentType、size を正しく取得する', async () => {
+        handlerMode = 'image-png';
+        const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 3000 });
+        const res = await client.getImage('/uploads/a.png');
+        assert.ok(Buffer.isBuffer(res.buffer));
+        assert.equal(res.contentType, 'image/png');
+        assert.equal(res.size, 10);
+        assert.equal(res.buffer[0], 0x89);
+        assert.equal(res.buffer[1], 0x50);
+    });
+
+    test('A-22: authHeader が設定されている場合、Authorization と Accept: image/* が送信される', async () => {
+        handlerMode = 'image-png';
+        const client = createApiClient({
+            apiUrl: baseUrl,
+            authHeader: 'Basic dXNlcjpwYXNz',
+            timeoutMs: 3000,
+        });
+        await client.getImage('/uploads/a.png');
+        assert.equal(lastRequest.headers['authorization'], 'Basic dXNlcjpwYXNz');
+        assert.equal(lastRequest.headers['accept'], 'image/*');
+    });
+
+    test('A-23: authHeader が null の場合、Authorization ヘッダーは送信されない', async () => {
+        handlerMode = 'image-png';
+        const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 3000 });
+        await client.getImage('/uploads/a.png');
+        assert.equal(lastRequest.headers['authorization'], undefined);
+    });
+
+    test('A-24: モックが 404 の場合、kind: not_found で「画像ファイルが見つかりません」を投げる', async () => {
+        handlerMode = '404';
+        const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 3000 });
+        await assert.rejects(
+            async () => {
+                await client.getImage('/uploads/missing.jpg');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'not_found');
+                assert.equal(err.status, 404);
+                assert.match(err.message, /画像ファイルが見つかりません/);
+                return true;
+            }
+        );
+    });
+
+    test('A-25: モックが 401 かつ authType: basic の場合、kind: unauthorized で EPM_BASIC_AUTH 案内を含む', async () => {
+        handlerMode = '401';
+        const client = createApiClient({
+            apiUrl: baseUrl,
+            authHeader: 'Basic xxx',
+            authType: 'basic',
+            timeoutMs: 3000,
+        });
+        await assert.rejects(
+            async () => {
+                await client.getImage('/uploads/secret.jpg');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'unauthorized');
+                assert.equal(err.status, 401);
+                assert.match(err.message, /EPM_BASIC_AUTH/);
+                return true;
+            }
+        );
+    });
+
+    test('A-26: モックが 200 かつ text/html の場合、kind: invalid_response で text/html を含む', async () => {
+        handlerMode = 'image-html';
+        const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 3000 });
+        await assert.rejects(
+            async () => {
+                await client.getImage('/uploads/missing-on-s3.jpg');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'invalid_response');
+                assert.match(err.message, /text\/html/);
+                return true;
+            }
+        );
+    });
+
+    test('A-27: Content-Length: 5000 かつ imageMaxBytes: 1000 の場合、kind: too_large で上限エラー', async () => {
+        handlerMode = 'image-too-large-cl';
+        const client = createApiClient({
+            apiUrl: baseUrl,
+            authHeader: null,
+            timeoutMs: 3000,
+            imageMaxBytes: 1000,
+        });
+        await assert.rejects(
+            async () => {
+                await client.getImage('/uploads/too-big.png');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'too_large');
+                assert.match(err.message, /EPM_IMAGE_MAX_BYTES/);
+                return true;
+            }
+        );
+    });
+
+    test('A-28: chunked で 600×3 送信かつ imageMaxBytes: 1000 の場合、読み取り途中で kind: too_large', async () => {
+        handlerMode = 'image-chunked-too-large';
+        const client = createApiClient({
+            apiUrl: baseUrl,
+            authHeader: null,
+            timeoutMs: 3000,
+            imageMaxBytes: 1000,
+        });
+        await assert.rejects(
+            async () => {
+                await client.getImage('/uploads/chunked.png');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'too_large');
+                assert.match(err.message, /EPM_IMAGE_MAX_BYTES/);
+                return true;
+            }
+        );
+    });
+
+    test('A-29: imageMaxBytes: 1000 でちょうど 1000 バイトの場合は成功する（境界値）', async () => {
+        handlerMode = 'image-exact-limit';
+        const client = createApiClient({
+            apiUrl: baseUrl,
+            authHeader: null,
+            timeoutMs: 3000,
+            imageMaxBytes: 1000,
+        });
+        const res = await client.getImage('/uploads/exact.png');
+        assert.equal(res.size, 1000);
+        assert.equal(res.buffer.length, 1000);
+    });
+
+    test('A-30: 応答がない場合、timeoutMs: 100 で kind: timeout, unknownOutcome: false', async () => {
+        handlerMode = 'hang';
+        const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 100 });
+        await assert.rejects(
+            async () => {
+                await client.getImage('/uploads/slow.jpg');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'timeout');
+                assert.equal(err.unknownOutcome, false);
+                return true;
+            }
+        );
+    });
+
+    test('A-31: 302 リダイレクト時は redirect: error により失敗しリダイレクト先に要求は出ない', async () => {
+        handlerMode = 'redirect-302';
+        const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 3000 });
+        await assert.rejects(
+            async () => {
+                await client.getImage('/uploads/redirect.jpg');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.ok(err.kind === 'network' || err.kind === 'http');
+                return true;
+            }
+        );
+    });
+
+    test('A-32: 他オリジンや uploads 外のパスは kind: bad_request となり fetchImpl は呼ばれない', async () => {
+        let fetchCalled = 0;
+        const mockFetch = async () => {
+            fetchCalled++;
+            return new Response('ok');
+        };
+        const client = createApiClient(
+            { apiUrl: 'http://localhost:3001', authHeader: 'Basic secret', timeoutMs: 3000 },
+            { fetchImpl: mockFetch }
+        );
+
+        await assert.rejects(
+            async () => {
+                await client.getImage('https://evil.example/uploads/a.jpg');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'bad_request');
+                return true;
+            }
+        );
+
+        await assert.rejects(
+            async () => {
+                await client.getImage('/api/parts/1');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'bad_request');
+                return true;
+            }
+        );
+
+        assert.equal(fetchCalled, 0, 'fetchImpl must not be called for unsafe paths');
+    });
+
+    test('A-33: モックが 200 で長さ 0 の場合、kind: invalid_response で「画像データが空です」', async () => {
+        handlerMode = 'image-empty';
+        const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 3000 });
+        await assert.rejects(
+            async () => {
+                await client.getImage('/uploads/empty.jpg');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'invalid_response');
+                assert.match(err.message, /画像データが空です/);
+                return true;
+            }
+        );
+    });
+
+    test('A-34: Express の 404 HTML レスポンス時も HTML 断片を含まず「画像ファイルが見つかりません」を投げる', async () => {
+        handlerMode = 'image-404-html';
+        const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 3000 });
+        await assert.rejects(
+            async () => {
+                await client.getImage('/uploads/notfound.jpg');
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'not_found');
+                assert.equal(err.status, 404);
+                assert.match(err.message, /画像ファイルが見つかりません/);
+                assert.doesNotMatch(err.message, /<html|Cannot GET/i);
                 return true;
             }
         );

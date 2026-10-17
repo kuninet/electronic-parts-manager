@@ -23,23 +23,24 @@ describe('MCP Tools Unit Tests (T-1 ~ T-14)', () => {
         return { client, server, apiClient };
     }
 
-    test('T-1: 6ツールが登録され、参照系は readOnlyHint: true、書き込み系は false', async () => {
+    test('T-1: 7ツールが登録され、参照系は readOnlyHint: true、書き込み系は false', async () => {
         const { client } = await createClientWithMock();
         const toolsResult = await client.listTools();
         const tools = toolsResult.tools;
 
-        assert.equal(tools.length, 6);
+        assert.equal(tools.length, 7);
         const names = tools.map((t) => t.name).sort();
         assert.deepEqual(names, [
             'create_part',
             'get_part_detail',
+            'get_part_image',
             'list_master_data',
             'search_parts',
             'store_part_location',
             'update_part_quantity',
         ]);
 
-        const readOnlyTools = ['get_part_detail', 'list_master_data', 'search_parts'];
+        const readOnlyTools = ['get_part_detail', 'get_part_image', 'list_master_data', 'search_parts'];
         const writeTools = ['create_part', 'store_part_location', 'update_part_quantity'];
 
         for (const tool of tools) {

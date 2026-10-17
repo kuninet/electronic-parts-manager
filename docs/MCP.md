@@ -32,6 +32,7 @@ flowchart LR
 |---|---|---|---|
 | `search_parts` | 参照 (`readOnlyHint: true`) | 冪等 (`idempotentHint: true`) | 電子部品の検索（キーワード・カテゴリ・保管場所） |
 | `get_part_detail` | 参照 (`readOnlyHint: true`) | 冪等 (`idempotentHint: true`) | 部品 ID を指定した完全な詳細情報取得 |
+| `get_part_image` | 参照 (`readOnlyHint: true`) | 冪等 (`idempotentHint: true`) | 部品写真の画像コンテンツ取得（刻印・型番・形状確認） |
 | `list_master_data` | 参照 (`readOnlyHint: true`) | 冪等 (`idempotentHint: true`) | カテゴリ一覧・保管場所一覧の取得 |
 | `create_part` | 更新 (`readOnlyHint: false`) | 非冪等 (`idempotentHint: false`) | 新規電子部品の登録（名前解決・型番重複チェック付き） |
 | `update_part_quantity` | 更新 (`readOnlyHint: false`) | 非冪等 (`destructiveHint: true`) | 在庫数量の増減（delta）または絶対値上書き（absolute） |
@@ -102,7 +103,55 @@ flowchart LR
   }
   ```
 
-### 2-3. `list_master_data`（マスタデータ一覧取得）
+### 2-3. `get_part_image`（部品写真取得）
+
+部品 ID を指定して、登録されている部品写真を画像コンテンツ（Base64）として取得します。マルチモーダル AI がチップの刻印や型番、形状、端子配置を視覚的に確認する用途に利用できます。読み取り専用モード（`EPM_MCP_READONLY=1`）でも使用可能です。
+
+- **入力パラメータ**:
+  - `id` (integer, 必須): 部品ID（正の整数）
+
+- **対応画像形式**:
+  - JPEG / PNG / GIF / WEBP に対応しています。
+  - 先頭バイト（Magic Bytes）を最優先として判定し、次いで Content-Type、拡張子、既定値（`image/jpeg`）の順で MIME を決定します。
+
+- **クライアントサイズ上限に関する注意**:
+  - 一部のデスクトップ向け MCP クライアントには、ツール実行結果に約 1MiB のサイズ制限が存在することが報告されています。
+  - Base64 エンコードによってデータ量は約 4/3 倍となるため、元画像が約 750KB を超える場合はクライアント側で表示エラーとなる可能性があります。
+  - 750KB を超える画像の場合、返却テキストに注意文（目安）が付与されます。
+
+- **返却例（画像登録時）**:
+  ```json
+  [
+    {
+      "type": "image",
+      "data": "<Base64 エンコードされた画像バイナリ>",
+      "mimeType": "image/jpeg"
+    },
+    {
+      "type": "text",
+      "text": "部品 ID 10 (10kΩ 金属皮膜抵抗) の登録写真です。"
+    }
+  ]
+  ```
+
+- **返却例（画像未登録時）**:
+  ```json
+  [
+    {
+      "type": "text",
+      "text": "部品 ID 10 (10kΩ 金属皮膜抵抗) には画像が登録されていません。"
+    }
+  ]
+  ```
+  ※画像未登録の場合はエラーにならず、テキストのみが返却されます。
+
+- **主なエラー応答**:
+  - 部品が存在しない場合: `部品 ID 999 は見つかりません。`
+  - 画像ファイルが見つからない場合: `部品 ID 10 (...) の画像を取得できませんでした: 画像ファイルが見つかりません`
+  - 画像サイズ上限超過: `部品 ID 10 (...) の画像を取得できませんでした: 画像が大きすぎます（12.5 MB / 上限 10.0 MB）。EPM_IMAGE_MAX_BYTES で上限を変更できます。`
+  - 非対応形式の場合: `部品 ID 10 (...) の画像形式（image/svg+xml）には対応していません。`
+
+### 2-4. `list_master_data`（マスタデータ一覧取得）
 
 カテゴリ一覧や保管場所一覧などのマスタデータを取得します。部品検索の条件設定や保管場所の把握に利用します。
 
@@ -111,7 +160,7 @@ flowchart LR
 
 ---
 
-### 2-4. `create_part`（電子部品登録）
+### 2-5. `create_part`（電子部品登録）
 
 新しい電子部品を登録します。実行するとデータが登録されます。必要に応じて事前に `search_parts` や `list_master_data` で既存データやマスタを確認してください。
 
@@ -150,7 +199,7 @@ flowchart LR
   }
   ```
 
-### 2-5. `update_part_quantity`（電子部品数量更新）
+### 2-6. `update_part_quantity`（電子部品数量更新）
 
 電子部品の在庫数量を増減（`delta`）または絶対値（`absolute`）で更新します。
 
@@ -177,7 +226,7 @@ flowchart LR
 > **SPA画面操作との競合について**:
 > SPA の在庫一覧画面で数量の ± ボタンを連打している最中に MCP から数量更新が行われた場合、SPA 側のデバウンス同期によって値が上書きされる可能性があります。通常の単独運用では問題ありませんが、画面操作の直後はご留意ください。
 
-### 2-6. `store_part_location`（電子部品保管場所格納）
+### 2-7. `store_part_location`（電子部品保管場所格納）
 
 電子部品を指定した保管場所に格納（移動）します。実行すると部品の保管場所が更新され、入出庫履歴（`storage_logs`）にメモ `MCP` 付きで記録されます。
 
@@ -211,6 +260,7 @@ flowchart LR
 | `EPM_BASIC_AUTH` | なし | CloudFront やリモートホストへの Basic 認証情報（`username:password` 形式）。コロン必須。 |
 | `EPM_MCP_READONLY` | `0` | `1` または `true` を設定すると、書き込み系ツール（`create_part`, `update_part_quantity`, `store_part_location`）を無効化し、参照専用モードとして起動します。 |
 | `EPM_API_TIMEOUT_MS` | `10000` | API リクエストのタイムアウト時間（ミリ秒、正の整数）。 |
+| `EPM_IMAGE_MAX_BYTES` | `10485760` (10MB) | `get_part_image` で取得を許可する画像ファイルの最大バイト数（正の整数、上限 50MB = 52428800）。 |
 
 ### トークン環境変数の対応表
 
@@ -328,8 +378,8 @@ AI アプリケーションの MCP 設定ファイルに登録して利用しま
    EPM の Lambda バックエンドは CloudFront が付与する検証ヘッダー（`x-origin-verify`）を要求します。API Gateway や Lambda の URL を直接 `EPM_API_URL` に指定すると 403 Forbidden になります。必ず CloudFront ドメイン（`https://xxx.cloudfront.net`）を指定してください。
 2. **Basic 認証との併用**:
    AWS 本番環境では CloudFront Function による Basic 認証で保護されています。CloudFront が Lambda へ転送するヘッダーは `Authorization` のみであるため、AWS 環境では `Authorization: Bearer` 方式のトークン認証は使用できません。MCP から AWS 環境へアクセスする際は、従来どおり `EPM_BASIC_AUTH` を指定してください（Basic 認証の内側にあるため、書き込み系ツールも安全に利用できます）。
-3. **画像の Basic 認証**:
-   返却される `image_url`（`/uploads/...`）は CloudFront 経由の絶対 URL となりますが、CloudFront 全体に Basic 認証が設定されている場合、画像アクセスにも認証が必要です。AI クライアントが画像を直接取得できない場合は、認証情報付きのクライアントを使用してください。
+3. **画像の Basic 認証と `get_part_image`**:
+   `get_part_image` ツールは設定された `EPM_BASIC_AUTH` を用いて画像を取得するため、CloudFront 全体に Basic 認証が設定されている AWS 本番環境下でも、AI アシスタントへ安全に部品写真を渡すことができます。一方、`get_part_detail` 等で返却される `image_url` を AI クライアント自身が直接外部から開く場合は、引き続き認証情報が必要です。
 
 ---
 
@@ -344,5 +394,7 @@ AI アプリケーションの MCP 設定ファイルに登録して利用しま
 | **403 Forbidden** | AWS 環境で API Gateway に直接接続していませんか？ `EPM_API_URL` を CloudFront の URL（`https://xxx.cloudfront.net`）に変更してください。 |
 | **API サーバーに接続できません (network)** | バックエンドが起動していないか、IP アドレスやポート番号が間違っています。LAN 内の場合はファイアウォールや IP の変更を確認してください。 |
 | **API から JSON 以外の応答が返りました (invalid_response)** | `EPM_API_URL` に SPA フロントエンド開発サーバー（Vite の `:5173` 等でプロキシ設定がされていないURL）を指定していませんか？ バックエンドポート（`:3001`）または正しいプロキシ・CloudFront URL を指定してください。 |
+| **画像ではなく text/html が返りました** | 画像ファイルが削除されているか、S3 に存在しません。AWS 環境では S3 の 403/404 に対し CloudFront が index.html を 200 でフォールバック返却するため、このエラーメッセージとなります。 |
+| **画像が大きすぎます** | 画像ファイルのサイズが `EPM_IMAGE_MAX_BYTES`（既定 10MB）を超えています。環境変数を調整するか、カメラの解像度を下げて再登録してください。 |
 | **結果不明エラー (timeout / unknownOutcome)** | 書き込みリクエスト中にタイムアウトが発生しました。重複登録を防ぐため、自動再試行は行われません。`search_parts` または `get_part_detail` で反映状況を確認してから必要に応じて再実行してください。 |
 | **Node.js バージョンについて** | MCP サーバーは SQLite 等のネイティブモジュールに依存しないため、Node.js 18 以上の任意の環境（Node 20, 22, 24等）で動作します。 |

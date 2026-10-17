@@ -26,10 +26,10 @@ describe('MCP 書き込みツール単体テスト (WT-1 ~ WT-20)', () => {
         return { client, server, apiClient };
     }
 
-    test('WT-1: readOnly: false では 6 ツールが登録され、書き込みツールは readOnlyHint: false、store_part_location だけが idempotentHint: true', async () => {
+    test('WT-1: readOnly: false では 7 ツールが登録され、書き込みツールは readOnlyHint: false、store_part_location だけが idempotentHint: true', async () => {
         const { client } = await createClientWithMock({}, { readOnly: false });
         const { tools } = await client.listTools();
-        assert.equal(tools.length, 6);
+        assert.equal(tools.length, 7);
 
         const createTool = tools.find(t => t.name === 'create_part');
         const updateTool = tools.find(t => t.name === 'update_part_quantity');
@@ -48,12 +48,12 @@ describe('MCP 書き込みツール単体テスト (WT-1 ~ WT-20)', () => {
         assert.equal(storeTool.annotations?.destructiveHint, false);
     });
 
-    test('WT-2: readOnly: true では参照系の 3 ツールのみ登録される', async () => {
+    test('WT-2: readOnly: true では参照系の 4 ツールのみ登録される', async () => {
         const { client } = await createClientWithMock({}, { readOnly: true });
         const { tools } = await client.listTools();
-        assert.equal(tools.length, 3);
+        assert.equal(tools.length, 4);
         const names = tools.map(t => t.name).sort();
-        assert.deepEqual(names, ['get_part_detail', 'list_master_data', 'search_parts']);
+        assert.deepEqual(names, ['get_part_detail', 'get_part_image', 'list_master_data', 'search_parts']);
     });
 
     test('WT-3: create_part { name: "LED", quantity: 5 } で createPart が undefined キーなしで呼ばれ、作成部品詳細が返る', async () => {

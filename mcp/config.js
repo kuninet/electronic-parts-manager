@@ -82,12 +82,23 @@ function loadConfig(env = {}) {
     const rawReadOnly = env.EPM_MCP_READONLY ? env.EPM_MCP_READONLY.trim().toLowerCase() : '';
     const readOnly = rawReadOnly === '1' || rawReadOnly === 'true';
 
+    // 5. 画像サイズ上限値の検証 (既定値 10MB = 10485760, 上限 50MB = 52428800)
+    let imageMaxBytes = 10485760;
+    if (env.EPM_IMAGE_MAX_BYTES !== undefined && env.EPM_IMAGE_MAX_BYTES !== '') {
+        const parsedMaxBytes = Number(env.EPM_IMAGE_MAX_BYTES);
+        if (!Number.isInteger(parsedMaxBytes) || parsedMaxBytes <= 0 || parsedMaxBytes > 52428800) {
+            throw new Error('EPM_IMAGE_MAX_BYTES must be a positive integer up to 52428800');
+        }
+        imageMaxBytes = parsedMaxBytes;
+    }
+
     return {
         apiUrl: normalizedUrl,
         authHeader,
         authType,
         readOnly,
         timeoutMs,
+        imageMaxBytes,
         warnings,
     };
 }
