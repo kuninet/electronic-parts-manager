@@ -9,7 +9,7 @@ const {
     toolError,
 } = require('../format.js');
 
-describe('MCP Format Unit Tests (F-1 ~ F-8)', () => {
+describe('MCP Format Unit Tests (F-1 ~ F-9)', () => {
     const apiUrl = 'https://x.net';
 
     test('F-1: カンマ区切りタグの空白除去と空要素フィルタリング', () => {
@@ -152,6 +152,7 @@ describe('MCP Format Unit Tests (F-1 ~ F-8)', () => {
             'tags',
             'image_url',
             'status',
+            'qr_code',
         ];
         assert.deepEqual(Object.keys(summary).sort(), allowedKeys.sort());
         assert.equal(summary.datasheet_path, undefined);
@@ -186,6 +187,31 @@ describe('MCP Format Unit Tests (F-1 ~ F-8)', () => {
         assert.equal(formatted.image_url, 'https://x.net/uploads/loc.jpg');
         assert.equal(formatted.display_order, 5);
         assert.equal(formatted.extra_field, undefined);
+    });
+
+    test('F-9: toPartSummary において qr_code が存在する場合は文字列、未定義・null の場合は null を返す', () => {
+        const partWithQr = {
+            id: 1,
+            name: 'LED',
+            qr_code: 'P-0001',
+        };
+        const summary1 = toPartSummary(partWithQr, apiUrl);
+        assert.equal(summary1.qr_code, 'P-0001');
+
+        const partWithNullQr = {
+            id: 2,
+            name: 'LED2',
+            qr_code: null,
+        };
+        const summary2 = toPartSummary(partWithNullQr, apiUrl);
+        assert.equal(summary2.qr_code, null);
+
+        const partWithoutQr = {
+            id: 3,
+            name: 'LED3',
+        };
+        const summary3 = toPartSummary(partWithoutQr, apiUrl);
+        assert.equal(summary3.qr_code, null);
     });
 
     test('toolResult と toolError のフォーマット検証', () => {
