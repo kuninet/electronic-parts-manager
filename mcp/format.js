@@ -94,6 +94,7 @@ function toPartSummary(part, apiUrl) {
         tags: parseTags(part.tags),
         image_url: formatImageUrl(part.image_path, apiUrl),
         status: resolveStatus(part),
+        qr_code: part.qr_code ?? null,
     };
 }
 
@@ -111,7 +112,6 @@ function toPartDetail(part, apiUrl) {
         ...summary,
         description: part.description !== undefined ? part.description : null,
         datasheet_url: part.datasheet_url ?? null,
-        qr_code: part.qr_code ?? null,
         used_at: part.used_at ?? null,
         used_for: part.used_for ?? null,
         used_note: part.used_note ?? null,

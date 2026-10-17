@@ -64,7 +64,8 @@ flowchart LR
         "location": { "id": 3, "name": "引き出しA-1" },
         "tags": ["抵抗", "リード部品"],
         "image_url": "http://localhost:3001/uploads/mf25.jpg",
-        "status": "active"
+        "status": "active",
+        "qr_code": "P-0010"
       }
     ]
   }
