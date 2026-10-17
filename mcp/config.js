@@ -7,7 +7,7 @@
  * 環境変数を検証・正規化し、設定オブジェクトを返します。
  *
  * @param {Record<string, string | undefined>} [env={}] 環境変数オブジェクト
- * @returns {{ apiUrl: string, authHeader: string | null, timeoutMs: number, warnings: string[] }}
+ * @returns {{ apiUrl: string, authHeader: string | null, authType: 'none' | 'basic' | 'bearer', readOnly: boolean, timeoutMs: number, warnings: string[] }}
  */
 function loadConfig(env = {}) {
     const warnings = [];
@@ -52,6 +52,7 @@ function loadConfig(env = {}) {
     }
 
     let authHeader = null;
+    let authType = 'none';
 
     if (hasBasic) {
         const rawBasic = env.EPM_BASIC_AUTH;
@@ -60,6 +61,7 @@ function loadConfig(env = {}) {
             throw new Error('EPM_BASIC_AUTH must be in user:pass format');
         }
         authHeader = 'Basic ' + Buffer.from(rawBasic).toString('base64');
+        authType = 'basic';
 
         // 平文 HTTP 送信のセキュリティ警告
         const hostname = parsedUrl.hostname;
@@ -73,11 +75,18 @@ function loadConfig(env = {}) {
             throw new Error('EPM_AUTH_TOKEN must not be empty');
         }
         authHeader = `Bearer ${token}`;
+        authType = 'bearer';
     }
+
+    // 4. 読み取り専用モード（EPM_MCP_READONLY）の判定
+    const rawReadOnly = env.EPM_MCP_READONLY ? env.EPM_MCP_READONLY.trim().toLowerCase() : '';
+    const readOnly = rawReadOnly === '1' || rawReadOnly === 'true';
 
     return {
         apiUrl: normalizedUrl,
         authHeader,
+        authType,
+        readOnly,
         timeoutMs,
         warnings,
     };

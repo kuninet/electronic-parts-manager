@@ -3,9 +3,21 @@ import { ref, onMounted } from 'vue';
 import axios from 'axios';
 import api from '../api';
 import { useToast } from '../composables/useToast';
+import { getApiToken, clearApiToken } from '../utils/apiToken.js';
 
 const toast = useToast();
 const emit = defineEmits(['close']);
+
+const hasToken = ref(false);
+const checkToken = () => {
+    hasToken.value = !!getApiToken();
+};
+
+const handleClearToken = () => {
+    clearApiToken();
+    checkToken();
+    toast.success('API トークンを削除しました');
+};
 
 const importing = ref(false);
 const importMessage = ref('');
@@ -18,6 +30,7 @@ const exportMessage = ref('');
 let exportPollTimer = null;
 
 onMounted(async () => {
+    checkToken();
     try {
         const { data } = await api.get('/backup/config');
         s3Enabled.value = data.s3Enabled;
@@ -208,7 +221,22 @@ const handleReset = async () => {
         </div>
       </div>
 
-      
+      <div class="data-section">
+        <h3>🔑 API トークン</h3>
+        <p>サーバー認証用トークンのブラウザ保存状態です（LAN / MCP 連携用）。</p>
+        <div class="token-status-row">
+          <span>保存状態: <strong>{{ hasToken ? '保存済み' : '未設定' }}</strong></span>
+          <button
+            v-if="hasToken"
+            type="button"
+            class="btn btn-outline"
+            @click="handleClearToken"
+          >
+            トークンを削除
+          </button>
+        </div>
+      </div>
+
       <div class="data-section danger-zone">
         <h3>🗑️ 危険な操作</h3>
         <p>登録された全パーツデータ・タグ紐付け・画像・PDFを完全に削除します。<br>(カテゴリ・保管場所・タグのマスタデータは残ります)</p>
@@ -362,5 +390,17 @@ h3 {
   font-size: 0.8rem;
   color: var(--text-2);
   margin-top: 0.25rem;
+}
+
+.token-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
 }
 </style>

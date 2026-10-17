@@ -232,10 +232,63 @@ router.get('/:id', async (req, res) => {
 router.post('/', upload, async (req, res) => {
     try {
         const db = getDb();
-        const { name, description, quantity, datasheet_url } = req.body;
-        const category_id = (req.body.category_id === '' || req.body.category_id === 'null' || req.body.category_id === undefined) ? null : req.body.category_id;
-        const location_id = (req.body.location_id === '' || req.body.location_id === 'null' || req.body.location_id === undefined) ? null : req.body.location_id;
-        const tags = req.body.tags ? req.body.tags.split(',').map(t => t.trim()).filter(t => t) : [];
+        const { description, datasheet_url } = req.body;
+
+        // name の検証
+        const rawName = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+        if (!rawName) {
+            return res.status(400).json({ error: '部品名は必須です' });
+        }
+        if (rawName.length > 200) {
+            return res.status(400).json({ error: '部品名は200文字以内で入力してください' });
+        }
+        const safeName = rawName;
+
+        // quantity の検証（未指定または空文字は 0）
+        let safeQuantity = 0;
+        if (req.body.quantity !== undefined && req.body.quantity !== null && req.body.quantity !== '') {
+            const qNum = Number(req.body.quantity);
+            if (!Number.isInteger(qNum) || qNum < 0) {
+                return res.status(400).json({ error: '数量は0以上の整数で指定してください' });
+            }
+            safeQuantity = qNum;
+        }
+
+        // category_id の検証と存在確認
+        let category_id = (req.body.category_id === '' || req.body.category_id === 'null' || req.body.category_id === undefined || req.body.category_id === null) ? null : req.body.category_id;
+        if (category_id !== null) {
+            const cid = Number(category_id);
+            if (!Number.isInteger(cid) || cid <= 0) {
+                return res.status(400).json({ error: '無効なカテゴリIDです' });
+            }
+            const cat = await db.get('SELECT 1 FROM categories WHERE id = ?', [cid]);
+            if (!cat) {
+                return res.status(400).json({ error: '指定されたカテゴリが存在しません' });
+            }
+            category_id = cid;
+        }
+
+        // location_id の検証と存在確認
+        let location_id = (req.body.location_id === '' || req.body.location_id === 'null' || req.body.location_id === undefined || req.body.location_id === null) ? null : req.body.location_id;
+        if (location_id !== null) {
+            const lid = Number(location_id);
+            if (!Number.isInteger(lid) || lid <= 0) {
+                return res.status(400).json({ error: '無効な保管場所IDです' });
+            }
+            const loc = await db.get('SELECT 1 FROM locations WHERE id = ?', [lid]);
+            if (!loc) {
+                return res.status(400).json({ error: '指定された保管場所が存在しません' });
+            }
+            location_id = lid;
+        }
+
+        // tags の処理（配列またはカンマ区切り文字列）
+        let tags = [];
+        if (Array.isArray(req.body.tags)) {
+            tags = req.body.tags.map(t => (typeof t === 'string' ? t.trim() : String(t).trim())).filter(t => t);
+        } else if (typeof req.body.tags === 'string' && req.body.tags) {
+            tags = req.body.tags.split(',').map(t => t.trim()).filter(t => t);
+        }
 
         const partNumberResult = normalizePartNumber(req.body.part_number);
         if (partNumberResult.error) {
@@ -244,8 +297,8 @@ router.post('/', upload, async (req, res) => {
         const safePartNumber = partNumberResult.value ?? null;
 
         let image_path = null;
-        if (req.files['image']) {
-            const file = req.files['image'][0];
+        if (req.files?.image) {
+            const file = req.files.image[0];
             if (file.size > MAX_IMAGE_FILE_SIZE) {
                 return res.status(413).json({ error: '画像ファイルサイズは20MB以下にしてください' });
             }
@@ -277,8 +330,8 @@ router.post('/', upload, async (req, res) => {
             image_path = '/uploads/' + filename;
         }
         let datasheet_path = null;
-        if (req.files['datasheet']) {
-            const dsFile = req.files['datasheet'][0];
+        if (req.files?.datasheet) {
+            const dsFile = req.files.datasheet[0];
             const dsFilename = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(dsFile.originalname);
             const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
             await fs.promises.writeFile(path.join(uploadsDir, dsFilename), dsFile.buffer);
@@ -288,7 +341,7 @@ router.post('/', upload, async (req, res) => {
         const result = await db.run(`
       INSERT INTO parts (name, description, category_id, location_id, quantity, image_path, datasheet_url, datasheet_path, part_number)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [name, description, category_id, location_id, quantity, image_path, datasheet_url, datasheet_path, safePartNumber]);
+    `, [safeName, description ?? null, category_id, location_id, safeQuantity, image_path, datasheet_url ?? null, datasheet_path, safePartNumber]);
 
         const partId = result.lastID;
 
@@ -558,6 +611,102 @@ router.delete('/:id/permanent', async (req, res) => {
         }
         res.json({ message: 'Permanently deleted', affected });
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/parts/:id/quantity - Change part quantity
+router.post('/:id/quantity', async (req, res) => {
+    try {
+        const id = parseId(req.params.id);
+        if (!id) return res.status(400).json({ error: 'Invalid ID' });
+
+        const hasDelta = req.body.delta !== undefined && req.body.delta !== null;
+        const hasAbsolute = req.body.absolute !== undefined && req.body.absolute !== null;
+
+        if ((hasDelta && hasAbsolute) || (!hasDelta && !hasAbsolute)) {
+            return res.status(400).json({ error: 'delta または absolute のどちらか一方を指定してください' });
+        }
+
+        let deltaNum = null;
+        let absNum = null;
+
+        if (hasDelta) {
+            if (typeof req.body.delta !== 'number' || !Number.isInteger(req.body.delta) || req.body.delta === 0) {
+                return res.status(400).json({ error: 'delta は 0 以外の整数で指定してください' });
+            }
+            deltaNum = req.body.delta;
+        } else {
+            if (typeof req.body.absolute !== 'number' || !Number.isInteger(req.body.absolute) || req.body.absolute < 0) {
+                return res.status(400).json({ error: 'absolute は 0 以上の整数で指定してください' });
+            }
+            absNum = req.body.absolute;
+        }
+
+        let safeReason = null;
+        if (req.body.reason !== undefined && req.body.reason !== null) {
+            if (typeof req.body.reason !== 'string') {
+                return res.status(400).json({ error: 'reason は文字列で指定してください' });
+            }
+            const trimmed = req.body.reason.trim();
+            if (trimmed.length > 200) {
+                return res.status(400).json({ error: 'reason は200文字以内で指定してください' });
+            }
+            safeReason = trimmed || null;
+        }
+
+        const db = getDb();
+        let previousQuantity;
+        let newQuantity;
+
+        if (hasDelta) {
+            // 条件付き単一 UPDATE 文により原子的に更新（NULL の古い行は 0 として扱う）
+            const result = await db.run(
+                'UPDATE parts SET quantity = COALESCE(quantity, 0) + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL AND used_at IS NULL AND COALESCE(quantity, 0) + ? >= 0',
+                [deltaNum, id, deltaNum]
+            );
+
+            if (result.changes === 0) {
+                const part = await db.get('SELECT COALESCE(quantity, 0) AS quantity, deleted_at, used_at FROM parts WHERE id = ?', [id]);
+                if (!part || part.deleted_at !== null || part.used_at !== null) {
+                    return res.status(404).json({ error: '部品が見つかりません（ゴミ箱・使用済みは対象外）' });
+                }
+                return res.status(400).json({ error: `在庫数が負になります（現在 ${part.quantity}）` });
+            }
+
+            const updatedPart = await db.get('SELECT quantity FROM parts WHERE id = ?', [id]);
+            newQuantity = updatedPart.quantity;
+            previousQuantity = newQuantity - deltaNum;
+        } else {
+            const part = await db.get(
+                'SELECT COALESCE(quantity, 0) AS quantity FROM parts WHERE id = ? AND deleted_at IS NULL AND used_at IS NULL',
+                [id]
+            );
+            if (!part) {
+                return res.status(404).json({ error: '部品が見つかりません（ゴミ箱・使用済みは対象外）' });
+            }
+            previousQuantity = part.quantity;
+            newQuantity = absNum;
+
+            if (newQuantity !== previousQuantity) {
+                await db.run(
+                    'UPDATE parts SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL AND used_at IS NULL',
+                    [newQuantity, id]
+                );
+            }
+        }
+
+        console.log(`quantity change part=${id} ${previousQuantity}->${newQuantity} reason=${safeReason || ''}`);
+
+        return res.status(200).json({
+            part_id: id,
+            previous_quantity: previousQuantity,
+            new_quantity: newQuantity,
+            delta: newQuantity - previousQuantity,
+            reason: safeReason
+        });
+    } catch (err) {
+        console.error(err);
         res.status(500).json({ error: err.message });
     }
 });

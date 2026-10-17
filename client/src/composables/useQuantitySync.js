@@ -2,6 +2,7 @@ import { reactive } from 'vue';
 import api from '../api';
 import { useToast } from './useToast';
 import * as Q from '../utils/quantityQueue';
+import { getApiToken } from '../utils/apiToken.js';
 
 const DEBOUNCE_MS = 400;
 const entries = reactive(new Map()); // partId -> entry
@@ -89,12 +90,17 @@ function hasPending() {
 
 function sendBeaconAll() {
   const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+  const token = getApiToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   for (const [id, e] of entries.entries()) {
     if (timers.has(id) || e.dirty) {
       try {
         fetch(`${apiBase}/parts/${id}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({ quantity: e.display }),
           keepalive: true
         });

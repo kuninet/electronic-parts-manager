@@ -10,22 +10,25 @@ const { version } = require('../package.json');
  */
 class ApiError extends Error {
     /**
-     * @param {'network' | 'timeout' | 'unauthorized' | 'forbidden' | 'not_found' | 'http' | 'invalid_response'} kind エラー種別
+     * @param {'network' | 'timeout' | 'unauthorized' | 'forbidden' | 'not_found' | 'bad_request' | 'conflict' | 'http' | 'invalid_response'} kind エラー種別
      * @param {number | null} status HTTP ステータスコード
      * @param {string} message エラーメッセージ
+     * @param {Object} [options]
+     * @param {boolean} [options.unknownOutcome=false] POST タイムアウト等の結果不明フラグ
      */
-    constructor(kind, status, message) {
+    constructor(kind, status, message, { unknownOutcome = false } = {}) {
         super(message);
         this.name = 'ApiError';
         this.kind = kind;
         this.status = status;
+        this.unknownOutcome = unknownOutcome;
     }
 }
 
 /**
  * API クライアントを生成します。
  *
- * @param {{ apiUrl: string, authHeader: string | null, timeoutMs: number }} config
+ * @param {{ apiUrl: string, authHeader: string | null, authType?: 'none' | 'basic' | 'bearer', timeoutMs: number }} config
  * @param {{ fetchImpl?: typeof globalThis.fetch }} [options]
  * @returns {object} API クライアント
  */
@@ -40,13 +43,16 @@ function createApiClient(config, { fetchImpl = globalThis.fetch } = {}) {
     }
 
     /**
-     * GET リクエストを実行します。
+     * 汎用 HTTP リクエストを実行します。
      *
-     * @param {string} path API パス（例: '/api/parts'）
-     * @param {Record<string, any>} [query] クエリパラメータ
+     * @param {'GET' | 'POST'} method HTTP メソッド
+     * @param {string} path API パス
+     * @param {Object} [options]
+     * @param {Record<string, any>} [options.query]
+     * @param {any} [options.body]
      * @returns {Promise<any>}
      */
-    async function get(path, query) {
+    async function request(method, path, { query, body } = {}) {
         const url = new URL(config.apiUrl + path);
 
         if (query && typeof query === 'object') {
@@ -57,11 +63,19 @@ function createApiClient(config, { fetchImpl = globalThis.fetch } = {}) {
             }
         }
 
+        const headers = { ...defaultHeaders };
+        let bodyPayload = undefined;
+        if (method === 'POST') {
+            headers['Content-Type'] = 'application/json';
+            bodyPayload = body !== undefined ? JSON.stringify(body) : undefined;
+        }
+
         let response;
         try {
             response = await fetchImpl(url.toString(), {
-                method: 'GET',
-                headers: defaultHeaders,
+                method,
+                headers,
+                body: bodyPayload,
                 signal: AbortSignal.timeout(config.timeoutMs),
             });
         } catch (err) {
@@ -69,7 +83,13 @@ function createApiClient(config, { fetchImpl = globalThis.fetch } = {}) {
                 throw err;
             }
             if (err && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-                throw new ApiError('timeout', null, `API の応答が ${config.timeoutMs}ms 以内にありませんでした。`);
+                const unknownOutcome = method === 'POST';
+                throw new ApiError(
+                    'timeout',
+                    null,
+                    `API の応答が ${config.timeoutMs}ms 以内にありませんでした。`,
+                    { unknownOutcome }
+                );
             }
             throw new ApiError(
                 'network',
@@ -80,20 +100,12 @@ function createApiClient(config, { fetchImpl = globalThis.fetch } = {}) {
 
         if (!response.ok) {
             const status = response.status;
-            if (status === 401) {
-                throw new ApiError('unauthorized', 401, '認証に失敗しました。EPM_BASIC_AUTH（user:pass）を確認してください。');
-            }
-            if (status === 403) {
-                throw new ApiError('forbidden', 403, 'アクセスが拒否されました。AWS の場合は API Gateway ではなく CloudFront の URL を EPM_API_URL に指定してください。');
-            }
-            if (status === 404) {
-                throw new ApiError('not_found', 404, 'リソースが見つかりません');
-            }
 
-            // その他 4xx / 5xx
+            // エラー本文の抽出（最大 200 文字）
+            let bodyText = '';
             let errorDetail = '';
             try {
-                const bodyText = await response.text();
+                bodyText = await response.text();
                 try {
                     const bodyJson = JSON.parse(bodyText);
                     if (bodyJson && typeof bodyJson.error === 'string') {
@@ -108,6 +120,36 @@ function createApiClient(config, { fetchImpl = globalThis.fetch } = {}) {
                 // 読み取り失敗時は無視
             }
 
+            if (status === 400) {
+                const msg = errorDetail ? `不正なリクエストです: ${errorDetail}` : '不正なリクエストです';
+                throw new ApiError('bad_request', 400, msg);
+            }
+
+            if (status === 401) {
+                let msg = '認証に失敗しました。EPM_BASIC_AUTH（user:pass）を確認してください。';
+                if (config.authType === 'bearer') {
+                    msg = 'API トークンが一致しません。EPM_AUTH_TOKEN を確認してください。';
+                } else if (config.authType === 'none') {
+                    msg = 'サーバーが API トークンを要求しています。EPM_AUTH_TOKEN にサーバーの EPM_API_TOKEN と同じ値を設定してください。';
+                }
+                throw new ApiError('unauthorized', 401, msg);
+            }
+
+            if (status === 403) {
+                throw new ApiError('forbidden', 403, 'アクセスが拒否されました。AWS の場合は API Gateway ではなく CloudFront の URL を EPM_API_URL に指定してください。');
+            }
+
+            if (status === 404) {
+                const msg = errorDetail || 'リソースが見つかりません';
+                throw new ApiError('not_found', 404, msg);
+            }
+
+            if (status === 409) {
+                const msg = errorDetail ? `競合が発生しました: ${errorDetail}` : '競合が発生しました';
+                throw new ApiError('conflict', 409, msg);
+            }
+
+            // その他 4xx / 5xx
             const msg = errorDetail ? `API エラー（${status}）: ${errorDetail}` : `API エラー（${status}）`;
             throw new ApiError('http', status, msg);
         }
@@ -130,11 +172,16 @@ function createApiClient(config, { fetchImpl = globalThis.fetch } = {}) {
 
     return {
         apiUrl: config.apiUrl,
-        get,
-        listParts: (params) => get('/api/parts', params),
-        getPart: (id) => get(`/api/parts/${id}`),
-        listCategories: () => get('/api/categories'),
-        listLocations: () => get('/api/locations'),
+        get: (path, query) => request('GET', path, { query }),
+        post: (path, body) => request('POST', path, { body }),
+        request,
+        listParts: (params) => request('GET', '/api/parts', { query: params }),
+        getPart: (id) => request('GET', `/api/parts/${id}`),
+        listCategories: () => request('GET', '/api/categories'),
+        listLocations: () => request('GET', '/api/locations'),
+        createPart: (body) => request('POST', '/api/parts', { body }),
+        changeQuantity: (id, body) => request('POST', `/api/parts/${id}/quantity`, { body }),
+        storePart: (body) => request('POST', '/api/qr/store', { body }),
     };
 }
 

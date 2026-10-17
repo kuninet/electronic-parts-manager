@@ -130,4 +130,30 @@ describe('MCP Config Unit Tests (C-1 ~ C-9)', () => {
             loadConfig({ EPM_API_TIMEOUT_MS: '10.5' });
         }, /EPM_API_TIMEOUT_MS/);
     });
+
+    test('C-10: 認証設定に応じた authType の判定 (none / basic / bearer)', () => {
+        const noAuth = loadConfig({});
+        assert.equal(noAuth.authType, 'none');
+
+        const basicAuth = loadConfig({ EPM_BASIC_AUTH: 'user:pass' });
+        assert.equal(basicAuth.authType, 'basic');
+
+        const bearerAuth = loadConfig({ EPM_AUTH_TOKEN: 'token123' });
+        assert.equal(bearerAuth.authType, 'bearer');
+    });
+
+    test('C-11: EPM_MCP_READONLY による readOnly フラグの判定', () => {
+        // 未設定時は false
+        assert.equal(loadConfig({}).readOnly, false);
+
+        // '1' または 'true'（大文字小文字無視・トリム）は true
+        assert.equal(loadConfig({ EPM_MCP_READONLY: '1' }).readOnly, true);
+        assert.equal(loadConfig({ EPM_MCP_READONLY: 'true' }).readOnly, true);
+        assert.equal(loadConfig({ EPM_MCP_READONLY: ' TRUE ' }).readOnly, true);
+
+        // '0', 'false', その他文字列は false
+        assert.equal(loadConfig({ EPM_MCP_READONLY: '0' }).readOnly, false);
+        assert.equal(loadConfig({ EPM_MCP_READONLY: 'false' }).readOnly, false);
+        assert.equal(loadConfig({ EPM_MCP_READONLY: 'anything' }).readOnly, false);
+    });
 });

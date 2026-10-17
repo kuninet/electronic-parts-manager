@@ -16,6 +16,32 @@
 
 ## 3. 共通事項
 
+### 認証 (API トークン認証)
+
+本システムは、LAN 内運用および MCP サーバー連携向けに **API トークン認証**（オプトイン）をサポートします。
+
+- **有効化**: 環境変数 `EPM_API_TOKEN` に任意の文字列（例: 32バイト乱数の base64url）を設定すると有効化されます。未設定または空の場合は無認証で動作します（後方互換性維持）。
+- **認証方式**: リクエストヘッダーに `Authorization: Bearer <token>` を指定します。
+- **未認証・認証失敗時のレスポンス**:
+  - HTTP ステータス: `401 Unauthorized`
+  - レスポンスヘッダー: `WWW-Authenticate: Bearer realm="epm"`
+  - レスポンスボディ:
+    ```json
+    {
+      "error": "Unauthorized",
+      "code": "API_TOKEN_REQUIRED"
+    }
+    ```
+- **免除されるリクエスト**:
+  - `OPTIONS` プリフライトリクエスト
+  - `GET` および `HEAD` の `/api/health`（死活監視・更新スクリプト用）
+  - AWS Lambda 環境における `POST /api/backup/export/worker`（非同期エクスポートワーカー内部呼出用。LAN環境では免除されません）
+  - ※ループバックアドレス（`127.0.0.1` / `::1`）からの要求であっても免除されません（Vite preview プロキシ経由時のバイパス防止のため）。
+- **対象外のパス**:
+  - `/uploads/*` の静的画像・データシート配信（ブラウザの `<img>` や `<a>` タグからヘッダー付与が困難なため保護対象外）。
+- **AWS 本番環境での扱い**:
+  - AWS 環境では CloudFront の Basic 認証が `Authorization` ヘッダーを使用するため、同一ヘッダーを奪い合う `Authorization: Bearer` 方式のトークン認証は併用できません。AWS 環境では従来どおり CloudFront Basic 認証のみで保護し、`EPM_API_TOKEN` は設定しません。
+
 ### エラー形式
 エラー時のレスポンスボディは原則として以下のJSON形式です。
 ```json
@@ -117,23 +143,46 @@
 - **副作用**: なし
 
 #### `POST /api/parts`
-- **用途**: 新規パーツを登録します。
-- **リクエスト**: `multipart/form-data`
+- **用途**: 新規パーツを登録します（`multipart/form-data` または `application/json` に対応）。
+- **リクエスト**: `multipart/form-data` または `application/json`
   - ボディ:
-    - `name` (string, 必須): 部品名（未入力の場合は自動生成）
+    - `name` (string, 必須): 部品名（1〜200文字、前後の空白は自動トリム）
     - `part_number` (string, 任意): 型番（最大100文字）
     - `description` (string, 任意): 説明
-    - `category_id` (number, 任意): カテゴリID
-    - `location_id` (number, 任意): 保管場所ID
-    - `quantity` (number, 任意): 数量（デフォルト: 0）
-    - `qr_code` (string, 任意): QRコード識別子
-    - `tags` (string, 任意): カンマ区切りタグ文字列、または配列
+    - `category_id` (number, 任意): カテゴリID（存在する正の整数）
+    - `location_id` (number, 任意): 保管場所ID（存在する正の整数）
+    - `quantity` (number, 任意): 数量（0以上の整数。デフォルト: 0）
+    - `tags` (string | array, 任意): カンマ区切りタグ文字列、または文字列の配列
     - `datasheet_url` (string, 任意): データシートURL
-    - `image` (file, 任意): 画像ファイル（最大20MB、JPG/PNG/GIF/WEBP）
-    - `datasheet` (file, 任意): データシートPDFファイル（最大20MB）
-- **レスポンス**: 201 Created（作成されたパーツオブジェクト）
-- **エラー**: 400（入力不備・画像破損等）、409（QRコード重複）、413（ファイルサイズ超過）、500
-- **副作用**: 画像・データシートファイルのアップロード保存、QRコード重複チェック
+    - `image` (file, 任意, multipartのみ): 画像ファイル（最大20MB、JPG/PNG/GIF/WEBP）
+    - `datasheet` (file, 任意, multipartのみ): データシートPDFファイル（最大20MB）
+- **レスポンス**: 201 Created (`{ id: <新パーツID> }`)
+- **エラー**: 400（必須項目不足、不正な数量、存在しない外部キー等）、413（ファイルサイズ超過）、500
+- **副作用**: パーツレコード作成、タグ紐付け、画像・データシート保存
+
+#### `POST /api/parts/:id/quantity`
+- **用途**: パーツの在庫数量を増減または絶対値で原子的に更新します（MCPツールや入庫処理向け）。
+- **リクエスト**: `application/json`
+  - パスパラメータ: `:id` (正の整数)
+  - ボディ:
+    - `delta` (number, 任意): 増減値（0以外の整数。正で増加、負で減少）。`absolute` との排他指定。
+    - `absolute` (number, 任意): 設定する絶対値（0以上の整数）。`delta` との排他指定。
+    - `reason` (string, 任意): 変更理由（最大200文字。サーバーログおよびレスポンスに反映）。
+- **レスポンス**: 200 OK
+  ```json
+  {
+    "part_id": 1,
+    "previous_quantity": 10,
+    "new_quantity": 15,
+    "delta": 5,
+    "reason": "秋月で購入"
+  }
+  ```
+- **エラー**:
+  - 400: 不正なID、`delta` と `absolute` の未指定または重複指定、小数の指定、200文字超の理由、計算後の在庫数が負になる場合
+  - 404: パーツが存在しない、またはゴミ箱（`deleted_at IS NOT NULL`）もしくは使用済み（`used_at IS NOT NULL`）の場合
+  - 500: サーバー内部エラー
+- **副作用**: `parts.quantity` および `parts.updated_at` の更新（`absolute` で数量不変の場合は `updated_at` を更新しない）、サーバーログへの出力
 
 #### `PUT /api/parts/:id`
 - **用途**: パーツ情報を包括的に更新します（マルチパート対応）。
