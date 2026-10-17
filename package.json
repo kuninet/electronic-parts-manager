@@ -9,14 +9,18 @@
         "start": "concurrently \"npm run server\" \"npm run client\"",
         "server": "cd server && npm start",
         "client": "cd client && npm run dev",
-        "test": "npm run test --prefix server && npm run test --prefix client && npm run test:scripts",
+        "test": "npm run test --prefix server && npm run test --prefix client && npm run test:scripts && npm run test:mcp",
         "test:scripts": "node --test scripts/test/*.test.js",
+        "test:mcp": "node --test mcp/test/*.test.js",
+        "mcp": "node mcp/index.js",
         "aws-auth": "node scripts/aws-auth.js"
     },
     "keywords": [],
     "author": "",
     "license": "ISC",
     "dependencies": {
-        "concurrently": "^9.2.1"
+        "@modelcontextprotocol/sdk": "^1.32.1",
+        "concurrently": "^9.2.1",
+        "zod": "^4.6.7"
     }
 }

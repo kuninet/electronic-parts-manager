@@ -15,6 +15,12 @@
 -   **ファイルアップロード**: Multer
 -   **バックアップ**: Archiver (ZIP作成), Adm-ZIP (ZIP解凍), CSV-Stringify/Parse
 
+### 外部AI連携 (MCP)
+-   **プロトコル**: Model Context Protocol (MCP) stdio トランスポート
+-   **SDK**: `@modelcontextprotocol/sdk`
+-   **スキーマ検証**: Zod
+-   **通信方式**: EPM REST API クライアント (Node 18+ 標準 fetch)
+
 ## ディレクトリ構造
 
 ```
@@ -43,6 +49,14 @@
 │   ├── index.js            # エントリーポイント
 │   ├── package.json
 │   └── database.sqlite     # SQLiteデータベースファイル (自動生成)
+│
+├── mcp/                    # 外部AI連携 MCP サーバー (REST API クライアント)
+│   ├── tools/              # MCP ツール実装 (search_parts, get_part_detail, list_master_data)
+│   ├── apiClient.js        # EPM API クライアント
+│   ├── config.js           # 設定読み込み・検証
+│   ├── format.js           # レスポンス整形純関数
+│   ├── server.js           # McpServer インスタンス構築
+│   └── index.js            # stdio エントリーポイント
 │
 ├── uploads/                # アップロードされた画像・PDF (gitignore対象)
 └── docs/                   # ドキュメント (本フォルダ)

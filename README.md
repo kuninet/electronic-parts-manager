@@ -64,6 +64,10 @@ npm run dev
 ```
 通常は `http://localhost:5173` で起動します。ブラウザでアクセスしてください。
 
+## 外部AI連携 (MCP)
+Claude Desktop や Antigravity などの外部 AI アシスタントと連携するための Model Context Protocol (MCP) サーバーを提供しています。
+自然言語による部品在庫の検索や詳細情報の確認が可能です。設定方法やツールの仕様、環境変数の詳細は [docs/MCP.md](docs/MCP.md) を参照してください。
+
 ## ディレクトリ構成
 
 ```
@@ -76,6 +80,7 @@ npm run dev
 │   ├── database.js      # SQLite接続設定
 │   ├── index.js         # サーバーエントリーポイント
 │   └── database.sqlite  # データベースファイル (自動生成)
+├── mcp/                 # 外部AI連携用 MCP サーバー (stdio)
 ├── scripts/             # Windows 運用・自動更新・サービス登録スクリプト
 ├── logs/                # 更新ログおよび PM2 ログ (git 管理外)
 ├── uploads/             # アップロードされた画像やPDFの保存先
