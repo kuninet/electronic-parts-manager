@@ -114,7 +114,7 @@ function Read-DotEnvValue {
         [Parameter(Mandatory = $true)][string]$Key
     )
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
-    foreach ($line in (Get-Content -LiteralPath $Path)) {
+    foreach ($line in (Get-Content -LiteralPath $Path -Encoding UTF8)) {
         $trimmed = $line.Trim()
         if (-not $trimmed -or $trimmed.StartsWith('#')) { continue }
         if ($trimmed -match "^$Key\s*=\s*(.*)$") {

@@ -168,6 +168,8 @@ test('Windows スクリプト静的検査 (S-1 〜 S-8)', async (t) => {
         assert.match(content, /curl\.exe\s+-k\s+-s\s+-m\s+3/, 'Wait-EpmHealthy に curl.exe によるプロキシ疎通確認が含まれていること');
         assert.match(content, /System\.Net\.Sockets\.TcpClient/, 'Wait-EpmHealthy に TCP フォールバックが含まれていること');
         assert.match(content, /WebScheme\s*=\s*\$webScheme/, 'Get-EpmPaths に WebScheme が定義されていること');
+        // PS 5.1 の Get-Content は BOM なし UTF-8 を Shift_JIS として読み、日本語コメントの後ろの行を壊すため
+        assert.match(content, /Get-Content -LiteralPath \$Path -Encoding UTF8/, 'Read-DotEnvValue が .env を UTF-8 として読むこと');
     });
 
     await t.test('S-7: ecosystem.config.js の構造と設定が正しいこと', () => {
