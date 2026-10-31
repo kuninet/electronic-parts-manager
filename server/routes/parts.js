@@ -104,6 +104,11 @@ async function permanentlyDeleteParts(db, ids) {
             `UPDATE purchase_records SET part_id = NULL, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE part_id IN (${ph})`,
             targetIds
         );
+        // ひも付け候補（suggested_part_id）も同じく外れた部品を指さないように戻す
+        await db.run(
+            `UPDATE purchase_records SET suggested_part_id = NULL, suggestion_note = NULL, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE suggested_part_id IN (${ph})`,
+            targetIds
+        );
         // part_tags / ai_name_suggestions は ON DELETE CASCADE で削除される
         const result = await db.run(`DELETE FROM parts WHERE id IN (${ph}) AND deleted_at IS NOT NULL`, targetIds);
         affected = result.changes;

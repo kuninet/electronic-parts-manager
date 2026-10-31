@@ -273,6 +273,8 @@ describe('MCP Format Unit Tests (F-1 ~ F-9)', () => {
             currency: 'JPY',
             quantity: 5,
             part: { id: 3, name: '高輝度LED' },
+            suggested_part: null,
+            suggestion_note: null,
             source_msg_id: 'msg1',
             note: 'メモ',
             import_batch_id: null,
@@ -294,6 +296,15 @@ describe('MCP Format Unit Tests (F-1 ~ F-9)', () => {
     test('toPurchaseRecord: import_batch_id を出す（なければ null）', () => {
         assert.equal(toPurchaseRecord({ id: 1, shop: 'S', name: 'x', import_batch_id: 4 }).import_batch_id, 4);
         assert.equal(toPurchaseRecord({ id: 1, shop: 'S', name: 'x' }).import_batch_id, null);
+    });
+
+    test('toPurchaseRecord: 候補は suggested_part（id と name）と suggestion_note で出す。部品がなければ name は null', () => {
+        const r = toPurchaseRecord({ id: 1, shop: 'S', name: 'x', suggested_part_id: 8, suggested_part_name: '抵抗', suggestion_note: '型番が近い' });
+        assert.deepEqual(r.suggested_part, { id: 8, name: '抵抗' });
+        assert.equal(r.suggestion_note, '型番が近い');
+        assert.deepEqual(toPurchaseRecord({ id: 1, shop: 'S', name: 'x', suggested_part_id: 8 }).suggested_part, { id: 8, name: null });
+        assert.equal(toPurchaseRecord({ id: 1, shop: 'S', name: 'x', suggested_part_id: null }).suggested_part, null);
+        assert.equal('suggested_part_id' in r, false);
     });
 
     test('toImportBatch: 件数の列名を短くし、undone_at を出す', () => {

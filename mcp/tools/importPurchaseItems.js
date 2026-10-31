@@ -54,7 +54,9 @@ function registerImportPurchaseItemsTool(server, { apiClient }) {
                 'order_id がなく source_msg_id があれば「source_msg_id＋正規化した name」です。order_id と source_msg_id のどちらも無い明細はエラーになります。' +
                 '同じ注文でも line_no の有無でキーが変わるため、同じ店では line_no を付けるかどうかをそろえてください。同じリクエスト内で同じキーになった明細には warning が付きます。' +
                 '同じデータを再度取り込んでも二重に登録されません（on_duplicate: skip は既存を変えず、update は送った項目で上書きします。update でも part_id が null や未指定なら既存のひも付けは残ります）。' +
-                '存在しない part_id はひも付けずに登録し、warning を返します。明細ごとのエラーはほかの明細に影響しません。' +
+                'ひも付けに迷う明細には、part_id の代わりに suggested_part_id（候補の部品 id）と suggestion_note（判断理由）も付けられます。人が画面で承認するとひも付きます。' +
+                'なお取り込みでは、part_id を付けても部品側の購入情報（購入先・購入日・単価）は自動更新されません（バッチの取り消しで戻せないため。update_purchase_item で part_id を設定したときは更新されます）。' +
+                '存在しない part_id と suggested_part_id はひも付けずに登録し、warning を返します。明細ごとのエラーはほかの明細に影響しません。' +
                 '大量に取り込む前は dry_run: true で件数と内容を確認してください（何も登録せず、集計と、created・updated の先頭20件の preview を返します）。' +
                 '本番の取り込みは batch_id を返します（同じデータを再実行しても明細は重複しませんが、取り込みバッチの記録は毎回作られます）。取り込みを取り消すには undo_import_batch に batch_id を指定します（list_import_batches で一覧、search_purchase_items の batch_id で内容を確認できます）。source と note は取り込みバッチの記録用の任意項目です。' +
                 '数千件を超える大量のファイルは、REST の POST /api/purchases/import に直接送れます（docs/MCP.md 参照）。' +

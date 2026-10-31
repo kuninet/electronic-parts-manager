@@ -15,6 +15,7 @@ const searchPurchaseItemsSchema = {
     part_id: z.number().int().positive().optional(),
     batch_id: z.number().int().positive().optional(),
     linked: z.boolean().optional(),
+    link_status: z.enum(['linked', 'unlinked', 'suggested']).optional(),
     from: z.string().regex(DATE_PATTERN).optional(),
     to: z.string().regex(DATE_PATTERN).optional(),
     currency: z.string().max(10).optional(),
@@ -38,6 +39,8 @@ function registerSearchPurchaseItemsTool(server, { apiClient }) {
                 'query は商品名・型番や通販コード・注文番号の部分一致、shop は購入店の完全一致、from / to は注文日（YYYY-MM-DD、両端を含む）の範囲です。' +
                 'batch_id を指定すると、その取り込みバッチ（import_purchase_items の batch_id）で新規登録した明細だけに絞れます（上書きされただけの明細は含みません）。' +
                 '部品にひも付いていない明細を探すには linked: false を使います（linked: true はひも付け済み）。' +
+                'link_status では、unlinked（part_id なし。候補の有無は問わない）、suggested（part_id なしで、人の承認待ちの候補あり）、linked（ひも付け済み）に絞れます。' +
+                'AI によるひも付けの作業では link_status: \'unlinked\' で未ひも付けの明細を取り、候補の入った明細は結果の suggested_part / suggestion_note で分かります。' +
                 '部品との照合では、先に search_parts で部品を探し、その id を update_purchase_item の part_id に指定します。' +
                 '結果は注文日の新しい順です。外貨の単価は換算せず、currency とともにそのまま返します。',
             annotations: {
@@ -60,6 +63,7 @@ function registerSearchPurchaseItemsTool(server, { apiClient }) {
                     part_id: args.part_id,
                     batch_id: args.batch_id,
                     linked: args.linked,
+                    link_status: args.link_status,
                     from: args.from,
                     to: args.to,
                     currency: trimmed(args.currency),
