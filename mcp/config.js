@@ -4,10 +4,83 @@
  */
 
 /**
+ * EPM_MCP_ALLOWED_HOSTS（カンマ区切り）を解析し、小文字化・重複除去したホスト名の配列を返します。
+ * ポート付き（host:port, [::1]:3002）は不正として例外を投げます。IPv6 は角括弧付きで指定します。
+ *
+ * @param {string | undefined} raw 環境変数の値
+ * @returns {string[]}
+ */
+function parseAllowedHosts(raw) {
+    if (!raw) {
+        return [];
+    }
+    const hosts = [];
+    for (const part of raw.split(',')) {
+        const original = part.trim();
+        const host = original.toLowerCase();
+        if (!host) {
+            continue;
+        }
+        const isBracketed = /^\[[^\]]*\]$/.test(host);
+        // 角括弧付き IPv6 以外でコロンを含むもの、および [...] の後ろに :port が続くものはポート付きとみなす
+        if (!isBracketed && host.includes(':')) {
+            throw new Error(`EPM_MCP_ALLOWED_HOSTS must contain hostnames without ports: '${original}'`);
+        }
+        if (!/^(\[[0-9a-f:.]+\]|[a-z0-9.-]+)$/.test(host)) {
+            throw new Error(`EPM_MCP_ALLOWED_HOSTS contains an invalid hostname: '${original}'`);
+        }
+        // Host ヘッダー側と同じ正規化（192.168.001.010 → 192.168.1.10 など）をかけて保存する
+        let normalized;
+        try {
+            normalized = new URL('http://' + host).hostname.toLowerCase();
+        } catch {
+            throw new Error(`EPM_MCP_ALLOWED_HOSTS contains an invalid hostname: '${original}'`);
+        }
+        if (!hosts.includes(normalized)) {
+            hosts.push(normalized);
+        }
+    }
+    return hosts;
+}
+
+/**
+ * EPM_MCP_ALLOWED_ORIGINS（カンマ区切りの URL）を解析し、new URL(v).origin で正規化した配列を返します。
+ * URL として不正な値、または origin が決まらない値（opaque origin）は例外を投げます。
+ *
+ * @param {string | undefined} raw 環境変数の値
+ * @returns {string[]}
+ */
+function parseAllowedOrigins(raw) {
+    if (!raw) {
+        return [];
+    }
+    const origins = [];
+    for (const part of raw.split(',')) {
+        const value = part.trim();
+        if (!value) {
+            continue;
+        }
+        let origin;
+        try {
+            origin = new URL(value).origin;
+        } catch {
+            throw new Error(`EPM_MCP_ALLOWED_ORIGINS must contain valid URLs: '${value}'`);
+        }
+        if (origin === 'null') {
+            throw new Error(`EPM_MCP_ALLOWED_ORIGINS must contain valid URLs: '${value}'`);
+        }
+        if (!origins.includes(origin)) {
+            origins.push(origin);
+        }
+    }
+    return origins;
+}
+
+/**
  * 環境変数を検証・正規化し、設定オブジェクトを返します。
  *
  * @param {Record<string, string | undefined>} [env={}] 環境変数オブジェクト
- * @returns {{ apiUrl: string, authHeader: string | null, authType: 'none' | 'basic' | 'bearer', readOnly: boolean, timeoutMs: number, warnings: string[] }}
+ * @returns {{ apiUrl: string, authHeader: string | null, authType: 'none' | 'basic' | 'bearer', readOnly: boolean, timeoutMs: number, imageMaxBytes: number, httpPort: number, httpHost: string, allowedHosts: string[], allowedOrigins: string[], warnings: string[] }}
  */
 function loadConfig(env = {}) {
     const warnings = [];
@@ -92,6 +165,29 @@ function loadConfig(env = {}) {
         imageMaxBytes = parsedMaxBytes;
     }
 
+    // 6. リモート MCP（Streamable HTTP）の待ち受け設定。stdio 版は参照しない
+    // 6-1. ポート（0 はテスト用のエフェメラルポート）
+    let httpPort = 3002;
+    const rawHttpPort = env.EPM_MCP_HTTP_PORT !== undefined ? env.EPM_MCP_HTTP_PORT.trim() : '';
+    if (rawHttpPort !== '') {
+        // PowerShell 側（Get-EpmPaths）と同じく、数字のみの値だけを受け付ける
+        const parsedPort = /^\d+$/.test(rawHttpPort) ? Number(rawHttpPort) : NaN;
+        if (!Number.isInteger(parsedPort) || parsedPort > 65535) {
+            throw new Error('EPM_MCP_HTTP_PORT must be an integer between 0 and 65535');
+        }
+        httpPort = parsedPort;
+    }
+
+    // 6-2. 待ち受けアドレス
+    const rawHttpHost = env.EPM_MCP_HTTP_HOST ? env.EPM_MCP_HTTP_HOST.trim() : '';
+    const httpHost = rawHttpHost || '0.0.0.0';
+
+    // 6-3. 許可する Host ヘッダー（空なら検証しない）
+    const allowedHosts = parseAllowedHosts(env.EPM_MCP_ALLOWED_HOSTS);
+
+    // 6-4. 許可する Origin（ブラウザ由来のリクエスト用。空なら Origin 付きはすべて拒否）
+    const allowedOrigins = parseAllowedOrigins(env.EPM_MCP_ALLOWED_ORIGINS);
+
     return {
         apiUrl: normalizedUrl,
         authHeader,
@@ -99,6 +195,10 @@ function loadConfig(env = {}) {
         readOnly,
         timeoutMs,
         imageMaxBytes,
+        httpPort,
+        httpHost,
+        allowedHosts,
+        allowedOrigins,
         warnings,
     };
 }

@@ -167,6 +167,13 @@ function Get-EpmPaths {
         $apiPort = [int]$portEnv
     }
 
+    # MCP PORT (mcp/.env の EPM_MCP_HTTP_PORT)
+    $mcpPortEnv = Read-DotEnvValue -Path (Join-Path $RepoRoot 'mcp\.env') -Key 'EPM_MCP_HTTP_PORT'
+    $mcpPort = 3002
+    if ($mcpPortEnv -and ($mcpPortEnv -match '^\d+$')) {
+        $mcpPort = [int]$mcpPortEnv
+    }
+
     # Web Scheme (VITE_HTTPS) 解決
     $clientEnvPath = Join-Path $clientDir '.env'
     $viteHttps = Read-DotEnvValue -Path $clientEnvPath -Key 'VITE_HTTPS'
@@ -179,6 +186,7 @@ function Get-EpmPaths {
         UploadDir  = $uploadDir
         ApiPort    = $apiPort
         WebPort    = 5173
+        McpPort    = $mcpPort
         WebScheme  = $webScheme
         Ecosystem  = (Join-Path $RepoRoot 'ecosystem.config.js')
         BackupDir  = (Join-Path $serverDir 'backups\db')
@@ -358,6 +366,33 @@ function Wait-EpmHealthy {
     }
 
     Write-EpmLog -Level ERR -Message ("ヘルスチェックタイムアウト: API={0}, PM2={1}, WebPort={2}" -f $apiOk, $pm2Ok, $webOk)
+    return $false
+}
+
+function Test-EpmMcpHealthy {
+    param(
+        [Parameter(Mandatory = $true)]$Paths,
+        [int]$TimeoutSec = 15
+    )
+    # MCP は付加機能のため、失敗しても WARN に留めて本体アプリの更新は失敗扱いにしない
+    Write-EpmLog -Level STEP -Message ("MCP サーバーのヘルスチェック待機中 (最大 {0} 秒)..." -f $TimeoutSec)
+    $startTime = [System.DateTime]::UtcNow
+    $healthUrl = ("http://127.0.0.1:{0}/health" -f $Paths.McpPort)
+
+    while (([System.DateTime]::UtcNow - $startTime).TotalSeconds -lt $TimeoutSec) {
+        try {
+            $res = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 3 -ErrorAction Stop
+            if ($res.status -eq 'ok') {
+                Write-EpmLog -Level OK -Message ("MCP サーバー (epm-mcp) が正常稼働しています: {0}" -f $healthUrl)
+                return $true
+            }
+        } catch {
+            # 起動中は接続失敗になるので次の試行へ
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    Write-EpmLog -Level WARN -Message "MCP サーバー (epm-mcp) のヘルスチェックに失敗しました。logs\pm2\epm-mcp.err.log を確認してください。本体アプリは正常に稼働しています。"
     return $false
 }
 

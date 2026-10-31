@@ -6,7 +6,7 @@
 
 ## 1. システム構成とアーキテクチャ
 
-Windows 稼働機上では、Node.js プロセス管理ツール **PM2** を使用してバックエンド API サーバーとフロントエンド配信サーバーの 2 つを独立して常駐運用します。
+Windows 稼働機上では、Node.js プロセス管理ツール **PM2** を使用してバックエンド API サーバー、フロントエンド配信サーバー、リモート MCP サーバーの 3 つを独立して常駐運用します。
 
 ```mermaid
 flowchart TD
@@ -14,10 +14,15 @@ flowchart TD
         Browser["ブラウザ / PWA\n(カメラ QR スキャン)"]
     end
 
+    subgraph McpClientDevice["LAN 内の別 PC"]
+        AiClient["AI クライアント\n(Claude Code 等)"]
+    end
+
     subgraph WindowsHost["Windows 稼働機 (常駐環境)"]
         subgraph PM2["PM2 プロセス管理 (electronic-parts-manager)"]
             EpmWeb["epm-web\n(vite preview --port 5173)\nHTTPS 自己署名配信"]
             EpmServer["epm-server\n(node index.js :3001)\nExpress API"]
+            EpmMcp["epm-mcp\n(node mcp/http.js :3002)\nリモート MCP"]
         end
 
         subgraph Storage["ローカル永続データ"]
@@ -29,6 +34,8 @@ flowchart TD
 
     Browser -->|"HTTPS :5173 (静的配信・SW)"| EpmWeb
     EpmWeb -->|"内部プロキシ /api, /uploads"| EpmServer
+    AiClient -->|"HTTP POST :3002/mcp"| EpmMcp
+    EpmMcp -->|"HTTP :3001 (REST API)"| EpmServer
     EpmServer -->|"SQL クエリ"| SQLite
     EpmServer -->|"ファイル読み書き"| Uploads
 ```
@@ -39,10 +46,12 @@ flowchart TD
 |---|---|---|---|---|
 | `epm-server` | Express API サーバー | `node index.js` | `3001` (HTTP) | `logs/pm2/epm-server.*.log` |
 | `epm-web` | ビルド済みクライアント配信 | `node .../vite.js preview` | `5173` (HTTPS) | `logs/pm2/epm-web.*.log` |
+| `epm-mcp` | リモート MCP サーバー（Streamable HTTP） | `node mcp/http.js` | `3002` (HTTP) | `logs/pm2/epm-mcp.*.log` |
 
 - **スマホからのアクセス URL**: これまでと同様に `https://<Windows機のIPアドレス>:5173` です。
 - **カメラ・PWA 動作**: `vite preview` が HTTPS（自己署名証明書）で配信するため、スマホのカメラを使った QR コード読み取りや PWA 機能が正常に動作します。
 - **静的ビルド配信**: 開発用 dev サーバーと異なり、ビルド済み成果物 (`dist`) を配信するため、メモリ消費が抑えられ高速かつ安定して動作します。
+- **リモート MCP**: LAN 内の別 PC の AI クライアントから `http://<Windows機のIPアドレス>:3002/mcp` で接続できます。**認証はありません**ので、インターネットには公開しないでください。ポートや許可ホストなどの設定は `mcp/.env`（`mcp/.env.example` 参照）に書き、変更後は `scripts\pm2-restart.bat` で反映します。設定を無効にするときは行を消さず `KEY=` と空にしてください（PM2 は前回の環境変数を残すことがあるため）。それでも残る場合は `pm2 delete epm-mcp` を実行してから `scripts\pm2-start.bat` か update-and-restart で再登録します。詳細は [MCP.md](MCP.md) の「リモート MCP」を参照してください。
 
 ---
 
@@ -84,7 +93,7 @@ Windows PC に以下の環境がインストールされている必要があり
 
 > [!TIP]
 > **Windows ファイアウォールの確認**:
-> スマホから接続できない場合は、Windows Defender ファイアウォールで `Node.js`、または TCP ポート `5173` および `3001` の受信が許可されているか確認してください。
+> スマホから接続できない場合は、Windows Defender ファイアウォールで `Node.js`、または TCP ポート `5173` および `3001` の受信が許可されているか確認してください。リモート MCP（`epm-mcp`）を LAN 内の別 PC から使う場合は TCP ポート `3002` の受信も許可が必要です。
 
 ---
 
@@ -192,7 +201,7 @@ PC 上で稼働中の他の PM2 アプリケーション（別プロジェクト
 
 | スクリプト | 用途 | 説明 |
 |---|---|---|
-| `scripts\pm2-start.bat` | 起動 | EPM のバックエンドおよびフロントエンドを PM2 で起動します。 |
+| `scripts\pm2-start.bat` | 起動 | EPM のバックエンド・フロントエンド・リモート MCP を PM2 で起動します。 |
 | `scripts\pm2-stop.bat` | 停止 | EPM のプロセスのみを安全に停止します（他アプリは稼働継続）。 |
 | `scripts\pm2-restart.bat` | 再起動 | EPM のプロセスのみを安全に再起動します。 |
 
@@ -271,6 +280,8 @@ PC 上で稼働中の他の PM2 アプリケーション（別プロジェクト
   - `logs\pm2\epm-server.err.log`
   - `logs\pm2\epm-web.out.log`
   - `logs\pm2\epm-web.err.log`
+  - `logs\pm2\epm-mcp.out.log`
+  - `logs\pm2\epm-mcp.err.log`
 - **リアルタイムログ監視**:
   ```cmd
   pm2 logs

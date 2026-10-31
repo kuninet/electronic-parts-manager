@@ -191,6 +191,10 @@ try {
         $exitCode = 1
         return
     }
+    $mcpAppStatus = ($currentApps | Where-Object { $_.name -eq 'epm-mcp' }).status
+    if ($mcpAppStatus -ne 'online' -and -not (Test-PortFree -Port $paths.McpPort)) {
+        Write-EpmLog -Level WARN -Message ("MCP 用ポート {0} が別プロセスで使用されています。epm-mcp が起動できない可能性があります (本体アプリの更新は続行します)。" -f $paths.McpPort)
+    }
     if ($paths.ApiPort -ne 3001) {
         Write-EpmLog -Level WARN -Message ("server/.env の PORT が 3001 以外 ({0}) に設定されています。" -f $paths.ApiPort)
     }
@@ -296,6 +300,9 @@ try {
         if (-not $isHealthy) {
             throw "ヘルスチェックに失敗しました (サービスが正常起動しませんでした)"
         }
+
+        # 17-2. MCP サーバーのヘルスチェック (失敗しても WARN のみで続行)
+        $null = Test-EpmMcpHealthy -Paths $paths
 
         # 18. uploads 件数チェック (D9)
         $uploadsAfter = Get-FileCountSafe -Path $paths.UploadDir

@@ -38,7 +38,8 @@ try {
 }
 $serverApp = $currentApps | Where-Object { $_.name -eq 'epm-server' }
 $webApp = $currentApps | Where-Object { $_.name -eq 'epm-web' }
-if (($null -ne $serverApp -and $serverApp.status -eq 'online') -or ($null -ne $webApp -and $webApp.status -eq 'online')) {
+$mcpApp = $currentApps | Where-Object { $_.name -eq 'epm-mcp' }
+if (($null -ne $serverApp -and $serverApp.status -eq 'online') -or ($null -ne $webApp -and $webApp.status -eq 'online') -or ($null -ne $mcpApp -and $mcpApp.status -eq 'online')) {
     Write-EpmLog -Level STEP -Message "既存の EPM プロセスが稼働中のため、安全に停止します..."
     Stop-EpmApps -Ecosystem $paths.Ecosystem
 }
@@ -51,6 +52,11 @@ if (-not (Test-PortFree -Port $paths.WebPort)) {
 if (-not (Test-PortFree -Port $paths.ApiPort)) {
     Write-EpmLog -Level ERR -Message ("ポート {0} が別プロセスで使用中です。start_app.bat 等のウィンドウをすべて閉じてから再実行してください。" -f $paths.ApiPort)
     exit 1
+}
+
+if (-not (Test-PortFree -Port $paths.McpPort)) {
+    # MCP は付加機能のため、ポートが使用中でも本体アプリの登録は続行する
+    Write-EpmLog -Level WARN -Message ("MCP 用ポート {0} が別プロセスで使用中です。epm-mcp が起動できない可能性があります (本体アプリの登録は続行します)。" -f $paths.McpPort)
 }
 
 # 4. 依存関係のインストール（登録時は確実に最新の依存関係を整合）
@@ -78,6 +84,9 @@ if (-not $isHealthy) {
     $null = Invoke-Native -FilePath 'pm2' -ArgumentList @('logs', '--lines', '50', '--nostream') -AllowFailure
     exit 1
 }
+
+# 7-2. MCP サーバーのヘルスチェック (失敗しても WARN のみで続行)
+$null = Test-EpmMcpHealthy -Paths $paths
 
 # 8. PM2 状態保存
 Write-EpmLog -Level STEP -Message "PM2 プロセス構成を保存中 (pm2 save)..."
@@ -136,6 +145,7 @@ try {
 Write-EpmLog -Level OK -Message "=================================================="
 Write-EpmLog -Level OK -Message "PM2 へのサービス登録が正常に完了しました！"
 Write-EpmLog -Level OK -Message ("アクセス URL: {0}://{1}:{2}" -f $paths.WebScheme, $ip, $paths.WebPort)
+Write-EpmLog -Level OK -Message ("MCP URL: http://{0}:{1}/mcp" -f $ip, $paths.McpPort)
 Write-EpmLog -Level OK -Message "運用手順・ショートカット作成手順は docs/WINDOWS_SETUP.md を参照してください。"
 Write-EpmLog -Level OK -Message "=================================================="
 

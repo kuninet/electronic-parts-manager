@@ -149,6 +149,7 @@ test('Windows スクリプト静的検査 (S-1 〜 S-8)', async (t) => {
             'Stop-EpmApps',
             'Start-EpmApps',
             'Wait-EpmHealthy',
+            'Test-EpmMcpHealthy',
             'Test-PortFree',
             'Get-FileCountSafe',
             'Invoke-ClientBuild',
@@ -175,23 +176,30 @@ test('Windows スクリプト静的検査 (S-1 〜 S-8)', async (t) => {
         const config = require(configPath);
 
         assert.ok(Array.isArray(config.apps), 'apps が配列であること');
-        assert.equal(config.apps.length, 2, '2つのアプリが定義されていること');
+        assert.equal(config.apps.length, 3, '3つのアプリが定義されていること');
 
         const serverApp = config.apps.find(a => a.name === 'epm-server');
         const webApp = config.apps.find(a => a.name === 'epm-web');
+        const mcpApp = config.apps.find(a => a.name === 'epm-mcp');
 
         assert.ok(serverApp, 'epm-server が定義されていること');
         assert.ok(webApp, 'epm-web が定義されていること');
+        assert.ok(mcpApp, 'epm-mcp が定義されていること');
 
         assert.equal(serverApp.namespace, 'electronic-parts-manager');
         assert.equal(webApp.namespace, 'electronic-parts-manager');
+        assert.equal(mcpApp.namespace, 'electronic-parts-manager');
 
         assert.ok(!serverApp.script.includes('npm'), 'epm-server の script に npm が含まれないこと');
         assert.ok(!webApp.script.includes('npm'), 'epm-web の script に npm が含まれないこと');
+        assert.ok(!mcpApp.script.includes('npm'), 'epm-mcp の script に npm が含まれないこと');
 
         // ファイル存在確認
         const serverScriptPath = path.resolve(serverApp.cwd, serverApp.script);
         assert.ok(fs.existsSync(serverScriptPath), `server script が存在すること: ${serverScriptPath}`);
+
+        const mcpScriptPath = path.resolve(mcpApp.cwd, mcpApp.script);
+        assert.ok(fs.existsSync(mcpScriptPath), `mcp script が存在すること: ${mcpScriptPath}`);
 
         // client/node_modules がある場合のみ web script 確認
         const clientNm = path.join(webApp.cwd, 'node_modules');

@@ -1,7 +1,8 @@
 # 外部AI連携 MCP サーバー（参照・更新ツール）
 
 電子パーツ管理アプリ（EPM）は、Model Context Protocol (MCP) を通じた外部 AI アシスタント（Claude Desktop や Antigravity 等）との連携に対応しています。
-本 MCP サーバーは stdio トランスポートを用いたサーバーであり、在庫の検索・詳細確認・マスタデータ取得などの**参照系**に加え、新規部品の登録、在庫数量の増減・更新、保管場所の格納などの**更新系**操作を自然言語で行えます。
+本 MCP サーバーには、AI クライアントと同じマシンで起動する **stdio 版**（`mcp/index.js`）と、サーバー機に常駐させて LAN 内の別 PC から HTTP で接続する **リモート版**（Streamable HTTP、`mcp/http.js`）があります。リモート版の使い方は「[8. リモート MCP（LAN 内 HTTP 接続）](#8-リモート-mcplan-内-http-接続)」を参照してください。
+どちらも同じツールを公開し、在庫の検索・詳細確認・マスタデータ取得などの**参照系**に加え、新規部品の登録、在庫数量の増減・更新、保管場所の格納などの**更新系**操作を自然言語で行えます。
 
 ---
 
@@ -17,8 +18,17 @@ flowchart LR
     API --> DB[(SQLite / S3)]
 ```
 
+リモート版では、サーバー機（Windows 機）で MCP を常駐させ、LAN 内の別 PC の AI クライアントから HTTP で接続します。
+
+```mermaid
+flowchart LR
+    AI2["AI クライアント (LAN 内の別 PC)"] -- "HTTP POST /mcp (Streamable HTTP)" --> MCPR["epm-mcp (Windows 機 :3002)"]
+    MCPR -- "HTTP GET / POST (JSON)" --> API2["epm-server (:3001)"]
+    API2 --> DB2[(SQLite)]
+```
+
 > [!IMPORTANT]
-> **MCP プロセスは AI クライアントが動作するマシン上で起動します**。
+> **stdio 版の MCP プロセスは AI クライアントが動作するマシン上で起動します**（リモート版を使う場合は不要です）。
 > 例えば、Mac 上の Claude Desktop から Windows LAN 機の EPM サーバーに接続する場合、Mac 上に本リポジトリを clone してルートで `npm install` を実行し、Mac 上の Node で `mcp/index.js` を起動します。
 > （Windows 機側では `update-and-restart.ps1` が自動更新時に `npm ci` を実行するため、依存関係は自動で解決されます）
 
@@ -262,6 +272,8 @@ flowchart LR
 | `EPM_API_TIMEOUT_MS` | `10000` | API リクエストのタイムアウト時間（ミリ秒、正の整数）。 |
 | `EPM_IMAGE_MAX_BYTES` | `10485760` (10MB) | `get_part_image` で取得を許可する画像ファイルの最大バイト数（正の整数、上限 50MB = 52428800）。 |
 
+リモート版（`mcp/http.js`）専用の環境変数は「[8. リモート MCP](#8-リモート-mcplan-内-http-接続)」を参照してください（stdio 版は無視します）。
+
 ### トークン環境変数の対応表
 
 | サービス / コンポーネント | 環境変数名 | 説明 |
@@ -370,6 +382,44 @@ AI アプリケーションの MCP 設定ファイルに登録して利用しま
 }
 ```
 
+### 5-3. リモート MCP（HTTP）に接続する場合
+
+サーバー機で `epm-mcp` が稼働していれば、クライアント側にはプログラムのインストールも環境変数の設定も不要で、URL を指定するだけで接続できます（`<Windows機のIP>` はサーバー機の LAN IP に置き換えてください）。
+
+**Claude Code**:
+
+```bash
+claude mcp add --transport http epm http://<Windows機のIP>:3002/mcp
+```
+
+**Antigravity (`mcp_config.json`)**:
+
+```json
+{
+  "mcpServers": {
+    "electronic-parts-manager": {
+      "serverUrl": "http://<Windows機のIP>:3002/mcp"
+    }
+  }
+}
+```
+
+**Claude Desktop**（`claude_desktop_config.json`、`mcp-remote` 経由。`--allow-http` は平文 HTTP を許可するために必要です。この方法だけは、クライアント PC に Node.js（`npx`）が必要です）:
+
+```json
+{
+  "mcpServers": {
+    "electronic-parts-manager": {
+      "command": "npx",
+      "args": ["mcp-remote", "http://<Windows機のIP>:3002/mcp", "--allow-http"]
+    }
+  }
+}
+```
+
+> [!NOTE]
+> Claude Desktop の「カスタムコネクタ」（UI から URL を追加する方式）は Anthropic のクラウドから接続するため、LAN 内のサーバーには届きません。LAN 内のサーバーに接続するには、上記のとおり設定ファイルで `mcp-remote` 経由にしてください。
+
 ---
 
 ## 6. AWS 本番環境接続時の重要事項
@@ -397,4 +447,50 @@ AI アプリケーションの MCP 設定ファイルに登録して利用しま
 | **画像ではなく text/html が返りました** | 画像ファイルが削除されているか、S3 に存在しません。AWS 環境では S3 の 403/404 に対し CloudFront が index.html を 200 でフォールバック返却するため、このエラーメッセージとなります。 |
 | **画像が大きすぎます** | 画像ファイルのサイズが `EPM_IMAGE_MAX_BYTES`（既定 10MB）を超えています。環境変数を調整するか、カメラの解像度を下げて再登録してください。 |
 | **結果不明エラー (timeout / unknownOutcome)** | 書き込みリクエスト中にタイムアウトが発生しました。重複登録を防ぐため、自動再試行は行われません。`search_parts` または `get_part_detail` で反映状況を確認してから必要に応じて再実行してください。 |
+| **リモート MCP に接続できない** | サーバー機のファイアウォールで TCP 3002 が許可されていますか？ また `pm2 ls` で `epm-mcp` が `online` か、`logs\pm2\epm-mcp.err.log` にエラーが出ていないかを確認してください。サーバー機上で `curl http://127.0.0.1:3002/health` が `{"status":"ok",...}` を返せば MCP 自体は動作しています。 |
+| **リモート MCP が 403 Forbidden (Host header is not allowed)** | `EPM_MCP_ALLOWED_HOSTS` を設定している場合、接続に使った Host（IP アドレスまたはホスト名）がその一覧にありません。接続 URL のホストを一覧に追加し、`mcp/.env` を編集後に再起動してください（`localhost` / `127.0.0.1` / `[::1]` は常に許可されます）。 |
+| **リモート MCP が 403 Forbidden (Origin is not allowed)** | リクエストに `Origin` ヘッダーが付いており、`EPM_MCP_ALLOWED_ORIGINS` の一覧にありません（既定では `Origin` 付きはすべて拒否）。ブラウザ上のクライアントから接続している場合は、その `Origin`（例: `http://192.168.1.10:5173`）を `EPM_MCP_ALLOWED_ORIGINS` に追加してください。通常のデスクトップ / CLI クライアントは `Origin` を付けないため、このエラーにはなりません。 |
+| **リモート MCP が 405 Method Not Allowed** | `GET /mcp` / `DELETE /mcp` はステートレス動作のため非対応です。ブラウザで URL を開いても 405 になりますが異常ではありません。MCP クライアントは `POST /mcp` で接続します。 |
 | **Node.js バージョンについて** | MCP サーバーは SQLite 等のネイティブモジュールに依存しないため、Node.js 18 以上の任意の環境（Node 20, 22, 24等）で動作します。 |
+
+---
+
+## 8. リモート MCP（LAN 内 HTTP 接続）
+
+`mcp/http.js` は MCP を Streamable HTTP で公開するエントリポイントです。Windows サーバー機に常駐させ、LAN 内の別 PC の AI クライアントから `http://<Windows機のIP>:3002/mcp` を指定するだけで接続できます。公開ツールは stdio 版と同じです。
+
+> [!WARNING]
+> **クライアント → MCP サーバー間に認証はありません**。LAN 内の誰でも、書き込み系ツール（`create_part` など）を含めて実行できます。
+> - **インターネットに公開しないでください**。ルーターのポート開放、リバースプロキシ、トンネルサービスによる公開は禁止です。
+> - ブラウザ経由の攻撃への対策として、`Origin` ヘッダー付きのリクエスト（ブラウザ由来）は既定ですべて拒否します（MCP 仕様が求める Origin 検証）。DNS リバインディング対策の Host 検証は `EPM_MCP_ALLOWED_HOSTS` を設定すると有効になるため、設定を推奨します。
+> - 更新系を使わせたくない場合は `EPM_MCP_READONLY=1` を設定してください。
+
+### 8-1. 起動方法
+
+- **PM2 運用（Windows 常駐）**: `scripts\pm2-register.bat` または `scripts\update-and-restart.bat` の実行で、`epm-server` / `epm-web` とともに `epm-mcp` が自動的に起動します。既存環境も次回の更新で自動的に追加されます。
+- **手動起動**: リポジトリのルートで `npm run mcp:http`（`node mcp/http.js`）を実行します。
+
+動作確認用に `GET /health` があり、`{"status":"ok","name":"electronic-parts-manager-mcp",...}` を返します（EPM API への疎通は確認しません）。
+
+### 8-2. 環境変数
+
+PM2 運用では **`mcp/.env`**（未追跡。`mcp/.env.example` をコピーして作成）に書くと `ecosystem.config.js` が読み込んで `epm-mcp` に渡します。`ecosystem.config.js` を直接編集しないでください（追跡ファイルを変更すると `update-and-restart` が中断します）。`mcp/http.js` 自体は `process.env` だけを参照するため、手動起動時は通常の環境変数で指定します。
+
+| 環境変数 | 既定値 | 説明 |
+|---|---|---|
+| `EPM_MCP_HTTP_PORT` | `3002` | 待ち受けポート（0〜65535 の数字のみ）。 |
+| `EPM_MCP_HTTP_HOST` | `0.0.0.0` | 待ち受けアドレス。LAN IP に限定すると、PM2 の運用スクリプトが行う `127.0.0.1` 宛てのヘルスチェックには応答しなくなり、`Test-EpmMcpHealthy` が WARN になります（MCP 自体は動作します）。 |
+| `EPM_MCP_ALLOWED_HOSTS` | なし（検証しない） | 許可する Host ヘッダーのホスト名をカンマ区切りで指定（例: `192.168.1.10,epm-server.local`）。ポートは含めず、IPv6 は `[::1]` のように角括弧付きで書きます。設定すると、これ以外の Host（`localhost` / `127.0.0.1` / `[::1]` を除く）や、形式に合わない Host からのリクエストは 403 になります。 |
+| `EPM_MCP_ALLOWED_ORIGINS` | なし（`Origin` 付きは全拒否） | 許可する `Origin` をカンマ区切りの URL で指定（例: `http://192.168.1.10:5173`）。`Origin` ヘッダーが付くのはブラウザ由来のリクエストだけで、Claude Code や `mcp-remote` など `Origin` を付けないクライアントには影響しません。許可リストに無い `Origin`（`Origin: null` を含む）は 403 になります。ブラウザ上の MCP クライアントを使う場合だけ設定してください。 |
+
+その他の `EPM_API_URL` / `EPM_AUTH_TOKEN` / `EPM_BASIC_AUTH` / `EPM_MCP_READONLY` / `EPM_API_TIMEOUT_MS` / `EPM_IMAGE_MAX_BYTES` も同じ `mcp/.env` に書けます。
+
+- `EPM_API_URL` の既定値は `http://127.0.0.1:3001`（`server/.env` の `PORT` が 3001 以外ならそのポート）です。
+- `mcp/.env` に認証設定（`EPM_AUTH_TOKEN` / `EPM_BASIC_AUTH`）が無く、`server/.env` に `EPM_API_TOKEN` がある場合は、それを `EPM_AUTH_TOKEN` として自動的に引き継ぎます。同じ機で動くため、API トークンを有効にしていても MCP 側の追加設定は不要です。
+- `mcp/.env` を変更したら、`scripts\pm2-restart.bat` で反映します。
+- **設定を無効にするときは行を消さず `KEY=` と空にしてください**（例: `EPM_MCP_ALLOWED_HOSTS=`）。PM2 は前回起動時の環境変数をマージして残すことがあり、行を消しただけでは古い値が効き続けるためです。空にしても反映されない場合は、`pm2 delete epm-mcp` を実行してから `scripts\pm2-start.bat` または `update-and-restart` で再登録してください。
+
+### 8-3. 既知の制約
+
+- **ステートレス動作**: リクエストごとに処理が完結し、セッションは保持しません。`GET /mcp`（SSE ストリーム）と `DELETE /mcp` は 405 を返します。
+- **`image_url` が `localhost` になる**: ツールの返す `image_url` は `EPM_API_URL` から組み立てられるため、既定のままではリモートのクライアントから開けません。`mcp/.env` で `EPM_API_URL=http://<Windows機のIP>:3001` を指定すると解消します。なお、部品写真そのものは `get_part_image` ツールで取得できるため、`image_url` を開けなくても AI は画像を確認できます。
