@@ -2,7 +2,7 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const { loadConfig } = require('../config.js');
 
-describe('MCP Config Unit Tests (C-1 ~ C-15)', () => {
+describe('MCP Config Unit Tests (C-1 ~ C-24)', () => {
     test('C-1: env が空の場合、デフォルト設定を返す', () => {
         const config = loadConfig({});
         assert.equal(config.apiUrl, 'http://localhost:3001');
@@ -176,6 +176,85 @@ describe('MCP Config Unit Tests (C-1 ~ C-15)', () => {
                 assert.match(err.message, /EPM_IMAGE_MAX_BYTES/);
                 return true;
             });
+        }
+    });
+
+    test('C-16: リモート MCP 設定の既定値は port=3002, host=0.0.0.0, allowedHosts=[]', () => {
+        const config = loadConfig({});
+        assert.equal(config.httpPort, 3002);
+        assert.equal(config.httpHost, '0.0.0.0');
+        assert.deepEqual(config.allowedHosts, []);
+    });
+
+    test('C-17: EPM_MCP_HTTP_PORT は 0〜65535 の整数を受け付ける', () => {
+        assert.equal(loadConfig({ EPM_MCP_HTTP_PORT: '8080' }).httpPort, 8080);
+        assert.equal(loadConfig({ EPM_MCP_HTTP_PORT: '0' }).httpPort, 0);
+        assert.equal(loadConfig({ EPM_MCP_HTTP_PORT: '' }).httpPort, 3002);
+    });
+
+    test('C-18: EPM_MCP_HTTP_PORT の異常値 (abc, -1, 65536, 1.5) は例外を投げる', () => {
+        for (const val of ['abc', '-1', '65536', '1.5']) {
+            assert.throws(() => {
+                loadConfig({ EPM_MCP_HTTP_PORT: val });
+            }, /EPM_MCP_HTTP_PORT must be an integer between 0 and 65535/);
+        }
+    });
+
+    test('C-19: EPM_MCP_HTTP_HOST は trim され、空なら既定値になる', () => {
+        assert.equal(loadConfig({ EPM_MCP_HTTP_HOST: ' 127.0.0.1 ' }).httpHost, '127.0.0.1');
+        assert.equal(loadConfig({ EPM_MCP_HTTP_HOST: '' }).httpHost, '0.0.0.0');
+        assert.equal(loadConfig({ EPM_MCP_HTTP_HOST: '   ' }).httpHost, '0.0.0.0');
+    });
+
+    test('C-20: EPM_MCP_ALLOWED_HOSTS は trim・小文字化・重複除去され、ポート付きは例外を投げる', () => {
+        assert.deepEqual(
+            loadConfig({ EPM_MCP_ALLOWED_HOSTS: ' A.local, 192.168.1.10 ,,a.local' }).allowedHosts,
+            ['a.local', '192.168.1.10']
+        );
+        assert.deepEqual(loadConfig({ EPM_MCP_ALLOWED_HOSTS: '[::1]' }).allowedHosts, ['[::1]']);
+
+        for (const val of ['host:3002', '[::1]:3002']) {
+            assert.throws(() => {
+                loadConfig({ EPM_MCP_ALLOWED_HOSTS: val });
+            }, /EPM_MCP_ALLOWED_HOSTS must contain hostnames without ports/);
+        }
+    });
+
+    test('C-21: EPM_MCP_ALLOWED_HOSTS は new URL と同じ正規化を行い、不正な形式は例外を投げる', () => {
+        // 先頭ゼロ付きの IPv4 は WHATWG URL 仕様では 8 進数として解釈される。Host ヘッダー側も同じ正規化をかけるため、
+        // 設定値と実際の Host が同じ表記なら一致し、別の IP と誤認されることもない
+        assert.deepEqual(
+            loadConfig({ EPM_MCP_ALLOWED_HOSTS: '192.168.001.010' }).allowedHosts,
+            ['192.168.1.8']
+        );
+        assert.deepEqual(
+            loadConfig({ EPM_MCP_ALLOWED_HOSTS: '0xC0.168.1.10' }).allowedHosts,
+            ['192.168.1.10']
+        );
+        for (const val of ['evil@epm.local', 'epm.local/foo', 'a b', 'ho$t']) {
+            assert.throws(() => {
+                loadConfig({ EPM_MCP_ALLOWED_HOSTS: val });
+            }, /EPM_MCP_ALLOWED_HOSTS/);
+        }
+    });
+
+    test('C-22: EPM_MCP_ALLOWED_ORIGINS の既定値は空配列', () => {
+        assert.deepEqual(loadConfig({}).allowedOrigins, []);
+        assert.deepEqual(loadConfig({ EPM_MCP_ALLOWED_ORIGINS: '' }).allowedOrigins, []);
+    });
+
+    test('C-23: EPM_MCP_ALLOWED_ORIGINS は new URL(v).origin で正規化・重複除去される', () => {
+        const config = loadConfig({
+            EPM_MCP_ALLOWED_ORIGINS: ' http://192.168.1.10:5173/path , HTTP://EPM.local:80 ,,http://192.168.1.10:5173',
+        });
+        assert.deepEqual(config.allowedOrigins, ['http://192.168.1.10:5173', 'http://epm.local']);
+    });
+
+    test('C-24: EPM_MCP_ALLOWED_ORIGINS に URL として不正な値があれば例外を投げる', () => {
+        for (const val of ['not a url', '192.168.1.10:5173', 'null']) {
+            assert.throws(() => {
+                loadConfig({ EPM_MCP_ALLOWED_ORIGINS: val });
+            }, /EPM_MCP_ALLOWED_ORIGINS/);
         }
     });
 });
