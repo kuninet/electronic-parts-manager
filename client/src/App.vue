@@ -6,6 +6,7 @@ import DataManagement from './components/DataManagement.vue';
 import MasterDataManagement from './components/MasterDataManagement.vue';
 import LocationGridView from './components/LocationGridView.vue';
 import UsedPartsView from './components/UsedPartsView.vue';
+import PurchasesView from './components/PurchasesView.vue';
 import QrScanner from './components/QrScanner.vue';
 import QrGenerator from './components/QrGenerator.vue';
 import AiSuggestionReviewModal from './components/AiSuggestionReviewModal.vue';
@@ -52,7 +53,7 @@ const topBarRef = ref(null);
 const cameraInput = ref(null);
 const uploadingCameraFile = ref(false);
 
-const currentView = ref('parts'); // 'parts' | 'used-parts' | 'locations'
+const currentView = ref('parts'); // 'parts' | 'used-parts' | 'purchases' | 'locations'
 
 // ハッシュルーティング（#/qr でQR画面表示）
 const currentPage = ref(window.location.hash === '#/qr' ? 'qr' : 'main');
@@ -287,6 +288,11 @@ const onCameraFileChange = async (event) => {
           ref="partsListRef"
           @edit="openEditModal"
         />
+        <PurchasesView
+          v-else-if="currentView === 'purchases'"
+          ref="partsListRef"
+          @edit="openEditModal"
+        />
         <LocationGridView
           v-else
           ref="locationGridRef"
@@ -306,7 +312,9 @@ const onCameraFileChange = async (event) => {
 
     <MobileMoreSheet
       v-if="showMoreSheet"
+      :current-view="currentView"
       @close="showMoreSheet = false"
+      @navigate="onTabNavigate"
       @open-ai-review="showAiReview = true"
       @open-qr-print="showQrGenerator = true"
       @open-master="openMasterModal()"

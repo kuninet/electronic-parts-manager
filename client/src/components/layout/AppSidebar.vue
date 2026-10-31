@@ -49,6 +49,17 @@
       <button
         type="button"
         class="nav-item"
+        :class="{ active: currentView === 'purchases' }"
+        :aria-current="currentView === 'purchases' ? 'page' : undefined"
+        @click="selectView('purchases')"
+      >
+        <AppIcon name="list" size="15" />
+        <span class="nav-label">購入履歴</span>
+      </button>
+
+      <button
+        type="button"
+        class="nav-item"
         :class="{ active: currentView === 'locations' }"
         :aria-current="currentView === 'locations' ? 'page' : undefined"
         @click="selectView('locations')"

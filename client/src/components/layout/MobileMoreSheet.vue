@@ -23,6 +23,17 @@
         <button
           type="button"
           class="menu-item"
+          :class="{ active: currentView === 'purchases' }"
+          :aria-current="currentView === 'purchases' ? 'page' : undefined"
+          @click="$emit('navigate', 'purchases'); $emit('close')"
+        >
+          <AppIcon name="list" size="18" />
+          <span class="menu-label">購入履歴</span>
+        </button>
+
+        <button
+          type="button"
+          class="menu-item"
           @click="$emit('open-ai-review'); $emit('close')"
         >
           <AppIcon name="spark" size="18" />
@@ -71,8 +82,16 @@ import { usePartsStats } from '../../composables/usePartsStats';
 import AppIcon from '../ui/AppIcon.vue';
 import ThemeSwitch from './ThemeSwitch.vue';
 
+defineProps({
+  currentView: {
+    type: String,
+    default: 'parts'
+  }
+});
+
 const emit = defineEmits([
   'close',
+  'navigate',
   'open-ai-review',
   'open-qr-print',
   'open-master',
@@ -154,7 +173,8 @@ onUnmounted(() => {
 }
 
 .menu-item:hover,
-.menu-item:focus-visible {
+.menu-item:focus-visible,
+.menu-item.active {
   background: var(--surface-hover);
 }
 
