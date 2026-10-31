@@ -323,11 +323,12 @@ flowchart LR
   - `part_id` (integer): ひも付け先の部品ID
   - `batch_id` (integer): 取り込みバッチのID（`import_purchase_items` が返す `batch_id`）。そのバッチで新規登録した明細に絞る（上書きされただけの明細は含まない）
   - `linked` (boolean): `true` でひも付け済みのみ、`false` で**部品に未ひも付けの明細のみ**
+  - `link_status` (string): `linked`（ひも付け済み）、`unlinked`（`part_id` なし。候補の有無は問わない）、`suggested`（`part_id` がなく、人の承認待ちの候補がある）
   - `from` / `to` (string): 注文日の範囲（`YYYY-MM-DD`、両端を含む）
   - `currency` (string): 通貨コード（例: `USD`）
   - `limit` (integer): 最大件数（1〜100、デフォルト 50）
   - `offset` (integer): 先頭から読み飛ばす件数（デフォルト 0）
-- **使い方の例**: 未ひも付けの明細を探すには `linked: false` を使います。部品との照合では、`search_parts` で部品を探し、その `id` を `update_purchase_item` の `part_id` に指定します。
+- **使い方の例**: 未ひも付けの明細を探すには `link_status: 'unlinked'`（または `linked: false`）を使います。結果の各明細には、候補があれば `suggested_part`（`{ id, name }`）と `suggestion_note`（AI の判断理由）が入ります。部品との照合では、`search_parts` で部品を探し、その `id` を `update_purchase_item` の `part_id` に指定します。
 - **返却例**:
   ```json
   {
@@ -352,7 +353,7 @@ flowchart LR
 購入明細（注文の 1 明細が 1 レコード）を一括で登録します。1 回に 1〜500 件までで、500 件を超えるときは分けて、順番に（並列にせず）呼んでください。大量のファイルは REST の `POST /api/purchases/import` に直接送れます（「[購入履歴の一括取り込み](#購入履歴の一括取り込み)」を参照）。
 
 - **入力パラメータ**:
-  - `records` (array, 必須): 明細のオブジェクトの配列（1〜500件）。各明細の項目は `shop`（必須）、`name`（必須）、`order_id`、`line_no`、`purchased_at`（`YYYY-MM-DD`）、`code`、`unit_price`、`currency`（既定 `JPY`）、`quantity`、`part_id`、`source_msg_id`、`note`。形式や範囲の細かい検証はサーバー側で行い、明細ごとのエラーとして返します
+  - `records` (array, 必須): 明細のオブジェクトの配列（1〜500件）。各明細の項目は `shop`（必須）、`name`（必須）、`order_id`、`line_no`、`purchased_at`（`YYYY-MM-DD`）、`code`、`unit_price`、`currency`（既定 `JPY`）、`quantity`、`part_id`、`suggested_part_id`、`suggestion_note`、`source_msg_id`、`note`。形式や範囲の細かい検証はサーバー側で行い、明細ごとのエラーとして返します
   - `dry_run` (boolean, デフォルト `false`): `true` にすると何も登録せず、件数と内容（`preview`）だけを返します。**大量に取り込む前は `dry_run: true` で件数と内容を確認してください**
   - `source` (string, 任意, 最大100文字) / `note` (string, 任意, 最大1000文字): 取り込みバッチに残す記録
   - `on_duplicate` (`"skip"` | `"update"`, デフォルト `"skip"`): 重複する明細の扱い。`skip` は既存を変更せず、`update` は送った項目で上書きします（`part_id` が `null` や未指定なら既存のひも付けは残ります）
@@ -363,6 +364,7 @@ flowchart LR
   - `order_id` も `source_msg_id` もない明細はエラーになります
   - 注意: `line_no` の有無でキーが変わるので、同じ店では `line_no` を付けるかどうかをそろえてください。同じリクエスト内で同じキーになった明細には `warning` が付きます
 - **存在しない `part_id`**: 新規登録ではひも付けずに登録し、`on_duplicate: "update"` では無視して既存のひも付けを維持します。どちらも `results` に `warning` を付けます。
+- **`part_id` と `suggested_part_id` が両方ある明細**: ひも付けを優先して `suggested_part_id` と `suggestion_note` を無視し、`results` に `warning` を付けます。
 - **返却例**（`results` はエラーまたは `warning` のある明細だけ。作成・更新された明細の ID は `ids` にまとまります）:
   ```json
   {
@@ -390,7 +392,10 @@ flowchart LR
   - `id` (integer, 必須): 購入明細ID（`search_purchase_items` で調べます）
   - `shop` (string, 1〜100文字) / `name` (string, 1〜500文字): 消去はできません
   - `order_id` / `line_no` / `purchased_at` / `code` / `unit_price` / `currency` / `quantity` / `source_msg_id` / `note`: 値の規則は `import_purchase_items` と同じ。`null` を指定すると消去できます（`currency` は `JPY` に戻ります）
-  - `part_id` (integer / null): 部品とのひも付け。部品の `id` を指定すると付き、**`null` を指定すると外れます**。存在しない部品はエラーです
+  - `part_id` (integer / null): 部品とのひも付け。部品の `id` を指定すると付き、**`null` を指定すると外れます**。存在しない部品はエラーです。新しく付けたとき、候補（`suggested_part_id` / `suggestion_note`）は消え、部品側の購入先・購入日・単価が自動で更新されます（下の「部品側の自動更新」を参照）
+  - `suggested_part_id` (integer / null): ひも付け候補の部品ID。迷うものに付けて、人が画面で承認するのを待ちます。`null` で候補を取り消します。存在しない部品はエラーです。**すでに `part_id` がある明細には設定できません**（400「ひも付け済みの明細には候補を設定できません」。解除したときに古い候補がよみがえるため。`part_id: null` と同時に送るか、先に解除してください）
+  - `suggestion_note` (string / null, 最大1000文字): 候補にした判断理由。画面に表示されます
+- **部品側の自動更新**: `part_id` を新しく設定すると、部品の `shop` / `purchased_at` / `unit_price`（最新の購入の要約）を次の規則で更新します。明細の注文日が部品の購入日と同じかそれより新しい（または部品側が空）ときに、3項目を上書きします。単価は通貨が `JPY` で単価があるときだけです。明細に注文日がないときは、部品側の空欄だけを埋めます。ゴミ箱の部品は更新しません。更新した項目は返却の `part_updated`（`{ part_id, fields }`。更新なしは `null`）に入ります。ひも付けを外しても部品側は元に戻りません。`import_purchase_items` でひも付けた明細では部品側を更新しません。
 - **注意**: `shop`・`order_id`・`line_no`・`name`・`source_msg_id` を変えた結果、ほかの明細と同じ明細になる場合は競合エラーになります。
 - **返却例**:
   ```json
@@ -399,8 +404,10 @@ flowchart LR
     "item": {
       "id": 12, "shop": "秋月電子通商", "order_id": "A-1", "line_no": 2, "purchased_at": "2026-03-01",
       "code": "I-001", "name": "LED", "unit_price": 10, "currency": "JPY", "quantity": 5,
-      "part": { "id": 3, "name": "赤色LED 5mm" }, "source_msg_id": null, "note": null, "import_batch_id": 3
-    }
+      "part": { "id": 3, "name": "赤色LED 5mm" }, "suggested_part": null, "suggestion_note": null,
+      "source_msg_id": null, "note": null, "import_batch_id": 3
+    },
+    "part_updated": { "part_id": 3, "fields": { "shop": "秋月電子通商", "purchased_at": "2026-03-01", "unit_price": 10 } }
   }
   ```
 
@@ -440,6 +447,15 @@ flowchart LR
   - `modified_after_import`: 取り込みの完了後に更新されていた明細数
 - **エラー**: 取り消し済みのバッチ、あとの（取り消していない）バッチが同じ明細を変更しているバッチは取り消せません（あとのバッチを先に取り消してください）。
 - 取り消したバッチの記録は残ります。
+
+### AI エージェントによる購入明細のひも付け
+
+取り込んだ購入明細を部品にひも付ける作業は、AI エージェントが MCP で行い、迷うものだけ人が画面（サイドバーの「購入履歴」）で承認します。承認・却下の MCP ツールはありません（人が行う操作のため）。
+
+1. `search_purchase_items` に `link_status: 'unlinked'` を付けて、未ひも付けの明細を取ります（`limit` と `offset` で順に取得します）。`suggested_part` が入っている明細は、人の承認待ちなので飛ばす（候補を上書きしない）。
+2. `search_parts` で、明細の `code`（型番・通販コード）や `name` に対応する部品を探します。
+3. 確実なもの（型番やコードが一致するなど）は、`update_purchase_item` で `part_id` を設定します。部品側の購入先・購入日・単価も自動で更新されます（返却の `part_updated` で確認できます）。迷うものは `part_id` を付けず、`suggested_part_id` と `suggestion_note`（判断理由）を設定して候補として登録します。ひも付け済みの明細に `suggested_part_id` を設定するとエラー（400「ひも付け済みの明細には候補を設定できません」）になります。
+4. 人が画面で候補を承認（`part_id` が設定され、部品側も更新される）または却下します。承認待ちの明細は `link_status: 'suggested'` で確認できます。
 
 ### 購入履歴の一括取り込み
 

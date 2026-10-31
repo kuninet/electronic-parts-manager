@@ -229,6 +229,11 @@ async function initDb() {
   // 先に作られた purchase_records には import_batch_id がないため追加する
   try { await db.run('ALTER TABLE purchase_records ADD COLUMN import_batch_id INTEGER'); } catch (e) { }
 
+  // ひも付け候補 (#101): AI が迷ったものを「候補」として登録し、人が画面で承認する
+  try { await db.run('ALTER TABLE purchase_records ADD COLUMN suggested_part_id INTEGER'); } catch (e) { }
+  try { await db.run('ALTER TABLE purchase_records ADD COLUMN suggestion_note TEXT'); } catch (e) { }
+  await db.run('CREATE INDEX IF NOT EXISTS idx_purchase_records_suggested ON purchase_records(suggested_part_id)');
+
   // Seed some initial data if empty
   const categories = await db.all('SELECT * FROM categories');
   if (categories.length === 0) {

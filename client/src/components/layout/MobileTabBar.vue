@@ -42,6 +42,8 @@
     <button
       type="button"
       class="tab-item"
+      :class="{ active: currentView === 'purchases' }"
+      :aria-current="currentView === 'purchases' ? 'page' : undefined"
       @click="$emit('more')"
     >
       <AppIcon name="more" size="20" />

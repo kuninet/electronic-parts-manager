@@ -135,6 +135,8 @@ const viewTitle = computed(() => {
       return '全パーツ';
     case 'used-parts':
       return '使用済み';
+    case 'purchases':
+      return '購入履歴';
     case 'locations':
       return '保管庫ビュー';
     default:

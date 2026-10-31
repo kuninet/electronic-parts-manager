@@ -5,12 +5,14 @@ const CODE_MAX_LENGTH = 100;
 const NAME_MAX_LENGTH = 500;
 const SOURCE_MSG_ID_MAX_LENGTH = 200;
 const NOTE_MAX_LENGTH = 2000;
+const SUGGESTION_NOTE_MAX_LENGTH = 1000;
 const DEFAULT_CURRENCY = 'JPY';
 
 // 正規化の対象項目（この順で検証し、最初のエラーを返す）
 const FIELDS = [
   'shop', 'order_id', 'line_no', 'purchased_at', 'code', 'name',
-  'unit_price', 'currency', 'quantity', 'part_id', 'source_msg_id', 'note'
+  'unit_price', 'currency', 'quantity', 'part_id', 'source_msg_id', 'note',
+  'suggested_part_id', 'suggestion_note'
 ];
 
 // 重複キーの材料になる項目（変更されたらキーを作り直す）
@@ -148,6 +150,12 @@ function normalizePurchaseRecord(input, { partial = false } = {}) {
   const note = normalizeOptionalText('note', input.note, NOTE_MAX_LENGTH);
   if (note.error) return { error: note.error };
 
+  const suggestedPartId = normalizeInteger('suggested_part_id', input.suggested_part_id, { min: 1 });
+  if (suggestedPartId.error) return { error: suggestedPartId.error };
+
+  const suggestionNote = normalizeOptionalText('suggestion_note', input.suggestion_note, SUGGESTION_NOTE_MAX_LENGTH);
+  if (suggestionNote.error) return { error: suggestionNote.error };
+
   const candidates = {
     order_id: order.value,
     line_no: lineNo.value,
@@ -159,7 +167,9 @@ function normalizePurchaseRecord(input, { partial = false } = {}) {
     quantity: quantity.value,
     part_id: partId.value,
     source_msg_id: sourceMsgId.value,
-    note: note.value
+    note: note.value,
+    suggested_part_id: suggestedPartId.value,
+    suggestion_note: suggestionNote.value
   };
 
   for (const field of FIELDS) {

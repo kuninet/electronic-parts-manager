@@ -82,6 +82,7 @@ describe('MCP 購入履歴ツールテスト (PT-1 ~ PT-38)', () => {
             part_id: undefined,
             batch_id: undefined,
             linked: false,
+            link_status: undefined,
             from: '2026-01-01',
             to: undefined,
             currency: undefined,
@@ -99,6 +100,31 @@ describe('MCP 購入履歴ツールテスト (PT-1 ~ PT-38)', () => {
         assert.equal('dedupe_key' in data.items[0], false);
         assert.equal('created_at' in data.items[0], false);
         assert.equal('updated_at' in data.items[0], false);
+    });
+
+    test('PT-1b: search_purchase_items は link_status を渡し、不正な値は isError で API を呼ばない', async () => {
+        const { client, calls } = await setup();
+        for (const ls of ['linked', 'unlinked', 'suggested']) {
+            const res = await call(client, 'search_purchase_items', { link_status: ls });
+            assert.ok(!res.isError);
+            assert.equal(calls[calls.length - 1][1].link_status, ls);
+        }
+        const n = calls.length;
+        const bad = await call(client, 'search_purchase_items', { link_status: 'all' });
+        assert.equal(bad.isError, true);
+        assert.equal(calls.length, n);
+    });
+
+    test('PT-1c: search_purchase_items は候補を suggested_part / suggestion_note で返し、説明に link_status が書かれている', async () => {
+        const { client } = await setup({
+            listPurchases: async () => ({ total: 1, items: [item({ suggested_part_id: 6, suggested_part_name: '抵抗', suggestion_note: '近い' })] }),
+        });
+        const data = body(await call(client, 'search_purchase_items', { link_status: 'suggested' }));
+        assert.deepEqual(data.items[0].suggested_part, { id: 6, name: '抵抗' });
+        assert.equal(data.items[0].suggestion_note, '近い');
+        const tool = (await client.listTools()).tools.find(t => t.name === 'search_purchase_items');
+        assert.match(tool.description, /link_status/);
+        assert.match(tool.description, /suggested/);
     });
 
     test('PT-2: search_purchase_items は件数が多いとき truncated と hint（次の offset）を返す', async () => {
@@ -325,6 +351,37 @@ describe('MCP 購入履歴ツールテスト (PT-1 ~ PT-38)', () => {
         assert.equal('dedupe_key' in data.item, false);
         assert.equal('created_at' in data.item, false);
         assert.equal('updated_at' in data.item, false);
+    });
+
+    test('PT-20b: update_purchase_item は候補を渡し、part_updated を出力に含める（item には混ぜない）', async () => {
+        const calls = [];
+        const { client } = await setup({
+            patchPurchase: async (id, b) => calls.push(['patchPurchase', id, b]) && item({ id, ...b, part_name: '高輝度LED', part_updated: b.part_id ? { part_id: b.part_id, fields: { shop: '秋月電子通商' } } : null }),
+        });
+        let data = body(await call(client, 'update_purchase_item', { id: 4, suggested_part_id: 7, suggestion_note: '型番が一致' }));
+        assert.deepEqual(calls.find(c => c[0] === 'patchPurchase')[2], { suggested_part_id: 7, suggestion_note: '型番が一致' });
+        assert.deepEqual(data.item.suggested_part, { id: 7, name: null });
+        assert.equal(data.part_updated, null);
+
+        data = body(await call(client, 'update_purchase_item', { id: 4, part_id: 7 }));
+        assert.deepEqual(data.part_updated, { part_id: 7, fields: { shop: '秋月電子通商' } });
+        assert.equal('part_updated' in data.item, false);
+
+        const cleared = await call(client, 'update_purchase_item', { id: 4, suggested_part_id: null, suggestion_note: null });
+        assert.ok(!cleared.isError);
+        assert.deepEqual(calls.filter(c => c[0] === 'patchPurchase').pop()[2], { suggested_part_id: null, suggestion_note: null });
+    });
+
+    test('PT-20c: update_purchase_item の候補のスキーマ違反（0・1001文字）は isError、説明にひも付けの運用が書かれている', async () => {
+        const { client, calls } = await setup();
+        for (const args of [{ id: 4, suggested_part_id: 0 }, { id: 4, suggestion_note: 'a'.repeat(1001) }]) {
+            assert.equal((await call(client, 'update_purchase_item', args)).isError, true);
+        }
+        assert.equal(calls.filter(c => c[0] === 'patchPurchase').length, 0);
+        const tool = (await client.listTools()).tools.find(t => t.name === 'update_purchase_item');
+        for (const w of ['suggested_part_id', 'suggestion_note', 'part_updated', '承認']) assert.match(tool.description, new RegExp(w));
+        const imp = (await client.listTools()).tools.find(t => t.name === 'import_purchase_items');
+        assert.match(imp.description, /suggested_part_id/);
     });
 
     test('PT-21: update_purchase_item で part_id: null を送るとひも付けを外す', async () => {

@@ -3,6 +3,7 @@ const router = express.Router();
 const { getDb } = require('../database');
 const { normalizePurchasedAt } = require('../utils/purchaseInfo');
 const { normalizePurchaseRecord, buildDedupeKey, FIELDS, KEY_FIELDS } = require('../utils/purchaseRecord');
+const { applyPurchaseToPart } = require('../utils/applyPurchaseToPart');
 
 // 1 回の取り込みで受け付ける明細数の上限
 const IMPORT_MAX_RECORDS = 5000;
@@ -12,11 +13,14 @@ const BATCH_DEFAULT_LIMIT = 50;
 const BATCH_MAX_LIMIT = 200;
 const SOURCE_MAX_LENGTH = 100;
 const BATCH_NOTE_MAX_LENGTH = 1000;
+const APPROVE_MAX_IDS = 500;
+const LINK_STATUSES = ['linked', 'unlinked', 'suggested'];
 
 const SELECT_WITH_PART_NAME = `
-    SELECT pr.*, p.name AS part_name
+    SELECT pr.*, p.name AS part_name, sp.name AS suggested_part_name
     FROM purchase_records pr
     LEFT JOIN parts p ON pr.part_id = p.id
+    LEFT JOIN parts sp ON pr.suggested_part_id = sp.id AND sp.deleted_at IS NULL
 `;
 
 // パスパラメータの ID を検証する。不正なら null
@@ -35,7 +39,7 @@ async function getRecordWithPartName(db, id) {
 router.get('/', async (req, res) => {
     try {
         const db = getDb();
-        const { search, shop, order_id, part_id, linked, from, to, currency, batch_id } = req.query;
+        const { search, shop, order_id, part_id, linked, link_status, from, to, currency, batch_id } = req.query;
 
         const where = [];
         const params = [];
@@ -69,6 +73,14 @@ router.get('/', async (req, res) => {
             if (linked === 'true') where.push('pr.part_id IS NOT NULL');
             else if (linked === 'false') where.push('pr.part_id IS NULL');
             else return res.status(400).json({ error: 'linked は true または false で指定してください' });
+        }
+        if (link_status !== undefined && link_status !== '') {
+            if (!LINK_STATUSES.includes(link_status)) {
+                return res.status(400).json({ error: 'link_status は linked / unlinked / suggested のいずれかで指定してください' });
+            }
+            if (link_status === 'linked') where.push('pr.part_id IS NOT NULL');
+            else if (link_status === 'unlinked') where.push('pr.part_id IS NULL');
+            else where.push('pr.part_id IS NULL AND pr.suggested_part_id IS NOT NULL');
         }
         if (from !== undefined && from !== '') {
             const r = normalizePurchasedAt(from);
@@ -259,6 +271,22 @@ async function planImport(db, records, onDuplicate) {
             missingPartId = value.part_id;
             value.part_id = null;
         }
+        // 候補の部品も part_id と同じ扱い（なければ NULL にして warning）
+        let missingSuggestedId = null;
+        if (value.suggested_part_id !== null && !(await hasPart(value.suggested_part_id))) {
+            missingSuggestedId = value.suggested_part_id;
+            value.suggested_part_id = null;
+            value.suggestion_note = null; // 候補がないのに理由だけが残らないようにする
+        }
+
+        // part_id と候補が同時に指定された明細は、ひも付けを優先して候補を無視する
+        let ignoredSuggestion = false;
+        if (value.part_id !== null && value.suggested_part_id !== null) {
+            value.suggested_part_id = null;
+            value.suggestion_note = null;
+            ignoredSuggestion = true;
+            warnings.push('part_id と suggested_part_id が両方あるため、suggested_part_id と suggestion_note を無視しました');
+        }
 
         const stateKey = `${value.shop}\u0000${key.value}`;
         let entry = state.get(stateKey);
@@ -279,6 +307,9 @@ async function planImport(db, records, onDuplicate) {
             if (missingPartId !== null) {
                 warnings.push(`part_id ${missingPartId} の部品が見つからないため、ひも付けずに登録しました`);
             }
+            if (missingSuggestedId !== null) {
+                warnings.push(`suggested_part_id ${missingSuggestedId} の部品が見つからないため、候補を付けずに登録しました`);
+            }
             const op = { type: 'create', values: { ...value }, dedupe_key: key.value, id: null };
             ops.push(op);
             entry.op = op;
@@ -294,14 +325,33 @@ async function planImport(db, records, onDuplicate) {
             if (missingPartId !== null) {
                 warnings.push(`part_id ${missingPartId} の部品が見つからないため無視しました（既存のひも付けは維持）`);
             }
+            if (missingSuggestedId !== null) {
+                warnings.push(`suggested_part_id ${missingSuggestedId} の部品が見つからないため無視しました（既存の候補は維持）`);
+            }
             // 送られてきた項目だけを上書きする。
             // part_id は null や未指定なら既存のひも付けを、currency は null や空なら既存の値を残す
             const changes = {};
             for (const f of FIELDS) {
                 if (raw[f] === undefined) continue;
                 if (f === 'part_id' && value.part_id === null) continue;
+                // 存在しない候補は無視する（明示的な null での消去は有効）
+                if (f === 'suggested_part_id' && value.suggested_part_id === null && missingSuggestedId !== null) continue;
+                if (f === 'suggestion_note' && missingSuggestedId !== null) continue;
                 if (f === 'currency' && (raw.currency === null || (typeof raw.currency === 'string' && raw.currency.trim() === ''))) continue;
                 changes[f] = value[f];
+            }
+            // ひも付け済みの明細には候補を付けない（解除したときに古い候補がよみがえるため）
+            const mergedPartId = changes.part_id !== undefined ? changes.part_id : entry.row.part_id;
+            if (mergedPartId !== null && mergedPartId !== undefined) {
+                if (!ignoredSuggestion && changes.suggested_part_id !== undefined && changes.suggested_part_id !== null) {
+                    warnings.push('すでに部品にひも付いている明細には候補を設定できないため、suggested_part_id と suggestion_note を無視しました');
+                    delete changes.suggested_part_id;
+                    delete changes.suggestion_note;
+                } else if (changes.part_id !== undefined) {
+                    // part_id を設定する更新では、PATCH と同じく既存の候補を消す
+                    changes.suggested_part_id = null;
+                    changes.suggestion_note = null;
+                }
             }
             const { dedupe_key: _ignored, ...before } = entry.row;
             if (entry.id === null) delete before.id;
@@ -600,6 +650,122 @@ router.post('/batches/:id/undo', async (req, res) => {
     }
 });
 
+// 候補を 1 件承認する。{ code, error?, record?, part_updated? } を返す（code は HTTP ステータス）。
+// 明細の更新と部品の更新は 1 つのトランザクションにまとめる。runExclusive の中から呼ぶこと
+async function approveSuggestion(db, id) {
+    const current = await db.get('SELECT * FROM purchase_records WHERE id = ?', [id]);
+    if (!current) return { code: 404, error: '購入明細が見つかりません' };
+    if (current.part_id !== null) return { code: 409, error: 'すでに部品にひも付いています' };
+    if (current.suggested_part_id === null) return { code: 409, error: '承認できる候補がありません' };
+    const part = await db.get('SELECT deleted_at FROM parts WHERE id = ?', [current.suggested_part_id]);
+    if (!part) return { code: 409, error: `候補の部品（id: ${current.suggested_part_id}）が見つかりません。候補を却下してください` };
+    if (part.deleted_at !== null) return { code: 409, error: `候補の部品（id: ${current.suggested_part_id}）はゴミ箱にあります` };
+
+    const partId = current.suggested_part_id;
+    let partUpdated = null;
+    let inTransaction = false;
+    try {
+        await db.exec('BEGIN');
+        inTransaction = true;
+        const update = await db.run(
+            `UPDATE purchase_records
+             SET part_id = ?, suggested_part_id = NULL, suggestion_note = NULL, updated_at = ${NOW_SQL}
+             WHERE id = ? AND part_id IS NULL AND suggested_part_id = ?`,
+            [partId, id, partId]
+        );
+        if (update.changes === 0) {
+            await db.exec('ROLLBACK');
+            inTransaction = false;
+            return { code: 409, error: '候補が変更されたため承認できませんでした。もう一度お試しください' };
+        }
+        partUpdated = await applyPurchaseToPart(db, { ...current, part_id: partId }, partId);
+        await db.exec('COMMIT');
+        inTransaction = false;
+    } catch (err) {
+        if (inTransaction) {
+            await db.exec('ROLLBACK').catch(e => console.error('Rollback failed:', e));
+        }
+        throw err;
+    }
+    return { code: 200, record: await getRecordWithPartName(db, id), part_updated: partUpdated };
+}
+
+// POST /api/purchases/approve-suggestions - 候補の一括承認。/:id より前に定義すること
+router.post('/approve-suggestions', async (req, res) => {
+    try {
+        const ids = req.body && typeof req.body === 'object' ? req.body.ids : undefined;
+        if (!Array.isArray(ids) || ids.length === 0 || ids.length > APPROVE_MAX_IDS) {
+            return res.status(400).json({ error: `ids は1〜${APPROVE_MAX_IDS}件の ID の配列で指定してください` });
+        }
+        if (!ids.every(v => (typeof v === 'number' || typeof v === 'string') && parseId(v) !== null)) {
+            return res.status(400).json({ error: 'ids は正の整数の配列で指定してください' });
+        }
+
+        const output = await runExclusive(async () => {
+            const db = getDb();
+            const results = [];
+            let approved = 0;
+            let failed = 0;
+            for (const raw of ids) {
+                const id = parseId(raw);
+                try {
+                    const r = await approveSuggestion(db, id);
+                    if (r.code === 200) {
+                        approved++;
+                        results.push({ id, status: 'approved', part_updated: r.part_updated });
+                    } else {
+                        failed++;
+                        results.push({ id, status: 'error', error: r.error });
+                    }
+                } catch (err) {
+                    failed++;
+                    results.push({ id, status: 'error', error: err.message });
+                }
+            }
+            return { approved, failed, results };
+        });
+        res.json(output);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/purchases/:id/approve-suggestion - 候補を承認してひも付ける
+router.post('/:id/approve-suggestion', async (req, res) => {
+    try {
+        const id = parseId(req.params.id);
+        if (!id) return res.status(400).json({ error: 'Invalid ID' });
+        const r = await runExclusive(() => approveSuggestion(getDb(), id));
+        if (r.code !== 200) return res.status(r.code).json({ error: r.error });
+        res.json({ record: r.record, part_updated: r.part_updated });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/purchases/:id/reject-suggestion - 候補を却下する
+router.post('/:id/reject-suggestion', async (req, res) => {
+    try {
+        const id = parseId(req.params.id);
+        if (!id) return res.status(400).json({ error: 'Invalid ID' });
+        // import / undo のトランザクションに巻き込まれないよう、直列に処理する
+        const out = await runExclusive(async () => {
+            const db = getDb();
+            const current = await db.get('SELECT suggested_part_id FROM purchase_records WHERE id = ?', [id]);
+            if (!current) return { code: 404, body: { error: '購入明細が見つかりません' } };
+            if (current.suggested_part_id === null) return { code: 409, body: { error: '却下できる候補がありません' } };
+            await db.run(
+                `UPDATE purchase_records SET suggested_part_id = NULL, suggestion_note = NULL, updated_at = ${NOW_SQL} WHERE id = ?`,
+                [id]
+            );
+            return { code: 200, body: { record: await getRecordWithPartName(db, id) } };
+        });
+        res.status(out.code).json(out.body);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // GET /api/purchases/:id
 router.get('/:id', async (req, res) => {
     try {
@@ -617,54 +783,12 @@ router.get('/:id', async (req, res) => {
 // PATCH /api/purchases/:id - 部分更新
 router.patch('/:id', async (req, res) => {
     try {
-        const db = getDb();
         const id = parseId(req.params.id);
         if (!id) return res.status(400).json({ error: 'Invalid ID' });
 
-        const current = await db.get('SELECT * FROM purchase_records WHERE id = ?', [id]);
-        if (!current) return res.status(404).json({ error: '購入明細が見つかりません' });
-
-        const norm = normalizePurchaseRecord(req.body, { partial: true });
-        if (norm.error) return res.status(400).json({ error: norm.error });
-        const updates = norm.value;
-
-        if (Object.keys(updates).length === 0) {
-            return res.status(400).json({ error: '更新する項目を1つ以上指定してください' });
-        }
-
-        if (updates.part_id !== undefined && updates.part_id !== null) {
-            const part = await db.get('SELECT 1 AS ok FROM parts WHERE id = ?', [updates.part_id]);
-            if (!part) {
-                return res.status(400).json({ error: `part_id ${updates.part_id} の部品が見つかりません` });
-            }
-        }
-
-        const sets = Object.keys(updates).map(f => `${f} = ?`);
-        const params = Object.values(updates);
-
-        // 重複キーの材料が変わったら、既存の値とマージしてキーを作り直す
-        if (KEY_FIELDS.some(f => updates[f] !== undefined)) {
-            const merged = { ...current, ...updates };
-            const key = buildDedupeKey(merged);
-            if (key.error) return res.status(400).json({ error: key.error });
-            if (key.value !== current.dedupe_key || merged.shop !== current.shop) {
-                const dup = await db.get(
-                    'SELECT id FROM purchase_records WHERE shop = ? AND dedupe_key = ? AND id != ?',
-                    [merged.shop, key.value, id]
-                );
-                if (dup) {
-                    return res.status(409).json({ error: `同じ明細がすでにあります（id: ${dup.id}）` });
-                }
-            }
-            sets.push('dedupe_key = ?');
-            params.push(key.value);
-        }
-
-        sets.push(`updated_at = ${NOW_SQL}`);
-        params.push(id);
-        await db.run(`UPDATE purchase_records SET ${sets.join(', ')} WHERE id = ?`, params);
-
-        res.json(await getRecordWithPartName(db, id));
+        // import / undo のトランザクションに巻き込まれないよう、直列に処理する
+        const out = await runExclusive(() => patchRecord(getDb(), id, req.body));
+        res.status(out.code).json(out.body);
     } catch (err) {
         // 事前の重複確認をすり抜けた UNIQUE 違反（同時更新など）も 409 にする
         if (err && err.code === 'SQLITE_CONSTRAINT') {
@@ -673,6 +797,75 @@ router.patch('/:id', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// 明細の部分更新。{ code, body } を返す（code は HTTP ステータス）。runExclusive の中から呼ぶこと
+async function patchRecord(db, id, input) {
+    const fail = (code, error) => ({ code, body: { error } });
+
+    const current = await db.get('SELECT * FROM purchase_records WHERE id = ?', [id]);
+    if (!current) return fail(404, '購入明細が見つかりません');
+
+    const norm = normalizePurchaseRecord(input, { partial: true });
+    if (norm.error) return fail(400, norm.error);
+    const updates = norm.value;
+
+    if (Object.keys(updates).length === 0) {
+        return fail(400, '更新する項目を1つ以上指定してください');
+    }
+
+    if (updates.part_id !== undefined && updates.part_id !== null) {
+        const part = await db.get('SELECT 1 AS ok FROM parts WHERE id = ?', [updates.part_id]);
+        if (!part) return fail(400, `part_id ${updates.part_id} の部品が見つかりません`);
+    }
+
+    if (updates.suggested_part_id !== undefined && updates.suggested_part_id !== null) {
+        const part = await db.get('SELECT 1 AS ok FROM parts WHERE id = ?', [updates.suggested_part_id]);
+        if (!part) return fail(400, `suggested_part_id ${updates.suggested_part_id} の部品が見つかりません`);
+    }
+
+    // part_id を新しく（前と違う値に）ひも付けるときは、候補を消して部品側の購入情報を更新する
+    const newlyLinked = updates.part_id !== undefined && updates.part_id !== null && updates.part_id !== current.part_id;
+    if (newlyLinked) {
+        updates.suggested_part_id = null;
+        updates.suggestion_note = null;
+    }
+
+    // ひも付け済みの明細に候補を付けると、解除したときに古い候補がよみがえる。更新後の状態で両方が入るなら拒否する
+    if (updates.suggested_part_id !== undefined && updates.suggested_part_id !== null) {
+        const mergedPartId = updates.part_id !== undefined ? updates.part_id : current.part_id;
+        if (mergedPartId !== null) return fail(400, 'ひも付け済みの明細には候補を設定できません');
+    }
+
+    const sets = Object.keys(updates).map(f => `${f} = ?`);
+    const params = Object.values(updates);
+
+    // 重複キーの材料が変わったら、既存の値とマージしてキーを作り直す
+    if (KEY_FIELDS.some(f => updates[f] !== undefined)) {
+        const merged = { ...current, ...updates };
+        const key = buildDedupeKey(merged);
+        if (key.error) return fail(400, key.error);
+        if (key.value !== current.dedupe_key || merged.shop !== current.shop) {
+            const dup = await db.get(
+                'SELECT id FROM purchase_records WHERE shop = ? AND dedupe_key = ? AND id != ?',
+                [merged.shop, key.value, id]
+            );
+            if (dup) return fail(409, `同じ明細がすでにあります（id: ${dup.id}）`);
+        }
+        sets.push('dedupe_key = ?');
+        params.push(key.value);
+    }
+
+    sets.push(`updated_at = ${NOW_SQL}`);
+    params.push(id);
+    await db.run(`UPDATE purchase_records SET ${sets.join(', ')} WHERE id = ?`, params);
+
+    let partUpdated = null;
+    if (newlyLinked) {
+        partUpdated = await applyPurchaseToPart(db, { ...current, ...updates }, updates.part_id);
+    }
+
+    return { code: 200, body: { ...(await getRecordWithPartName(db, id)), part_updated: partUpdated } };
+}
 
 // DELETE /api/purchases/:id - 物理削除
 router.delete('/:id', async (req, res) => {

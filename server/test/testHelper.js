@@ -114,6 +114,8 @@ async function createTestDb() {
       note TEXT,
       dedupe_key TEXT NOT NULL,
       import_batch_id INTEGER,
+      suggested_part_id INTEGER,
+      suggestion_note TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -121,6 +123,7 @@ async function createTestDb() {
     CREATE UNIQUE INDEX idx_purchase_records_dedupe ON purchase_records(shop, dedupe_key);
     CREATE INDEX idx_purchase_records_part_id ON purchase_records(part_id);
     CREATE INDEX idx_purchase_records_order ON purchase_records(shop, order_id);
+    CREATE INDEX idx_purchase_records_suggested ON purchase_records(suggested_part_id);
 
     CREATE TABLE purchase_import_batches (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
