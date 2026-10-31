@@ -23,11 +23,18 @@
     <template v-else-if="record.suggested_part_id">
       <div class="suggest-line" :title="record.suggestion_note || undefined">
         <span class="suggest-badge">候補</span>
-        <span class="suggest-name">{{ record.suggested_part_name || `部品 #${record.suggested_part_id}（削除済み?）` }}</span>
+        <span class="suggest-name">{{ record.suggested_part_name || `部品 #${record.suggested_part_id}（ゴミ箱または削除済み）` }}</span>
       </div>
       <div v-if="record.suggestion_note" class="suggest-note">{{ record.suggestion_note }}</div>
       <div class="cell-actions">
-        <button type="button" class="btn btn-primary btn-sm" :disabled="busy" @click="$emit('approve', record)">承認</button>
+        <!-- 候補の部品がゴミ箱・削除済み（名前が取れない）のときは承認できない。却下か別の部品を選ぶ -->
+        <button
+          v-if="record.suggested_part_name"
+          type="button"
+          class="btn btn-primary btn-sm"
+          :disabled="busy"
+          @click="$emit('approve', record)"
+        >承認</button>
         <button type="button" class="btn btn-secondary btn-sm" :disabled="busy" @click="$emit('reject', record)">却下</button>
         <button type="button" class="btn btn-ghost btn-sm" :disabled="busy" @click="$emit('pick', record)">別の部品</button>
       </div>

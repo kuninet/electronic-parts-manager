@@ -32,6 +32,7 @@
         >
           <span class="picker-pn mono">{{ part.part_number || '-' }}</span>
           <span class="picker-nm">{{ part.name }}</span>
+          <span v-if="part.used_at" class="picker-used">使用済み</span>
           <span v-if="part.location_name" class="picker-loc">{{ part.location_name }}</span>
         </button>
       </div>
@@ -78,9 +79,18 @@ const fetchParts = async () => {
   try {
     const params = {};
     if (query.value.trim()) params.search = query.value.trim();
-    const res = await api.get('/parts', { params });
+    // /parts は status 未指定だと使用済みを除く。購入した部品が使用済みでもひも付けられるよう、
+    // 通常と used の 2 回取得して、通常を先にして結合する
+    const [normal, used] = await Promise.all([
+      api.get('/parts', { params }),
+      api.get('/parts', { params: { ...params, status: 'used' } })
+    ]);
     if (seq !== requestSeq) return;
-    parts.value = Array.isArray(res.data) ? res.data.slice(0, 50) : [];
+    const merged = [
+      ...(Array.isArray(normal.data) ? normal.data : []),
+      ...(Array.isArray(used.data) ? used.data : [])
+    ];
+    parts.value = merged.slice(0, 50);
   } catch (err) {
     if (seq !== requestSeq) return;
     console.error(err);
@@ -255,6 +265,16 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.picker-used {
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  flex-shrink: 0;
 }
 
 .picker-loc {

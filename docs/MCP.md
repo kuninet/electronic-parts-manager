@@ -364,6 +364,7 @@ flowchart LR
   - `order_id` も `source_msg_id` もない明細はエラーになります
   - 注意: `line_no` の有無でキーが変わるので、同じ店では `line_no` を付けるかどうかをそろえてください。同じリクエスト内で同じキーになった明細には `warning` が付きます
 - **存在しない `part_id`**: 新規登録ではひも付けずに登録し、`on_duplicate: "update"` では無視して既存のひも付けを維持します。どちらも `results` に `warning` を付けます。
+- **`part_id` と `suggested_part_id` が両方ある明細**: ひも付けを優先して `suggested_part_id` と `suggestion_note` を無視し、`results` に `warning` を付けます。
 - **返却例**（`results` はエラーまたは `warning` のある明細だけ。作成・更新された明細の ID は `ids` にまとまります）:
   ```json
   {
@@ -392,7 +393,7 @@ flowchart LR
   - `shop` (string, 1〜100文字) / `name` (string, 1〜500文字): 消去はできません
   - `order_id` / `line_no` / `purchased_at` / `code` / `unit_price` / `currency` / `quantity` / `source_msg_id` / `note`: 値の規則は `import_purchase_items` と同じ。`null` を指定すると消去できます（`currency` は `JPY` に戻ります）
   - `part_id` (integer / null): 部品とのひも付け。部品の `id` を指定すると付き、**`null` を指定すると外れます**。存在しない部品はエラーです。新しく付けたとき、候補（`suggested_part_id` / `suggestion_note`）は消え、部品側の購入先・購入日・単価が自動で更新されます（下の「部品側の自動更新」を参照）
-  - `suggested_part_id` (integer / null): ひも付け候補の部品ID。迷うものに付けて、人が画面で承認するのを待ちます。`null` で候補を取り消します。存在しない部品はエラーです
+  - `suggested_part_id` (integer / null): ひも付け候補の部品ID。迷うものに付けて、人が画面で承認するのを待ちます。`null` で候補を取り消します。存在しない部品はエラーです。**すでに `part_id` がある明細には設定できません**（400「ひも付け済みの明細には候補を設定できません」。解除したときに古い候補がよみがえるため。`part_id: null` と同時に送るか、先に解除してください）
   - `suggestion_note` (string / null, 最大1000文字): 候補にした判断理由。画面に表示されます
 - **部品側の自動更新**: `part_id` を新しく設定すると、部品の `shop` / `purchased_at` / `unit_price`（最新の購入の要約）を次の規則で更新します。明細の注文日が部品の購入日と同じかそれより新しい（または部品側が空）ときに、3項目を上書きします。単価は通貨が `JPY` で単価があるときだけです。明細に注文日がないときは、部品側の空欄だけを埋めます。ゴミ箱の部品は更新しません。更新した項目は返却の `part_updated`（`{ part_id, fields }`。更新なしは `null`）に入ります。ひも付けを外しても部品側は元に戻りません。`import_purchase_items` でひも付けた明細では部品側を更新しません。
 - **注意**: `shop`・`order_id`・`line_no`・`name`・`source_msg_id` を変えた結果、ほかの明細と同じ明細になる場合は競合エラーになります。
@@ -451,9 +452,9 @@ flowchart LR
 
 取り込んだ購入明細を部品にひも付ける作業は、AI エージェントが MCP で行い、迷うものだけ人が画面（サイドバーの「購入履歴」）で承認します。承認・却下の MCP ツールはありません（人が行う操作のため）。
 
-1. `search_purchase_items` に `link_status: 'unlinked'` を付けて、未ひも付けの明細を取ります（`limit` と `offset` で順に取得します）。
+1. `search_purchase_items` に `link_status: 'unlinked'` を付けて、未ひも付けの明細を取ります（`limit` と `offset` で順に取得します）。`suggested_part` が入っている明細は、人の承認待ちなので飛ばす（候補を上書きしない）。
 2. `search_parts` で、明細の `code`（型番・通販コード）や `name` に対応する部品を探します。
-3. 確実なもの（型番やコードが一致するなど）は、`update_purchase_item` で `part_id` を設定します。部品側の購入先・購入日・単価も自動で更新されます（返却の `part_updated` で確認できます）。迷うものは `part_id` を付けず、`suggested_part_id` と `suggestion_note`（判断理由）を設定して候補として登録します。
+3. 確実なもの（型番やコードが一致するなど）は、`update_purchase_item` で `part_id` を設定します。部品側の購入先・購入日・単価も自動で更新されます（返却の `part_updated` で確認できます）。迷うものは `part_id` を付けず、`suggested_part_id` と `suggestion_note`（判断理由）を設定して候補として登録します。ひも付け済みの明細に `suggested_part_id` を設定するとエラー（400「ひも付け済みの明細には候補を設定できません」）になります。
 4. 人が画面で候補を承認（`part_id` が設定され、部品側も更新される）または却下します。承認待ちの明細は `link_status: 'suggested'` で確認できます。
 
 ### 購入履歴の一括取り込み

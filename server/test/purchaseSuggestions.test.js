@@ -376,4 +376,102 @@ test('ひも付け候補 API (PS-1 〜)', async (t) => {
     assert.equal(res.status, 200, await res.clone().text());
     assert.deepEqual(await db.all('SELECT * FROM purchase_records ORDER BY id'), before);
   });
+  await t.test('PS-17: ひも付け済みの明細に候補は設定できない（400）。解除と同時なら設定できる', async () => {
+    const p = await insertPart('LED');
+    const q = await insertPart('抵抗');
+    const id = await importOne({ part_id: p });
+    let res = await send('PATCH', `/purchases/${id}`, { suggested_part_id: q, suggestion_note: '理由' });
+    assert.equal(res.status, 400);
+    assert.equal((await res.json()).error, 'ひも付け済みの明細には候補を設定できません');
+    // part_id を同じ値で送っても、候補があれば 400（新しいひも付けではない）
+    assert.equal((await send('PATCH', `/purchases/${id}`, { part_id: p, suggested_part_id: q })).status, 400);
+    let row = await getRow(id);
+    assert.equal(row.suggested_part_id, null);
+    // 候補の消去（null）やメモだけの更新は通る
+    assert.equal((await send('PATCH', `/purchases/${id}`, { suggested_part_id: null })).status, 200);
+    assert.equal((await send('PATCH', `/purchases/${id}`, { note: 'x' })).status, 200);
+    // 解除と同時に候補を設定する
+    res = await send('PATCH', `/purchases/${id}`, { part_id: null, suggested_part_id: q });
+    assert.equal(res.status, 200);
+    row = await getRow(id);
+    assert.equal(row.part_id, null);
+    assert.equal(row.suggested_part_id, q);
+    // 解除済みなら候補を設定できる
+    assert.equal((await send('PATCH', `/purchases/${id}`, { suggested_part_id: p })).status, 200);
+    // 新しくひも付けるときは、同時に送った候補も消える（400 にならない）
+    res = await send('PATCH', `/purchases/${id}`, { part_id: q, suggested_part_id: p });
+    assert.equal(res.status, 200);
+    row = await getRow(id);
+    assert.equal(row.part_id, q);
+    assert.equal(row.suggested_part_id, null);
+  });
+
+  await t.test('PS-18: import は part_id と候補が両方ある明細の候補を無視して warning を付ける', async () => {
+    const p = await insertPart('LED');
+    const q = await insertPart('抵抗');
+    const r = await (await send('POST', '/purchases/import', [
+      rec({ line_no: 1, part_id: p, suggested_part_id: q, suggestion_note: '理由' })
+    ])).json();
+    assert.equal(r.created, 1);
+    assert.match(r.results[0].warning, /suggested_part_id/);
+    assert.deepEqual(await db.get('SELECT part_id, suggested_part_id, suggestion_note FROM purchase_records'),
+      { part_id: p, suggested_part_id: null, suggestion_note: null });
+
+    // on_duplicate=update: ひも付け済みの既存行に候補だけを送っても無視する
+    const r2 = await (await send('POST', '/purchases/import', {
+      on_duplicate: 'update', records: [rec({ line_no: 1, suggested_part_id: q, suggestion_note: '無視' })]
+    })).json();
+    assert.equal(r2.updated, 1);
+    assert.match(r2.results[0].warning, /suggested_part_id/);
+    assert.deepEqual(await db.get('SELECT part_id, suggested_part_id, suggestion_note FROM purchase_records'),
+      { part_id: p, suggested_part_id: null, suggestion_note: null });
+
+    // 候補つきの未ひも付け行に part_id を送る update は、候補を消す
+    const id = await importOne({ line_no: 2, suggested_part_id: q, suggestion_note: '旧' });
+    await send('POST', '/purchases/import', { on_duplicate: 'update', records: [rec({ line_no: 2, part_id: p })] });
+    assert.deepEqual(await getRow(id).then(x => [x.part_id, x.suggested_part_id, x.suggestion_note]), [p, null, null]);
+  });
+
+  await t.test('PS-19: ゴミ箱の部品は候補の名前に出ず、承認は専用の文言で 409。却下はできる', async () => {
+    const trash = await insertPart('ゴミ箱の部品');
+    const id = await importOne({ suggested_part_id: trash, suggestion_note: 'n' });
+    await db.run("UPDATE parts SET deleted_at = '2026-01-01' WHERE id = ?", [trash]);
+
+    const item = await (await fetch(`${baseUrl}/purchases/${id}`)).json();
+    assert.equal(item.suggested_part_id, trash);
+    assert.equal(item.suggested_part_name, null);
+    const list = (await (await fetch(`${baseUrl}/purchases`)).json()).items.find(i => i.id === id);
+    assert.equal(list.suggested_part_name, null);
+
+    let res = await send('POST', `/purchases/${id}/approve-suggestion`);
+    assert.equal(res.status, 409);
+    assert.equal((await res.json()).error, `候補の部品（id: ${trash}）はゴミ箱にあります`);
+
+    // 部品が存在しない場合は従来の文言
+    await db.run('DELETE FROM parts WHERE id = ?', [trash]);
+    res = await send('POST', `/purchases/${id}/approve-suggestion`);
+    assert.equal(res.status, 409);
+    assert.match((await res.json()).error, /見つかりません/);
+
+    assert.equal((await send('POST', `/purchases/${id}/reject-suggestion`)).status, 200);
+  });
+
+  await t.test('PS-20: 承認の途中で失敗したら、明細の更新も戻る（トランザクション）', async () => {
+    const p = await insertPart('LED');
+    const id = await importOne({ suggested_part_id: p, suggestion_note: 'n' });
+    // 部品の UPDATE だけを失敗させる
+    await db.run(`CREATE TRIGGER fail_part_update BEFORE UPDATE ON parts BEGIN SELECT RAISE(ABORT, 'forced'); END`);
+    try {
+      const res = await send('POST', `/purchases/${id}/approve-suggestion`);
+      assert.equal(res.status, 500);
+    } finally {
+      await db.run('DROP TRIGGER fail_part_update');
+    }
+    const row = await getRow(id);
+    assert.equal(row.part_id, null);
+    assert.equal(row.suggested_part_id, p);
+    assert.equal(row.suggestion_note, 'n');
+    // 失敗後も直列キューは止まらず、次の承認が通る
+    assert.equal((await send('POST', `/purchases/${id}/approve-suggestion`)).status, 200);
+  });
 });

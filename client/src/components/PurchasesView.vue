@@ -65,13 +65,14 @@
       </button>
     </div>
 
-    <div v-if="loading" class="state-message">読み込み中...</div>
+    <!-- 読み込み中の表示は初回だけ。2 回目以降は表を残して半透明にし、スクロール位置を保つ -->
+    <div v-if="loading && !loaded" class="state-message">読み込み中...</div>
     <div v-else-if="error" class="state-message error">{{ error }}</div>
-    <div v-else-if="items.length === 0" class="empty-state">
+    <div v-else-if="items.length === 0" class="empty-state" :class="{ reloading: loading }" :aria-busy="loading ? 'true' : 'false'">
       <p class="empty-text">該当する購入履歴はありません</p>
     </div>
 
-    <div v-else class="purchases-content">
+    <div v-else class="purchases-content" :class="{ reloading: loading }" :aria-busy="loading ? 'true' : 'false'">
       <!-- デスクトップ：テーブル -->
       <div class="purchases-table-wrap only-desktop">
         <table class="purchases-table">
@@ -94,6 +95,7 @@
                 <input
                   type="checkbox"
                   :checked="selectedIds.includes(item.id)"
+                  :disabled="!canApprove(item)"
                   :aria-label="`${item.name}を選択`"
                   @change="toggleOne(item.id, $event.target.checked)"
                 />
@@ -108,7 +110,7 @@
               <td class="col-part">
                 <PurchasePartCell
                   :record="item"
-                  :busy="isBusy(item.id)"
+                  :busy="isRowBusy(item.id)"
                   @open="openPart"
                   @pick="openPicker"
                   @unlink="unlink"
@@ -129,6 +131,7 @@
               v-if="bulkMode"
               type="checkbox"
               :checked="selectedIds.includes(item.id)"
+              :disabled="!canApprove(item)"
               :aria-label="`${item.name}を選択`"
               @change="toggleOne(item.id, $event.target.checked)"
             />
@@ -148,7 +151,7 @@
           </div>
           <PurchasePartCell
             :record="item"
-            :busy="isBusy(item.id)"
+            :busy="isRowBusy(item.id)"
             @open="openPart"
             @pick="openPicker"
             @unlink="unlink"
@@ -211,6 +214,7 @@ const items = ref([]);
 const total = ref(0);
 const offset = ref(0);
 const loading = ref(true);
+const loaded = ref(false); // 最初の取得が終わったか（以降は「読み込み中...」で表を消さない）
 const error = ref(null);
 
 const linkStatus = ref('');
@@ -233,13 +237,16 @@ const pickerRecord = ref(null);
 const pickerSaving = ref(false);
 
 const bulkMode = computed(() => linkStatus.value === 'suggested');
+// 候補の部品がゴミ箱・削除済み（名前が取れない）の明細は承認できない
+const canApprove = (item) => !!item.suggested_part_name;
+const approvable = computed(() => items.value.filter(canApprove));
 const allSelected = computed(
-  () => items.value.length > 0 && items.value.every((i) => selectedIds.value.includes(i.id))
+  () => approvable.value.length > 0 && approvable.value.every((i) => selectedIds.value.includes(i.id))
 );
 const range = computed(() => pageRange(total.value, offset.value, items.value.length));
 const pager = computed(() => pagerState(total.value, offset.value, PAGE_SIZE));
 
-const isBusy = (id) => bulkBusy.value || busyIds.value.includes(id);
+const isRowBusy = (id) => bulkBusy.value || busyIds.value.includes(id);
 
 const errorMessage = (err, fallback) => err.response?.data?.error || fallback;
 
@@ -248,7 +255,6 @@ let fetchSeq = 0;
 const fetchItems = async () => {
   const seq = ++fetchSeq;
   loading.value = true;
-  error.value = null;
   try {
     const params = buildPurchaseParams(
       {
@@ -270,6 +276,7 @@ const fetchItems = async () => {
       offset.value = Math.max(0, Math.floor((res.data.total - 1) / PAGE_SIZE) * PAGE_SIZE);
       return fetchItems();
     }
+    error.value = null;
     items.value = res.data.items;
     total.value = res.data.total;
     const seen = new Set(seenCurrencies.value);
@@ -282,7 +289,10 @@ const fetchItems = async () => {
     console.error(err);
     error.value = errorMessage(err, '購入履歴の取得に失敗しました');
   } finally {
-    if (seq === fetchSeq) loading.value = false;
+    if (seq === fetchSeq) {
+      loading.value = false;
+      loaded.value = true;
+    }
   }
 };
 
@@ -297,7 +307,7 @@ const fetchShops = async () => {
 
 const fetchBatches = async () => {
   try {
-    const res = await api.get('/purchases/batches');
+    const res = await api.get('/purchases/batches?limit=200');
     batches.value = res.data || [];
   } catch (err) {
     console.error(err);
@@ -342,7 +352,7 @@ const toggleOne = (id, checked) => {
 };
 
 const toggleAll = (checked) => {
-  selectedIds.value = checked ? items.value.map((i) => i.id) : [];
+  selectedIds.value = checked ? approvable.value.map((i) => i.id) : [];
 };
 
 // 1 行の操作中は同じ行のボタンを無効にする
@@ -449,7 +459,11 @@ const openPart = (item) =>
     }
   });
 
-defineExpose({ fetchParts: fetchItems });
+// App.vue が、操作中（ピッカー表示・選択中・処理中）はリロードを止めるために使う
+const isBusy = () =>
+  !!pickerRecord.value || selectedIds.value.length > 0 || busyIds.value.length > 0 || bulkBusy.value;
+
+defineExpose({ fetchParts: fetchItems, isBusy });
 </script>
 
 <style scoped>
@@ -599,6 +613,11 @@ defineExpose({ fetchParts: fetchItems });
 
 .state-message.error {
   color: var(--ng-fg);
+}
+
+.reloading {
+  opacity: 0.5;
+  transition: opacity 0.15s;
 }
 
 .empty-state {

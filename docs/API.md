@@ -860,7 +860,7 @@ stateDiagram-v2
 
 注意: `line_no` の有無でキーが変わるので、同じ店では `line_no` を付けるかどうかをそろえてください。
 
-各レスポンスの明細には、上記の項目に加えて `id`、`dedupe_key`、`import_batch_id`（新規登録したバッチの ID。バッチなしは `null`）、`created_at`、`updated_at` と、ひも付け先の部品名 `part_name`（ひも付けなし、または部品が存在しなければ `null`）、候補の部品名 `suggested_part_name`（候補なし、または部品が存在しなければ `null`）が含まれます。
+各レスポンスの明細には、上記の項目に加えて `id`、`dedupe_key`、`import_batch_id`（新規登録したバッチの ID。バッチなしは `null`）、`created_at`、`updated_at` と、ひも付け先の部品名 `part_name`（ひも付けなし、または部品が存在しなければ `null`）、候補の部品名 `suggested_part_name`（候補なし、または部品が存在しない・ゴミ箱にあれば `null`）が含まれます。
 
 **部品側の自動更新**: 明細を部品にひも付けたとき（`PATCH` で `part_id` を前と違う値にした、または候補を承認した）に、部品（ゴミ箱を除く）の購入情報を次の規則で更新します。実際に値が変わる項目だけを更新し、`updated_at` も更新します。
 - 明細に `purchased_at` がある: 部品の `purchased_at` が空、または明細の日付が部品の日付と同じかそれより新しいときに、`shop`・`purchased_at`・`unit_price` を明細の値にします（`unit_price` は通貨が `JPY` で単価があるときだけ）。部品側のほうが新しければ何も変えません。
@@ -964,7 +964,7 @@ stateDiagram-v2
   - 1 回に最大 5000 件（超えると 400）
   - 同時に複数の取り込みを送った場合は、サーバー側で 1 本ずつ順に処理します
   - `on_duplicate`: `skip`（既定）は既存の明細を変更しません。`update` は送られた項目で既存の明細を上書きします（送られていない項目は変更しません。`part_id` が `null` または未指定なら既存のひも付けを、`currency` が `null` または空なら既存の通貨を残します）。
-  - 明細には `suggested_part_id` と `suggestion_note` も指定できます（形式は `PATCH` と同じ）。存在しない `suggested_part_id` は `NULL` にして `warning` を付けます（`part_id` と同じ扱い）。取り込みでは部品側の購入情報を自動更新しません。
+  - 明細には `suggested_part_id` と `suggestion_note` も指定できます（形式は `PATCH` と同じ）。存在しない `suggested_part_id` は `NULL` にして `warning` を付けます（`part_id` と同じ扱い）。`part_id` と `suggested_part_id` が両方ある明細は、ひも付けを優先して `suggested_part_id` と `suggestion_note` を無視し、`warning` を付けます（`on_duplicate=update` で、ひも付け済みの既存行に候補だけを送った場合も同じです）。また `on_duplicate=update` で `part_id` を設定する明細は、既存の候補を消します。取り込みでは部品側の購入情報を自動更新しません。
 - **レスポンス**: 200 OK。`results` には全件を入れます。`status` は `created` / `updated` / `skipped` / `error` です。本番の取り込みは、取り込みバッチの ID を `batch_id` で返します（取り消しに使います）。`dry_run` のときは `batch_id` の代わりに `dry_run: true` を返し、`created` の result に `id` を付けません（ROLLBACK されるため）。また各 result に、正規化後の値 `record`（`dedupe_key` を除く）を付け、`updated` の result には更新前の値 `before` も付けます。
   ```json
   {
@@ -988,19 +988,21 @@ stateDiagram-v2
   ```json
   { "id": 10, "part_id": 3, "suggested_part_id": null, "...": "...", "part_updated": { "part_id": 3, "fields": { "shop": "秋月電子通商", "purchased_at": "2026-03-01", "unit_price": 10 } } }
   ```
-- **エラー**: 400（更新項目なし・値の不正・存在しない `part_id` / `suggested_part_id`・`order_id` と `source_msg_id` がともになくなる更新）、404、409 `{ error: "同じ明細がすでにあります（id: N）" }`。UNIQUE 制約違反も 409、500
+- **エラー**: 400（更新項目なし・値の不正・存在しない `part_id` / `suggested_part_id`・`order_id` と `source_msg_id` がともになくなる更新・更新後に `part_id` と `suggested_part_id` がどちらも `null` でない状態になる更新 `{ error: "ひも付け済みの明細には候補を設定できません" }`）、404、409 `{ error: "同じ明細がすでにあります（id: N）" }`。UNIQUE 制約違反も 409、500
+- **ひも付け済みの明細と候補**: ひも付け済みの明細には候補を設定できません（解除したときに古い候補がよみがえるため）。候補を付けたいときは、`part_id: null` と同時に送るか、先に解除してください。`part_id` を前と違う値に設定する更新は、同時に送った候補も含めて候補を消すため、この対象外です（400 になりません）。
 - **副作用**: `shop`・`order_id`・`line_no`・`name`・`source_msg_id` のいずれかが変わると、既存の値とマージして `dedupe_key` を作り直します。`updated_at` を現在時刻に更新します。`part_id` を null 以外の前と違う値にすると、候補（`suggested_part_id` / `suggestion_note`）を `NULL` に戻し、部品側の購入情報を自動更新します（上記）。
 
 #### `POST /api/purchases/:id/approve-suggestion`
 - **用途**: ひも付け候補を承認します。`part_id` に `suggested_part_id` を入れ、候補を消し、部品側の購入情報を自動更新します。
 - **レスポンス**: 200 OK `{ "record": <明細（suggested_part_name 付き）>, "part_updated": { "part_id": 3, "fields": { ... } } | null }`
-- **エラー**: 400（ID 不正）、404、409（候補がない、すでに `part_id` がある、候補の部品が存在しない・ゴミ箱にある。最後の場合は候補を消さない）、500
-- **副作用**: 明細の更新と、部品の `shop` / `purchased_at` / `unit_price` の更新（直列に処理）
+- **エラー**: 400（ID 不正）、404、409（候補がない、すでに `part_id` がある、候補の部品が存在しない `候補の部品（id: N）が見つかりません…`、またはゴミ箱にある `候補の部品（id: N）はゴミ箱にあります`。最後の2つの場合は候補を消さない）、500
+- **副作用**: 明細の更新と、部品の `shop` / `purchased_at` / `unit_price` の更新（1 つのトランザクション。失敗時はどちらも戻る。直列に処理）
 
 #### `POST /api/purchases/:id/reject-suggestion`
 - **用途**: ひも付け候補を却下します（`suggested_part_id` と `suggestion_note` を `NULL` に戻します）。
 - **レスポンス**: 200 OK `{ "record": <明細> }`
 - **エラー**: 400（ID 不正）、404、409（候補がない）、500
+- **副作用**: 取り込みや取り消しと同じ直列化キューの中で実行します（`PATCH /api/purchases/:id` も同様）。
 
 #### `POST /api/purchases/approve-suggestions`
 - **用途**: 候補を一括で承認します。1 件ずつ `approve-suggestion` と同じ処理を行い、失敗した明細はスキップして続けます。

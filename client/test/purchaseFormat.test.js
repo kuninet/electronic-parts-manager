@@ -8,6 +8,7 @@ import {
   buildPurchaseParams,
   buildCurrencyOptions,
   formatBatchLabel,
+  formatBatchCreatedAt,
   describePartUpdated,
   buildLinkMessage,
   summarizeBulkApprove,
@@ -33,6 +34,17 @@ describe('formatUnitPrice', () => {
   });
   test('0 は表示する', () => {
     assert.notEqual(formatUnitPrice(0, 'USD'), '-');
+  });
+  test('整数でない値は小数 2 桁まで表示する（丸めない）', () => {
+    assert.match(formatUnitPrice(52.5, 'JPY'), /52\.5$/);
+    assert.match(formatUnitPrice(52.123, 'JPY'), /52\.12$/);
+    assert.equal(formatUnitPrice(1.5, 'USD'), '$1.50');
+    assert.equal(formatUnitPrice(1.234, 'USD'), '$1.23');
+    assert.match(formatUnitPrice(52, 'JPY'), /52$/);
+    assert.equal(formatUnitPrice('52.5', 'JPY'), formatUnitPrice(52.5, 'JPY'));
+  });
+  test('小数桁が 3 の通貨でも例外にしない', () => {
+    assert.match(formatUnitPrice(1.5, 'KWD'), /1\.5/);
   });
   test('不正な通貨コードでも例外にしない', () => {
     assert.equal(formatUnitPrice(5, 'ZZ$'), '5 ZZ$');
@@ -77,11 +89,36 @@ describe('buildCurrencyOptions', () => {
   });
 });
 
+// タイムゾーンに依存しないよう、期待値は同じ瞬間のローカル時刻の各成分から作る
+const pad = (n) => String(n).padStart(2, '0');
+const localLabel = (d) =>
+  `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+describe('formatBatchCreatedAt', () => {
+  test('UTC の文字列をローカル時刻の YYYY/MM/DD HH:mm にする', () => {
+    const expected = localLabel(new Date(Date.UTC(2026, 9, 1, 12, 34, 56)));
+    assert.equal(formatBatchCreatedAt('2026-10-01 12:34:56'), expected);
+  });
+  test('ミリ秒付きも同じ', () => {
+    const expected = localLabel(new Date(Date.UTC(2026, 9, 1, 23, 59, 1, 234)));
+    assert.equal(formatBatchCreatedAt('2026-10-01 23:59:01.234'), expected);
+  });
+  test('Z 付きの ISO 文字列はそのまま解釈する', () => {
+    const expected = localLabel(new Date(Date.UTC(2026, 0, 2, 3, 4, 5)));
+    assert.equal(formatBatchCreatedAt('2026-01-02T03:04:05Z'), expected);
+  });
+  test('空は空文字、解釈できない値は元の文字列の先頭 16 文字', () => {
+    assert.equal(formatBatchCreatedAt(null), '');
+    assert.equal(formatBatchCreatedAt('not-a-date-at-all-xyz'), 'not-a-date-at-al');
+  });
+});
+
 describe('formatBatchLabel', () => {
   test('#id 日時 source（件数）', () => {
+    const expected = localLabel(new Date(Date.UTC(2026, 9, 1, 12, 34, 56)));
     assert.equal(
       formatBatchLabel({ id: 3, created_at: '2026-10-01 12:34:56', source: 'amazon', created_count: 20 }),
-      '#3 2026-10-01 12:34 amazon（20件）'
+      `#3 ${expected} amazon（20件）`
     );
   });
   test('取り消し済みは印を付ける', () => {
@@ -119,12 +156,31 @@ describe('summarizeBulkApprove', () => {
     assert.equal(summarizeBulkApprove({ approved: 2, failed: 1 }).type, 'warning');
     assert.equal(summarizeBulkApprove({ approved: 0, failed: 2 }).type, 'error');
   });
+  test('失敗があるときは最初の 1 件の理由を添える', () => {
+    const r = summarizeBulkApprove({
+      approved: 1,
+      failed: 2,
+      results: [
+        { id: 1, status: 'approved' },
+        { id: 2, status: 'error', error: '承認できる候補がありません' },
+        { id: 3, status: 'error', error: '別の理由' }
+      ]
+    });
+    assert.equal(r.message, '承認 1 件、失敗 2 件（最初の失敗: 承認できる候補がありません）');
+    assert.equal(r.type, 'warning');
+  });
+  test('失敗がなければ理由は付けない', () => {
+    assert.equal(
+      summarizeBulkApprove({ approved: 1, failed: 0, results: [{ id: 1, status: 'approved' }] }).message,
+      '承認 1 件、失敗 0 件'
+    );
+  });
 });
 
 describe('initialPartSearch', () => {
-  test('コード優先、なければ商品名', () => {
-    assert.equal(initialPartSearch({ code: ' ABC-1 ', name: '抵抗' }), 'ABC-1');
-    assert.equal(initialPartSearch({ code: null, name: '抵抗' }), '抵抗');
+  test('商品名を使い、コードは使わない', () => {
+    assert.equal(initialPartSearch({ code: ' ABC-1 ', name: ' 抵抗 ' }), '抵抗');
+    assert.equal(initialPartSearch({ code: 'ABC-1', name: null }), '');
     assert.equal(initialPartSearch({}), '');
   });
 });
