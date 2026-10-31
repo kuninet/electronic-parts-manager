@@ -53,7 +53,44 @@ erDiagram
         integer part_id PK, FK
         integer tag_id PK, FK
     }
+
+    purchase_records {
+        integer id PK
+        string shop "購入店"
+        string order_id "注文番号"
+        integer line_no "注文内の明細行番号"
+        string purchased_at "注文日 (YYYY-MM-DD)"
+        string code "通販コード・型番"
+        string name "商品名"
+        real unit_price "単価 (currency 建て)"
+        string currency "通貨 (既定 JPY)"
+        integer quantity
+        integer part_id "部品への任意のひも付け (外部キーなし)"
+        string source_msg_id
+        string note
+        string dedupe_key "重複判定キー"
+        integer import_batch_id "新規登録した取り込みバッチ"
+    }
+
+    purchase_import_batches {
+        integer id PK
+        string source
+        string note
+        string on_duplicate
+        integer total
+        datetime undone_at "取り消し日時"
+    }
+
+    purchase_import_changes {
+        integer id PK
+        integer batch_id "外部キーなし"
+        integer record_id "外部キーなし"
+        string action "created / updated"
+        string before_json "更新前の行"
+    }
 ```
+
+`purchase_records.part_id` は `parts.id` を指しますが、外部キー制約は付けていません（下記参照）。
 
 ## テーブル定義詳細
 
@@ -121,3 +158,59 @@ QR「しまう」操作等による保管場所への移動履歴を記録しま
 | `memo` | TEXT | メモ |
 | `created_at` | DATETIME | 作成日時 |
 
+### `purchase_records` (購入履歴)
+メールの注文内容などから取り込んだ購入明細です。1 レコードが注文の 1 明細で、何をいつどこでいくつ買ったかを記録する台帳として使います。`parts` の `shop` / `purchased_at` / `unit_price`（最新の購入の要約）とは独立しており、自動では連動しません。
+| カラム名 | 型 | 説明 |
+| --- | --- | --- |
+| `id` | INTEGER | 主キー (AUTOINCREMENT) |
+| `shop` | TEXT | 購入店 (必須、最大100文字) |
+| `order_id` | TEXT | 注文番号 (任意、最大100文字) |
+| `line_no` | INTEGER | 注文内の明細行番号 (任意、0以上) |
+| `purchased_at` | TEXT | 注文日 (任意、`YYYY-MM-DD`) |
+| `code` | TEXT | 店の通販コードまたはメーカー型番 (任意、最大100文字) |
+| `name` | TEXT | メール記載の商品名 (必須、最大500文字) |
+| `unit_price` | REAL | 単価 (任意、0以上。`currency` 建てで、換算はしない) |
+| `currency` | TEXT | 通貨コード (必須、デフォルト `JPY`) |
+| `quantity` | INTEGER | 数量 (任意、0以上) |
+| `part_id` | INTEGER | ひも付ける `parts.id` (任意)。**外部キー制約は付けない**。部品の完全削除時にアプリ側 (`permanentlyDeleteParts`) が `NULL` に戻す |
+| `source_msg_id` | TEXT | 元になったメールのメッセージ ID (任意、最大200文字) |
+| `note` | TEXT | メモ (任意、最大2000文字) |
+| `dedupe_key` | TEXT | 重複判定キー (必須)。作り方は API 仕様書 (`docs/API.md` 11章) を参照 |
+| `import_batch_id` | INTEGER | この行を新規登録した取り込みバッチ (`purchase_import_batches.id`)。外部キーは付けない。バッチを使わずに作った行は NULL |
+| `created_at` | DATETIME | 作成日時 |
+| `updated_at` | DATETIME | 更新日時 (アプリが更新するときはミリ秒まで記録する) |
+
+インデックス:
+-   `idx_purchase_records_dedupe`: `(shop, dedupe_key)` の UNIQUE。同じ明細の二重登録を防ぎます
+-   `idx_purchase_records_part_id`: `part_id`
+-   `idx_purchase_records_order`: `(shop, order_id)`
+
+バックアップ (`backup_data.json`) には `purchaseRecords`、`purchaseImportBatches`、`purchaseImportChanges` として含まれます。復元は全置換のため、`purchaseRecords` を含まない古いバックアップから復元すると購入履歴は空になります。
+
+### `purchase_import_batches` (購入履歴の取り込みバッチ)
+`POST /api/purchases/import`（`dry_run` なし）1 回につき 1 行が作られます。取り込み単位で取り消す（`POST /api/purchases/batches/:id/undo`）ための記録で、取り消したあとも残ります。
+| カラム名 | 型 | 説明 |
+| --- | --- | --- |
+| `id` | INTEGER | 主キー (AUTOINCREMENT) |
+| `source` | TEXT | 取り込み元の名前 (任意、最大100文字。例: `muse`) |
+| `note` | TEXT | メモ (任意、最大1000文字) |
+| `on_duplicate` | TEXT | `skip` または `update` |
+| `total` | INTEGER | 受け取った明細数 |
+| `created_count` | INTEGER | 新規登録した件数 |
+| `updated_count` | INTEGER | 上書きした件数 |
+| `skipped_count` | INTEGER | 重複でスキップした件数 |
+| `error_count` | INTEGER | エラーの件数 |
+| `created_at` | DATETIME | 取り込みの完了時刻 (ミリ秒まで。取り消し時に「取り込み後に変更された明細」を判定する基準) |
+| `undone_at` | DATETIME | 取り消した日時 (取り消していなければ NULL) |
+
+### `purchase_import_changes` (取り込みバッチの変更記録)
+バッチが変更した明細の記録です。`skipped` と `error` は記録しません。外部キー制約は付けません。
+| カラム名 | 型 | 説明 |
+| --- | --- | --- |
+| `id` | INTEGER | 主キー (AUTOINCREMENT)。取り消しはこの降順に行う |
+| `batch_id` | INTEGER | `purchase_import_batches.id` |
+| `record_id` | INTEGER | `purchase_records.id` |
+| `action` | TEXT | `created`（新規登録。取り消しで削除）または `updated`（上書き。取り消しで `before_json` に戻す） |
+| `before_json` | TEXT | `updated` のときの更新前の行 (`purchase_records` の全列を JSON で)。同じバッチで同じ行を複数回変えても、取り込み前の 1 回分だけ残す |
+
+インデックス: `idx_purchase_import_changes_batch` (`batch_id`)、`idx_purchase_import_changes_record` (`record_id`)

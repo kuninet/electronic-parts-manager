@@ -146,19 +146,24 @@ describe('MCP Remote HTTP Integration Tests (H-1 ~ H-18)', () => {
         ]);
     });
 
-    test('H-1: listTools で 8 ツールが取得できる', async () => {
+    test('H-1: listTools で 13 ツールが取得できる', async () => {
         const client = await connectClient(httpPort);
         const result = await client.listTools();
-        assert.equal(result.tools.length, 8);
+        assert.equal(result.tools.length, 13);
         assert.deepEqual(result.tools.map((t) => t.name).sort(), [
             'create_part',
             'get_part_detail',
             'get_part_image',
+            'import_purchase_items',
+            'list_import_batches',
             'list_master_data',
             'search_parts',
+            'search_purchase_items',
             'store_part_location',
+            'undo_import_batch',
             'update_part',
             'update_part_quantity',
+            'update_purchase_item',
         ]);
     });
 
@@ -180,14 +185,16 @@ describe('MCP Remote HTTP Integration Tests (H-1 ~ H-18)', () => {
         assert.equal(JSON.parse(second.content[0].text).total, 1);
     });
 
-    test('H-4: readOnly の config では参照系 4 ツールのみ公開される', async () => {
+    test('H-4: readOnly の config では参照系 6 ツールのみ公開される', async () => {
         const client = await connectClient(readOnlyPort);
         const result = await client.listTools();
         assert.deepEqual(result.tools.map((t) => t.name).sort(), [
             'get_part_detail',
             'get_part_image',
+            'list_import_batches',
             'list_master_data',
             'search_parts',
+            'search_purchase_items',
         ]);
     });
 

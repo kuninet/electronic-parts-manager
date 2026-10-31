@@ -28,10 +28,10 @@ describe('MCP get_part_image Tool Unit Tests (GI-1 ~ GI-16)', () => {
         return { client, server, apiClient };
     }
 
-    test('GI-1: readOnly: false で 8 ツール登録、get_part_image の annotations と inputSchema.required が正しく設定される', async () => {
+    test('GI-1: readOnly: false で 13 ツール登録、get_part_image の annotations と inputSchema.required が正しく設定される', async () => {
         const { client } = await createClientWithMock();
         const toolsResult = await client.listTools();
-        assert.equal(toolsResult.tools.length, 8);
+        assert.equal(toolsResult.tools.length, 13);
 
         const imgTool = toolsResult.tools.find((t) => t.name === 'get_part_image');
         assert.ok(imgTool);
@@ -43,12 +43,12 @@ describe('MCP get_part_image Tool Unit Tests (GI-1 ~ GI-16)', () => {
         assert.deepEqual(imgTool.inputSchema.required, ['id']);
     });
 
-    test('GI-2: readOnly: true で 4 ツール登録され、get_part_image を含む', async () => {
+    test('GI-2: readOnly: true で 6 ツール登録され、get_part_image を含む', async () => {
         const { client } = await createClientWithMock({}, { readOnly: true });
         const toolsResult = await client.listTools();
-        assert.equal(toolsResult.tools.length, 4);
+        assert.equal(toolsResult.tools.length, 6);
         const names = toolsResult.tools.map((t) => t.name).sort();
-        assert.deepEqual(names, ['get_part_detail', 'get_part_image', 'list_master_data', 'search_parts']);
+        assert.deepEqual(names, ['get_part_detail', 'get_part_image', 'list_import_batches', 'list_master_data', 'search_parts', 'search_purchase_items']);
     });
 
     test('GI-3: 正常系: 写真付き部品で image コンテンツと text コンテンツを正しく返す（isError なし）', async () => {

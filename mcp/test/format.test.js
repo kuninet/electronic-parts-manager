@@ -5,6 +5,8 @@ const {
     toPartDetail,
     toCategory,
     toLocation,
+    toPurchaseRecord,
+    toImportBatch,
     toolResult,
     toolError,
 } = require('../format.js');
@@ -237,6 +239,73 @@ describe('MCP Format Unit Tests (F-1 ~ F-9)', () => {
         };
         const summary3 = toPartSummary(partWithoutQr, apiUrl);
         assert.equal(summary3.qr_code, null);
+    });
+
+    test('toPurchaseRecord: part_id があれば part に id と name を入れ、dedupe_key・part_name・created_at・updated_at は出さない', () => {
+        const row = {
+            id: 7,
+            shop: '秋月電子通商',
+            order_id: 'A-1',
+            line_no: 2,
+            purchased_at: '2026-03-01',
+            code: 'I-001',
+            name: 'LED',
+            unit_price: 10,
+            currency: 'JPY',
+            quantity: 5,
+            part_id: 3,
+            part_name: '高輝度LED',
+            source_msg_id: 'msg1',
+            note: 'メモ',
+            dedupe_key: 'o:A-1|l:2',
+            created_at: '2026-03-02 00:00:00',
+            updated_at: '2026-03-03 00:00:00',
+        };
+        assert.deepEqual(toPurchaseRecord(row), {
+            id: 7,
+            shop: '秋月電子通商',
+            order_id: 'A-1',
+            line_no: 2,
+            purchased_at: '2026-03-01',
+            code: 'I-001',
+            name: 'LED',
+            unit_price: 10,
+            currency: 'JPY',
+            quantity: 5,
+            part: { id: 3, name: '高輝度LED' },
+            source_msg_id: 'msg1',
+            note: 'メモ',
+            import_batch_id: null,
+        });
+    });
+
+    test('toPurchaseRecord: part_id が無ければ part は null、part_name が無ければ name は null、欠けた項目は null', () => {
+        const unlinked = toPurchaseRecord({ id: 1, shop: 'S', name: 'x', part_id: null, part_name: null });
+        assert.equal(unlinked.part, null);
+        assert.equal(unlinked.order_id, null);
+        assert.equal(unlinked.unit_price, null);
+        assert.equal(unlinked.quantity, null);
+        assert.equal('dedupe_key' in unlinked, false);
+
+        const orphan = toPurchaseRecord({ id: 1, shop: 'S', name: 'x', part_id: 9 });
+        assert.deepEqual(orphan.part, { id: 9, name: null });
+    });
+
+    test('toPurchaseRecord: import_batch_id を出す（なければ null）', () => {
+        assert.equal(toPurchaseRecord({ id: 1, shop: 'S', name: 'x', import_batch_id: 4 }).import_batch_id, 4);
+        assert.equal(toPurchaseRecord({ id: 1, shop: 'S', name: 'x' }).import_batch_id, null);
+    });
+
+    test('toImportBatch: 件数の列名を短くし、undone_at を出す', () => {
+        assert.deepEqual(toImportBatch({
+            id: 2, source: 'muse', note: null, on_duplicate: 'update', total: 10,
+            created_count: 7, updated_count: 2, skipped_count: 1, error_count: 0,
+            created_at: '2026-10-31 10:00:00', undone_at: '2026-10-31 11:00:00',
+        }), {
+            id: 2, source: 'muse', note: null, on_duplicate: 'update', total: 10,
+            created: 7, updated: 2, skipped: 1, errors: 0,
+            created_at: '2026-10-31 10:00:00', undone_at: '2026-10-31 11:00:00',
+        });
     });
 
     test('toolResult と toolError のフォーマット検証', () => {

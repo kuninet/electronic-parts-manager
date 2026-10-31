@@ -157,6 +157,57 @@ function toLocation(location, apiUrl) {
 }
 
 /**
+ * 購入明細を MCP 出力形式に整形します（dedupe_key、created_at、updated_at は出さない）。
+ *
+ * @param {Record<string, any>} row
+ * @returns {object}
+ */
+function toPurchaseRecord(row) {
+    const part = (row.part_id !== null && row.part_id !== undefined)
+        ? { id: row.part_id, name: row.part_name ?? null }
+        : null;
+
+    return {
+        id: row.id,
+        shop: row.shop,
+        order_id: row.order_id ?? null,
+        line_no: row.line_no ?? null,
+        purchased_at: row.purchased_at ?? null,
+        code: row.code ?? null,
+        name: row.name,
+        unit_price: row.unit_price ?? null,
+        currency: row.currency ?? null,
+        quantity: row.quantity ?? null,
+        part,
+        source_msg_id: row.source_msg_id ?? null,
+        note: row.note ?? null,
+        import_batch_id: row.import_batch_id ?? null,
+    };
+}
+
+/**
+ * 取り込みバッチを MCP 出力形式に整形します。
+ *
+ * @param {Record<string, any>} row
+ * @returns {object}
+ */
+function toImportBatch(row) {
+    return {
+        id: row.id,
+        source: row.source ?? null,
+        note: row.note ?? null,
+        on_duplicate: row.on_duplicate ?? null,
+        total: row.total ?? 0,
+        created: row.created_count ?? 0,
+        updated: row.updated_count ?? 0,
+        skipped: row.skipped_count ?? 0,
+        errors: row.error_count ?? 0,
+        created_at: row.created_at ?? null,
+        undone_at: row.undone_at ?? null,
+    };
+}
+
+/**
  * ツール成功結果オブジェクトを生成します。
  *
  * @param {any} data
@@ -200,6 +251,8 @@ module.exports = {
     toPartDetail,
     toCategory,
     toLocation,
+    toPurchaseRecord,
+    toImportBatch,
     toolResult,
     toolError,
 };
