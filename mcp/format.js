@@ -167,6 +167,10 @@ function toPurchaseRecord(row) {
         ? { id: row.part_id, name: row.part_name ?? null }
         : null;
 
+    const suggestedPart = (row.suggested_part_id !== null && row.suggested_part_id !== undefined)
+        ? { id: row.suggested_part_id, name: row.suggested_part_name ?? null }
+        : null;
+
     return {
         id: row.id,
         shop: row.shop,
@@ -179,6 +183,8 @@ function toPurchaseRecord(row) {
         currency: row.currency ?? null,
         quantity: row.quantity ?? null,
         part,
+        suggested_part: suggestedPart,
+        suggestion_note: row.suggestion_note ?? null,
         source_msg_id: row.source_msg_id ?? null,
         note: row.note ?? null,
         import_batch_id: row.import_batch_id ?? null,

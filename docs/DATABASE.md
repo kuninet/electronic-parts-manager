@@ -70,6 +70,8 @@ erDiagram
         string note
         string dedupe_key "重複判定キー"
         integer import_batch_id "新規登録した取り込みバッチ"
+        integer suggested_part_id "ひも付け候補の部品 (外部キーなし)"
+        string suggestion_note "候補の判断理由"
     }
 
     purchase_import_batches {
@@ -159,7 +161,7 @@ QR「しまう」操作等による保管場所への移動履歴を記録しま
 | `created_at` | DATETIME | 作成日時 |
 
 ### `purchase_records` (購入履歴)
-メールの注文内容などから取り込んだ購入明細です。1 レコードが注文の 1 明細で、何をいつどこでいくつ買ったかを記録する台帳として使います。`parts` の `shop` / `purchased_at` / `unit_price`（最新の購入の要約）とは独立しており、自動では連動しません。
+メールの注文内容などから取り込んだ購入明細です。1 レコードが注文の 1 明細で、何をいつどこでいくつ買ったかを記録する台帳として使います。`parts` の `shop` / `purchased_at` / `unit_price`（最新の購入の要約）とは基本的に独立していますが、明細を部品にひも付けたとき（`PATCH` で `part_id` を設定、または候補の承認）に、部品側を「最新の購入の要約」として自動で更新します（規則は `docs/API.md` 11章）。一括取り込みでのひも付けでは更新しません。
 | カラム名 | 型 | 説明 |
 | --- | --- | --- |
 | `id` | INTEGER | 主キー (AUTOINCREMENT) |
@@ -177,6 +179,8 @@ QR「しまう」操作等による保管場所への移動履歴を記録しま
 | `note` | TEXT | メモ (任意、最大2000文字) |
 | `dedupe_key` | TEXT | 重複判定キー (必須)。作り方は API 仕様書 (`docs/API.md` 11章) を参照 |
 | `import_batch_id` | INTEGER | この行を新規登録した取り込みバッチ (`purchase_import_batches.id`)。外部キーは付けない。バッチを使わずに作った行は NULL |
+| `suggested_part_id` | INTEGER | ひも付け候補の `parts.id` (任意)。AI が迷ったものを登録し、人が画面で承認すると `part_id` に移る。**外部キー制約は付けない**。部品の完全削除時に `NULL` に戻す |
+| `suggestion_note` | TEXT | 候補にした判断理由 (任意、最大1000文字)。候補を承認・却下・`part_id` 設定したときは `NULL` に戻す |
 | `created_at` | DATETIME | 作成日時 |
 | `updated_at` | DATETIME | 更新日時 (アプリが更新するときはミリ秒まで記録する) |
 
@@ -184,6 +188,7 @@ QR「しまう」操作等による保管場所への移動履歴を記録しま
 -   `idx_purchase_records_dedupe`: `(shop, dedupe_key)` の UNIQUE。同じ明細の二重登録を防ぎます
 -   `idx_purchase_records_part_id`: `part_id`
 -   `idx_purchase_records_order`: `(shop, order_id)`
+-   `idx_purchase_records_suggested`: `suggested_part_id`
 
 バックアップ (`backup_data.json`) には `purchaseRecords`、`purchaseImportBatches`、`purchaseImportChanges` として含まれます。復元は全置換のため、`purchaseRecords` を含まない古いバックアップから復元すると購入履歴は空になります。
 

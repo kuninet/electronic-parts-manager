@@ -27,7 +27,9 @@ test('purchaseRecord 正規化関数 (PR-U)', async (t) => {
       quantity: null,
       part_id: null,
       source_msg_id: null,
-      note: null
+      note: null,
+      suggested_part_id: null,
+      suggestion_note: null
     });
   });
 
@@ -135,7 +137,8 @@ test('purchaseRecord 正規化関数 (PR-U)', async (t) => {
     assert.equal(r.error, undefined);
     assert.deepEqual(r.value, {
       shop: 'S', order_id: null, line_no: null, purchased_at: null, code: null, name: 'x',
-      unit_price: null, currency: 'JPY', quantity: null, part_id: null, source_msg_id: null, note: null
+      unit_price: null, currency: 'JPY', quantity: null, part_id: null, source_msg_id: null, note: null,
+      suggested_part_id: null, suggestion_note: null
     });
     // 必須項目の shop は null 扱いになりエラー
     assert.equal(normalizePurchaseRecord({ shop: 'null', name: 'x' }).error, 'shop は必須です');
