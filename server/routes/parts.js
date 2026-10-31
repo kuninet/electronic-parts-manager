@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { getDb } = require('../database');
 const { normalizePartNumber } = require('../utils/partNumber');
+const { normalizeShop, normalizePurchasedAt, normalizeUnitPrice, normalizePurchaseInfo } = require('../utils/purchaseInfo');
 const { resizeImageBuffer, validateImage } = require('../utils/image');
 const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 
@@ -45,6 +46,17 @@ function normalizeIds(raw) {
 function parseId(raw) {
     const ids = normalizeIds([raw]);
     return ids ? ids[0] : null;
+}
+
+// タグ名の配列またはカンマ区切り文字列を、trim・空除去・重複除去した配列にする
+function normalizeTagNames(raw) {
+    let list = [];
+    if (Array.isArray(raw)) {
+        list = raw.map(t => String(t).trim());
+    } else if (typeof raw === 'string') {
+        list = raw.split(',').map(t => t.trim());
+    }
+    return [...new Set(list.filter(Boolean))];
 }
 
 // 画像・データシートのファイルを削除する（完了を待たない。失敗はログのみ）
@@ -104,7 +116,7 @@ async function permanentlyDeleteParts(db, ids) {
 router.get('/', async (req, res) => {
     try {
         const db = getDb();
-        const { category_id, location_id, tag_id, search, status, sort, order, used_for } = req.query;
+        const { category_id, location_id, tag_id, search, status, sort, order, used_for, shop } = req.query;
         let query = `
       SELECT p.*, c.name as category_name, l.name as location_name,
       (SELECT GROUP_CONCAT(t.name, ',') FROM tags t JOIN part_tags pt ON t.id = pt.tag_id WHERE pt.part_id = p.id) as tags
@@ -139,8 +151,13 @@ router.get('/', async (req, res) => {
         }
 
         if (search) {
-            query += ` AND (p.name LIKE ? OR p.description LIKE ? OR p.part_number LIKE ?)`;
-            params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+            query += ` AND (p.name LIKE ? OR p.description LIKE ? OR p.part_number LIKE ? OR p.shop LIKE ?)`;
+            params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+        }
+
+        if (shop) {
+            query += ` AND p.shop LIKE ?`;
+            params.push(`%${shop}%`);
         }
 
         if (used_for) {
@@ -170,6 +187,21 @@ router.get('/', async (req, res) => {
 
         const parts = await db.all(query, params);
         res.json(parts);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/parts/shops - 購入先の候補一覧（件数順）。/:id より前に定義すること
+router.get('/shops', async (req, res) => {
+    try {
+        const db = getDb();
+        const rows = await db.all(`
+            SELECT shop AS name, COUNT(*) AS count FROM parts
+            WHERE shop IS NOT NULL AND shop != '' AND deleted_at IS NULL
+            GROUP BY shop ORDER BY count DESC, shop ASC
+        `);
+        res.json(rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -283,18 +315,19 @@ router.post('/', upload, async (req, res) => {
         }
 
         // tags の処理（配列またはカンマ区切り文字列）
-        let tags = [];
-        if (Array.isArray(req.body.tags)) {
-            tags = req.body.tags.map(t => (typeof t === 'string' ? t.trim() : String(t).trim())).filter(t => t);
-        } else if (typeof req.body.tags === 'string' && req.body.tags) {
-            tags = req.body.tags.split(',').map(t => t.trim()).filter(t => t);
-        }
+        const tags = normalizeTagNames(req.body.tags);
 
         const partNumberResult = normalizePartNumber(req.body.part_number);
         if (partNumberResult.error) {
             return res.status(400).json({ error: partNumberResult.error });
         }
         const safePartNumber = partNumberResult.value ?? null;
+
+        const purchaseResult = normalizePurchaseInfo(req.body);
+        if (purchaseResult.error) {
+            return res.status(400).json({ error: purchaseResult.error });
+        }
+        const { shop: safeShop, purchased_at: safePurchasedAt, unit_price: safeUnitPrice } = purchaseResult.values;
 
         let image_path = null;
         if (req.files?.image) {
@@ -339,9 +372,9 @@ router.post('/', upload, async (req, res) => {
         }
 
         const result = await db.run(`
-      INSERT INTO parts (name, description, category_id, location_id, quantity, image_path, datasheet_url, datasheet_path, part_number)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [safeName, description ?? null, category_id, location_id, safeQuantity, image_path, datasheet_url ?? null, datasheet_path, safePartNumber]);
+      INSERT INTO parts (name, description, category_id, location_id, quantity, image_path, datasheet_url, datasheet_path, part_number, shop, purchased_at, unit_price)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [safeName, description ?? null, category_id, location_id, safeQuantity, image_path, datasheet_url ?? null, datasheet_path, safePartNumber, safeShop ?? null, safePurchasedAt ?? null, safeUnitPrice ?? null]);
 
         const partId = result.lastID;
 
@@ -391,12 +424,25 @@ router.put('/:id', upload, async (req, res) => {
             return res.status(400).json({ error: partNumberResult.error });
         }
 
+        const purchaseResult = normalizePurchaseInfo(req.body);
+        if (purchaseResult.error) {
+            return res.status(400).json({ error: purchaseResult.error });
+        }
+
         let query = `UPDATE parts SET name = ?, description = ?, category_id = ?, location_id = ?, quantity = ?, datasheet_url = ?, qr_code = ?, used_at = ?, used_for = ?, used_note = ?, updated_at = CURRENT_TIMESTAMP`;
         const params = [name, description, safeCategoryId, safeLocationId, quantity, datasheet_url, safeQrCode, safeUsedAt, safeUsedFor, safeUsedNote];
 
         if (partNumberResult.value !== undefined) {
             query += `, part_number = ?`;
             params.push(partNumberResult.value);
+        }
+
+        // 購入情報は未送信（undefined）の項目を更新しない
+        for (const field of ['shop', 'purchased_at', 'unit_price']) {
+            if (purchaseResult.values[field] !== undefined) {
+                query += `, ${field} = ?`;
+                params.push(purchaseResult.values[field]);
+            }
         }
 
         // Fetch current file paths to delete old files if necessary
@@ -469,7 +515,7 @@ router.put('/:id', upload, async (req, res) => {
 
         // Update Tags
         if (req.body.tags !== undefined) {
-            const tags = req.body.tags ? req.body.tags.split(',').map(t => t.trim()).filter(t => t) : [];
+            const tags = normalizeTagNames(req.body.tags);
 
             // Clear existing tags
             await db.run('DELETE FROM part_tags WHERE part_id = ?', [id]);
@@ -503,7 +549,8 @@ router.patch('/:id', async (req, res) => {
         const allowedFields = [
             'name', 'description', 'category_id', 'location_id',
             'quantity', 'datasheet_url', 'qr_code', 'used_at',
-            'used_for', 'used_note', 'part_number'
+            'used_for', 'used_note', 'part_number',
+            'shop', 'purchased_at', 'unit_price'
         ];
         const updates = [];
         const params = [];
@@ -517,6 +564,16 @@ router.patch('/:id', async (req, res) => {
                         return res.status(400).json({ error: pnResult.error });
                     }
                     val = pnResult.value;
+                }
+                if (field === 'shop' || field === 'purchased_at' || field === 'unit_price') {
+                    const normalizer = field === 'shop' ? normalizeShop
+                        : field === 'purchased_at' ? normalizePurchasedAt
+                        : normalizeUnitPrice;
+                    const result = normalizer(val);
+                    if (result.error) {
+                        return res.status(400).json({ error: result.error });
+                    }
+                    val = result.value;
                 }
                 if ((field === 'category_id' || field === 'location_id' || field === 'used_at' || field === 'used_for' || field === 'used_note') && (val === '' || val === 'null')) {
                     val = null;
@@ -548,9 +605,7 @@ router.patch('/:id', async (req, res) => {
 
         // Tags update if provided
         if (req.body.tags !== undefined) {
-            const tags = Array.isArray(req.body.tags)
-                ? req.body.tags
-                : (typeof req.body.tags === 'string' ? req.body.tags.split(',').map(t => t.trim()).filter(Boolean) : []);
+            const tags = normalizeTagNames(req.body.tags);
 
             await db.run('DELETE FROM part_tags WHERE part_id = ?', [id]);
             for (const tagName of tags) {

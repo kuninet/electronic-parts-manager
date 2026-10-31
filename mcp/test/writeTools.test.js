@@ -26,14 +26,19 @@ describe('MCP 書き込みツール単体テスト (WT-1 ~ WT-20)', () => {
         return { client, server, apiClient };
     }
 
-    test('WT-1: readOnly: false では 7 ツールが登録され、書き込みツールは readOnlyHint: false、store_part_location だけが idempotentHint: true', async () => {
+    test('WT-1: readOnly: false では 8 ツールが登録され、書き込みツールは readOnlyHint: false、store_part_location だけが idempotentHint: true', async () => {
         const { client } = await createClientWithMock({}, { readOnly: false });
         const { tools } = await client.listTools();
-        assert.equal(tools.length, 7);
+        assert.equal(tools.length, 8);
 
         const createTool = tools.find(t => t.name === 'create_part');
         const updateTool = tools.find(t => t.name === 'update_part_quantity');
         const storeTool = tools.find(t => t.name === 'store_part_location');
+        const patchTool = tools.find(t => t.name === 'update_part');
+
+        assert.equal(patchTool.annotations?.readOnlyHint, false);
+        assert.equal(patchTool.annotations?.idempotentHint, false);
+        assert.equal(patchTool.annotations?.destructiveHint, false);
 
         assert.equal(createTool.annotations?.readOnlyHint, false);
         assert.equal(createTool.annotations?.idempotentHint, false);
@@ -54,6 +59,7 @@ describe('MCP 書き込みツール単体テスト (WT-1 ~ WT-20)', () => {
         assert.equal(tools.length, 4);
         const names = tools.map(t => t.name).sort();
         assert.deepEqual(names, ['get_part_detail', 'get_part_image', 'list_master_data', 'search_parts']);
+        assert.ok(!names.includes('update_part'));
     });
 
     test('WT-3: create_part { name: "LED", quantity: 5 } で createPart が undefined キーなしで呼ばれ、作成部品詳細が返る', async () => {
@@ -85,6 +91,44 @@ describe('MCP 書き込みツール単体テスト (WT-1 ~ WT-20)', () => {
         assert.equal(body.created, true);
         assert.equal(body.part.id, 9);
         assert.equal(body.part.name, 'LED');
+    });
+
+    test('WT-3b: create_part で shop, purchased_at, unit_price が API に渡り、結果に shop が含まれる', async () => {
+        let calledPayload = null;
+        const { client } = await createClientWithMock({
+            createPart: async (payload) => {
+                calledPayload = payload;
+                return { id: 11 };
+            },
+            getPart: async () => ({ id: 11, name: 'R', quantity: 0, shop: '秋月電子' })
+        });
+
+        const res = await client.callTool({
+            name: 'create_part',
+            arguments: { name: 'R', shop: '秋月電子', purchased_at: '2026-03-01', unit_price: 1.5 }
+        });
+
+        assert.ok(!res.isError);
+        assert.deepEqual(calledPayload, {
+            name: 'R', quantity: 0, shop: '秋月電子', purchased_at: '2026-03-01', unit_price: 1.5
+        });
+        assert.equal(JSON.parse(res.content[0].text).part.shop, '秋月電子');
+
+        const bad = await client.callTool({
+            name: 'create_part',
+            arguments: { name: 'R', purchased_at: '2026/03/01' }
+        });
+        assert.equal(bad.isError, true);
+        const neg = await client.callTool({
+            name: 'create_part',
+            arguments: { name: 'R', unit_price: -1 }
+        });
+        assert.equal(neg.isError, true);
+        const huge = await client.callTool({
+            name: 'create_part',
+            arguments: { name: 'R', unit_price: 1e9 + 1 }
+        });
+        assert.equal(huge.isError, true);
     });
 
     test('WT-4: create_part { name: "R" } で quantity 未指定時は quantity: 0 で送られる', async () => {

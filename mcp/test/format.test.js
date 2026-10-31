@@ -145,6 +145,7 @@ describe('MCP Format Unit Tests (F-1 ~ F-9)', () => {
             'id',
             'name',
             'part_number',
+            'shop',
             'quantity',
             'description',
             'category',
@@ -157,6 +158,30 @@ describe('MCP Format Unit Tests (F-1 ~ F-9)', () => {
         assert.deepEqual(Object.keys(summary).sort(), allowedKeys.sort());
         assert.equal(summary.datasheet_path, undefined);
         assert.equal(summary.unknown_internal_col, undefined);
+    });
+
+    test('F-7b: shop は Summary に、purchased_at と unit_price は Detail に含まれ、未設定は null になる', () => {
+        const part = {
+            id: 1,
+            name: '抵抗',
+            shop: '秋月電子',
+            purchased_at: '2026-03-01',
+            unit_price: 0,
+        };
+        const summary = toPartSummary(part, apiUrl);
+        assert.equal(summary.shop, '秋月電子');
+        assert.equal('purchased_at' in summary, false);
+        assert.equal('unit_price' in summary, false);
+
+        const detail = toPartDetail(part, apiUrl);
+        assert.equal(detail.shop, '秋月電子');
+        assert.equal(detail.purchased_at, '2026-03-01');
+        assert.equal(detail.unit_price, 0);
+
+        const empty = toPartDetail({ id: 2, name: 'x' }, apiUrl);
+        assert.equal(empty.shop, null);
+        assert.equal(empty.purchased_at, null);
+        assert.equal(empty.unit_price, null);
     });
 
     test('F-8: location の行は規定されたフィールドのみを持つ', () => {

@@ -10,6 +10,7 @@ const searchPartsSchema = {
     query: z.string().max(200).optional(),
     category_id: z.number().int().positive().optional(),
     location_id: z.number().int().positive().optional(),
+    shop: z.string().max(100).optional(),
     limit: z.number().int().min(1).max(200).default(50),
 };
 
@@ -24,7 +25,7 @@ function registerSearchPartsTool(server, { apiClient, apiUrl }) {
         'search_parts',
         {
             title: '電子部品検索',
-            description: '電子部品の在庫を名前・型番・説明のキーワードやカテゴリ・保管場所で検索します。使用済みとゴミ箱の部品は含みません。',
+            description: '電子部品の在庫を名前・型番・説明・購入先のキーワードやカテゴリ・保管場所・購入先で検索します。使用済みとゴミ箱の部品は含みません。',
             annotations: {
                 readOnlyHint: true,
                 idempotentHint: true,
@@ -38,9 +39,10 @@ function registerSearchPartsTool(server, { apiClient, apiUrl }) {
                 const search = query || undefined;
                 const category_id = args.category_id;
                 const location_id = args.location_id;
+                const shop = typeof args.shop === 'string' ? args.shop.trim() || undefined : undefined;
                 const limit = args.limit ?? 50;
 
-                const allParts = await apiClient.listParts({ search, category_id, location_id });
+                const allParts = await apiClient.listParts({ search, category_id, location_id, shop });
                 const total = Array.isArray(allParts) ? allParts.length : 0;
                 const truncated = total > limit;
                 const sliced = Array.isArray(allParts) ? allParts.slice(0, limit) : [];

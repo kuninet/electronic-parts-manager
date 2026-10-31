@@ -15,7 +15,7 @@ class ApiError extends Error {
      * @param {number | null} status HTTP ステータスコード
      * @param {string} message エラーメッセージ
      * @param {Object} [options]
-     * @param {boolean} [options.unknownOutcome=false] POST タイムアウト等の結果不明フラグ
+     * @param {boolean} [options.unknownOutcome=false] POST/PATCH タイムアウト等の結果不明フラグ
      */
     constructor(kind, status, message, { unknownOutcome = false } = {}) {
         super(message);
@@ -88,7 +88,7 @@ function createApiClient(config, { fetchImpl = globalThis.fetch } = {}) {
     /**
      * 汎用 HTTP リクエストを実行します。
      *
-     * @param {'GET' | 'POST'} method HTTP メソッド
+     * @param {'GET' | 'POST' | 'PATCH'} method HTTP メソッド
      * @param {string} path API パス
      * @param {Object} [options]
      * @param {Record<string, any>} [options.query]
@@ -108,7 +108,7 @@ function createApiClient(config, { fetchImpl = globalThis.fetch } = {}) {
 
         const headers = { ...defaultHeaders };
         let bodyPayload = undefined;
-        if (method === 'POST') {
+        if (method !== 'GET') {
             headers['Content-Type'] = 'application/json';
             bodyPayload = body !== undefined ? JSON.stringify(body) : undefined;
         }
@@ -126,7 +126,7 @@ function createApiClient(config, { fetchImpl = globalThis.fetch } = {}) {
                 throw err;
             }
             if (err && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-                const unknownOutcome = method === 'POST';
+                const unknownOutcome = method !== 'GET';
                 throw new ApiError(
                     'timeout',
                     null,
@@ -352,6 +352,7 @@ function createApiClient(config, { fetchImpl = globalThis.fetch } = {}) {
         listCategories: () => request('GET', '/api/categories'),
         listLocations: () => request('GET', '/api/locations'),
         createPart: (body) => request('POST', '/api/parts', { body }),
+        patchPart: (id, body) => request('PATCH', `/api/parts/${id}`, { body }),
         changeQuantity: (id, body) => request('POST', `/api/parts/${id}/quantity`, { body }),
         storePart: (body) => request('POST', '/api/qr/store', { body }),
     };

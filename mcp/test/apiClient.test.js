@@ -487,6 +487,34 @@ describe('MCP API Client Unit Tests (A-1 ~ A-34)', () => {
         );
     });
 
+    test('A-19b: patchPart は PATCH メソッドで Content-Type と JSON body を送り、タイムアウトは unknownOutcome: true になる', async () => {
+        handlerMode = 'default';
+        const client = createApiClient({
+            apiUrl: baseUrl,
+            authHeader: 'Bearer testtoken',
+            timeoutMs: 3000
+        });
+        await client.patchPart(7, { shop: '秋月電子', unit_price: null });
+        assert.equal(lastRequest.method, 'PATCH');
+        assert.equal(lastRequest.url, '/api/parts/7');
+        assert.equal(lastRequest.headers['content-type'], 'application/json');
+        assert.equal(lastRequest.body, JSON.stringify({ shop: '秋月電子', unit_price: null }));
+
+        handlerMode = 'hang';
+        const slowClient = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 100 });
+        await assert.rejects(
+            async () => {
+                await slowClient.patchPart(7, { shop: 'x' });
+            },
+            (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'timeout');
+                assert.equal(err.unknownOutcome, true);
+                return true;
+            }
+        );
+    });
+
     test('A-21: getImage(/uploads/a.png) が PNG バイト列、contentType、size を正しく取得する', async () => {
         handlerMode = 'image-png';
         const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 3000 });

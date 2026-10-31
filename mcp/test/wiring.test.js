@@ -127,13 +127,14 @@ describe('MCP Static Wiring and Safety Verification (W-1 ~ W-12)', () => {
         assert.doesNotMatch(content, /for\s*\([^)]*\)\s*\{[^{}]*fetchImpl/, 'No for loop around fetchImpl');
     });
 
-    test('W-8: docs/MCP.md に EPM_API_TOKEN、EPM_MCP_READONLY、create_part、update_part_quantity、store_part_location があること', () => {
+    test('W-8: docs/MCP.md に EPM_API_TOKEN、EPM_MCP_READONLY、create_part、update_part、update_part_quantity、store_part_location があること', () => {
         const mcpDocPath = path.resolve(rootDir, 'docs/MCP.md');
         const docContent = fs.readFileSync(mcpDocPath, 'utf-8');
 
         assert.ok(docContent.includes('EPM_API_TOKEN'), 'docs/MCP.md must include EPM_API_TOKEN');
         assert.ok(docContent.includes('EPM_MCP_READONLY'), 'docs/MCP.md must include EPM_MCP_READONLY');
         assert.ok(docContent.includes('create_part'), 'docs/MCP.md must include create_part');
+        assert.ok(docContent.includes('### 2-8. `update_part`'), 'docs/MCP.md must include update_part');
         assert.ok(docContent.includes('update_part_quantity'), 'docs/MCP.md must include update_part_quantity');
         assert.ok(docContent.includes('store_part_location'), 'docs/MCP.md must include store_part_location');
     });

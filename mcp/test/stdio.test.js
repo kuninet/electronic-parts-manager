@@ -113,7 +113,7 @@ describe('MCP Stdio Integration Tests (S-1 ~ S-12)', () => {
         await new Promise((resolve) => mockServer.close(resolve));
     });
 
-    test('S-1: stdio 経由でプロセスを起動し listTools で 7 ツールが取得できる', async () => {
+    test('S-1: stdio 経由でプロセスを起動し listTools で 8 ツールが取得できる', async () => {
         const transport = new StdioClientTransport({
             command: process.execPath,
             args: [entrypoint],
@@ -128,7 +128,7 @@ describe('MCP Stdio Integration Tests (S-1 ~ S-12)', () => {
 
         try {
             const result = await client.listTools();
-            assert.equal(result.tools.length, 7);
+            assert.equal(result.tools.length, 8);
             const names = result.tools.map((t) => t.name).sort();
             assert.deepEqual(names, [
                 'create_part',
@@ -137,6 +137,7 @@ describe('MCP Stdio Integration Tests (S-1 ~ S-12)', () => {
                 'list_master_data',
                 'search_parts',
                 'store_part_location',
+                'update_part',
                 'update_part_quantity',
             ]);
         } finally {
@@ -194,7 +195,7 @@ describe('MCP Stdio Integration Tests (S-1 ~ S-12)', () => {
 
         try {
             const listRes = await client.listTools();
-            assert.equal(listRes.tools.length, 7);
+            assert.equal(listRes.tools.length, 8);
 
             const callRes = await client.callTool({
                 name: 'search_parts',
@@ -462,7 +463,7 @@ describe('MCP Stdio Integration Tests (S-1 ~ S-12)', () => {
 
             // 継続して listTools が実行可能
             const toolsRes = await client.listTools();
-            assert.equal(toolsRes.tools.length, 7);
+            assert.equal(toolsRes.tools.length, 8);
         } finally {
             await client.close();
         }

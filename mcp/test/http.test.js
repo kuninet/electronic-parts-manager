@@ -146,10 +146,10 @@ describe('MCP Remote HTTP Integration Tests (H-1 ~ H-18)', () => {
         ]);
     });
 
-    test('H-1: listTools で 7 ツールが取得できる', async () => {
+    test('H-1: listTools で 8 ツールが取得できる', async () => {
         const client = await connectClient(httpPort);
         const result = await client.listTools();
-        assert.equal(result.tools.length, 7);
+        assert.equal(result.tools.length, 8);
         assert.deepEqual(result.tools.map((t) => t.name).sort(), [
             'create_part',
             'get_part_detail',
@@ -157,6 +157,7 @@ describe('MCP Remote HTTP Integration Tests (H-1 ~ H-18)', () => {
             'list_master_data',
             'search_parts',
             'store_part_location',
+            'update_part',
             'update_part_quantity',
         ]);
     });

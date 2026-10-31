@@ -95,6 +95,20 @@ test('マイグレーションテスト (parts.part_number)', async (t) => {
     assert.strictEqual(parts[1].quantity, 20);
     assert.strictEqual(parts[1].qr_code, 'QR-PART-002');
     assert.strictEqual(parts[1].part_number, null);
+
+    // 購入情報カラム (#97)
+    const shopCol = columns.find(c => c.name === 'shop');
+    const purchasedAtCol = columns.find(c => c.name === 'purchased_at');
+    const unitPriceCol = columns.find(c => c.name === 'unit_price');
+    assert.ok(shopCol, 'shop カラムが存在すること');
+    assert.ok(purchasedAtCol, 'purchased_at カラムが存在すること');
+    assert.ok(unitPriceCol, 'unit_price カラムが存在すること');
+    assert.strictEqual(shopCol.type.toUpperCase(), 'TEXT');
+    assert.strictEqual(purchasedAtCol.type.toUpperCase(), 'TEXT');
+    assert.strictEqual(unitPriceCol.type.toUpperCase(), 'REAL');
+    assert.strictEqual(parts[0].shop, null);
+    assert.strictEqual(parts[0].purchased_at, null);
+    assert.strictEqual(parts[0].unit_price, null);
   });
 
   await t.test('M-2: idx_parts_part_number インデックスが作成されること', async () => {
