@@ -53,7 +53,26 @@ erDiagram
         integer part_id PK, FK
         integer tag_id PK, FK
     }
+
+    purchase_records {
+        integer id PK
+        string shop "購入店"
+        string order_id "注文番号"
+        integer line_no "注文内の明細行番号"
+        string purchased_at "注文日 (YYYY-MM-DD)"
+        string code "通販コード・型番"
+        string name "商品名"
+        real unit_price "単価 (currency 建て)"
+        string currency "通貨 (既定 JPY)"
+        integer quantity
+        integer part_id "部品への任意のひも付け (外部キーなし)"
+        string source_msg_id
+        string note
+        string dedupe_key "重複判定キー"
+    }
 ```
+
+`purchase_records.part_id` は `parts.id` を指しますが、外部キー制約は付けていません（下記参照）。
 
 ## テーブル定義詳細
 
@@ -121,3 +140,30 @@ QR「しまう」操作等による保管場所への移動履歴を記録しま
 | `memo` | TEXT | メモ |
 | `created_at` | DATETIME | 作成日時 |
 
+### `purchase_records` (購入履歴)
+メールの注文内容などから取り込んだ購入明細です。1 レコードが注文の 1 明細で、何をいつどこでいくつ買ったかを記録する台帳として使います。`parts` の `shop` / `purchased_at` / `unit_price`（最新の購入の要約）とは独立しており、自動では連動しません。
+| カラム名 | 型 | 説明 |
+| --- | --- | --- |
+| `id` | INTEGER | 主キー (AUTOINCREMENT) |
+| `shop` | TEXT | 購入店 (必須、最大100文字) |
+| `order_id` | TEXT | 注文番号 (任意、最大100文字) |
+| `line_no` | INTEGER | 注文内の明細行番号 (任意、0以上) |
+| `purchased_at` | TEXT | 注文日 (任意、`YYYY-MM-DD`) |
+| `code` | TEXT | 店の通販コードまたはメーカー型番 (任意、最大100文字) |
+| `name` | TEXT | メール記載の商品名 (必須、最大500文字) |
+| `unit_price` | REAL | 単価 (任意、0以上。`currency` 建てで、換算はしない) |
+| `currency` | TEXT | 通貨コード (必須、デフォルト `JPY`) |
+| `quantity` | INTEGER | 数量 (任意、0以上) |
+| `part_id` | INTEGER | ひも付ける `parts.id` (任意)。**外部キー制約は付けない**。部品の完全削除時にアプリ側 (`permanentlyDeleteParts`) が `NULL` に戻す |
+| `source_msg_id` | TEXT | 元になったメールのメッセージ ID (任意、最大200文字) |
+| `note` | TEXT | メモ (任意、最大2000文字) |
+| `dedupe_key` | TEXT | 重複判定キー (必須)。作り方は API 仕様書 (`docs/API.md` 11章) を参照 |
+| `created_at` | DATETIME | 作成日時 |
+| `updated_at` | DATETIME | 更新日時 |
+
+インデックス:
+-   `idx_purchase_records_dedupe`: `(shop, dedupe_key)` の UNIQUE。同じ明細の二重登録を防ぎます
+-   `idx_purchase_records_part_id`: `part_id`
+-   `idx_purchase_records_order`: `(shop, order_id)`
+
+バックアップ (`backup_data.json`) には `purchaseRecords` として含まれます。復元は全置換のため、`purchaseRecords` を含まない古いバックアップから復元すると購入履歴は空になります。

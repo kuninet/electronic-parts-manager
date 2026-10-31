@@ -98,6 +98,29 @@ async function createTestDb() {
       FOREIGN KEY(part_id) REFERENCES parts(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE purchase_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shop TEXT NOT NULL,
+      order_id TEXT,
+      line_no INTEGER,
+      purchased_at TEXT,
+      code TEXT,
+      name TEXT NOT NULL,
+      unit_price REAL,
+      currency TEXT NOT NULL DEFAULT 'JPY',
+      quantity INTEGER,
+      part_id INTEGER,
+      source_msg_id TEXT,
+      note TEXT,
+      dedupe_key TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE UNIQUE INDEX idx_purchase_records_dedupe ON purchase_records(shop, dedupe_key);
+    CREATE INDEX idx_purchase_records_part_id ON purchase_records(part_id);
+    CREATE INDEX idx_purchase_records_order ON purchase_records(shop, order_id);
+
     CREATE INDEX idx_ai_name_suggestions_part_id ON ai_name_suggestions(part_id);
     CREATE INDEX idx_ai_name_suggestions_status ON ai_name_suggestions(status);
   `);

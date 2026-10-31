@@ -515,6 +515,55 @@ describe('MCP API Client Unit Tests (A-1 ~ A-34)', () => {
         );
     });
 
+    test('A-19c: 購入履歴の API（listPurchases / getPurchase / importPurchases / patchPurchase）が正しいメソッド・パス・本文で呼ばれ、書き込みのタイムアウトは unknownOutcome: true になる', async () => {
+        handlerMode = 'default';
+        const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 3000 });
+
+        await client.listPurchases({ search: 'LED', linked: false, part_id: undefined, limit: 10, offset: 0 });
+        assert.equal(lastRequest.method, 'GET');
+        const listUrl = new URL(lastRequest.url, 'http://x');
+        assert.equal(listUrl.pathname, '/api/purchases');
+        assert.equal(listUrl.searchParams.get('search'), 'LED');
+        assert.equal(listUrl.searchParams.get('linked'), 'false');
+        assert.equal(listUrl.searchParams.get('limit'), '10');
+        assert.equal(listUrl.searchParams.get('offset'), '0');
+        assert.equal(listUrl.searchParams.has('part_id'), false);
+
+        await client.getPurchase(5);
+        assert.equal(lastRequest.method, 'GET');
+        assert.equal(lastRequest.url, '/api/purchases/5');
+
+        const importBody = { records: [{ shop: 'A', name: 'x', order_id: '1' }], on_duplicate: 'update' };
+        await client.importPurchases(importBody);
+        assert.equal(lastRequest.method, 'POST');
+        assert.equal(lastRequest.url, '/api/purchases/import');
+        assert.equal(lastRequest.headers['content-type'], 'application/json');
+        assert.equal(lastRequest.body, JSON.stringify(importBody));
+
+        await client.patchPurchase(5, { part_id: null });
+        assert.equal(lastRequest.method, 'PATCH');
+        assert.equal(lastRequest.url, '/api/purchases/5');
+        assert.equal(lastRequest.body, JSON.stringify({ part_id: null }));
+
+        handlerMode = 'hang';
+        const slowClient = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 100 });
+        for (const run of [
+            () => slowClient.importPurchases({ records: [] }),
+            () => slowClient.patchPurchase(5, { note: 'x' }),
+        ]) {
+            await assert.rejects(run, (err) => {
+                assert.ok(err instanceof ApiError);
+                assert.equal(err.kind, 'timeout');
+                assert.equal(err.unknownOutcome, true);
+                return true;
+            });
+        }
+        await assert.rejects(() => slowClient.listPurchases({}), (err) => {
+            assert.equal(err.unknownOutcome, false);
+            return true;
+        });
+    });
+
     test('A-21: getImage(/uploads/a.png) が PNG バイト列、contentType、size を正しく取得する', async () => {
         handlerMode = 'image-png';
         const client = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 3000 });

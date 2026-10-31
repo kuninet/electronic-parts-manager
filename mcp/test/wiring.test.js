@@ -108,8 +108,8 @@ describe('MCP Static Wiring and Safety Verification (W-1 ~ W-12)', () => {
         assert.ok(docContent.includes('npm run mcp'), 'docs/MCP.md must warn against using npm run mcp in client config');
     });
 
-    test('W-6: mcp/tools/ の書き込み系 3 ファイルに readOnlyHint: false があること', () => {
-        const writeToolFiles = ['createPart.js', 'updatePartQuantity.js', 'storePartLocation.js'];
+    test('W-6: mcp/tools/ の書き込み系 5 ファイルに readOnlyHint: false があること', () => {
+        const writeToolFiles = ['createPart.js', 'updatePartQuantity.js', 'storePartLocation.js', 'importPurchaseItems.js', 'updatePurchaseItem.js'];
         for (const file of writeToolFiles) {
             const filePath = path.resolve(mcpDir, 'tools', file);
             assert.ok(fs.existsSync(filePath), `${file} must exist`);
@@ -137,6 +137,10 @@ describe('MCP Static Wiring and Safety Verification (W-1 ~ W-12)', () => {
         assert.ok(docContent.includes('### 2-8. `update_part`'), 'docs/MCP.md must include update_part');
         assert.ok(docContent.includes('update_part_quantity'), 'docs/MCP.md must include update_part_quantity');
         assert.ok(docContent.includes('store_part_location'), 'docs/MCP.md must include store_part_location');
+        assert.ok(docContent.includes('### 2-9. `search_purchase_items`'), 'docs/MCP.md must include search_purchase_items');
+        assert.ok(docContent.includes('### 2-10. `import_purchase_items`'), 'docs/MCP.md must include import_purchase_items');
+        assert.ok(docContent.includes('### 2-11. `update_purchase_item`'), 'docs/MCP.md must include update_purchase_item');
+        assert.ok(docContent.includes('/api/purchases/import'), 'docs/MCP.md must include the bulk import endpoint');
     });
 
     test('W-9: docs/API.md に EPM_API_TOKEN と API_TOKEN_REQUIRED があること', () => {

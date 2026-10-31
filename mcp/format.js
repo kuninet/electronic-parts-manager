@@ -157,6 +157,34 @@ function toLocation(location, apiUrl) {
 }
 
 /**
+ * 購入明細を MCP 出力形式に整形します（dedupe_key、created_at、updated_at は出さない）。
+ *
+ * @param {Record<string, any>} row
+ * @returns {object}
+ */
+function toPurchaseRecord(row) {
+    const part = (row.part_id !== null && row.part_id !== undefined)
+        ? { id: row.part_id, name: row.part_name ?? null }
+        : null;
+
+    return {
+        id: row.id,
+        shop: row.shop,
+        order_id: row.order_id ?? null,
+        line_no: row.line_no ?? null,
+        purchased_at: row.purchased_at ?? null,
+        code: row.code ?? null,
+        name: row.name,
+        unit_price: row.unit_price ?? null,
+        currency: row.currency ?? null,
+        quantity: row.quantity ?? null,
+        part,
+        source_msg_id: row.source_msg_id ?? null,
+        note: row.note ?? null,
+    };
+}
+
+/**
  * ツール成功結果オブジェクトを生成します。
  *
  * @param {any} data
@@ -200,6 +228,7 @@ module.exports = {
     toPartDetail,
     toCategory,
     toLocation,
+    toPurchaseRecord,
     toolResult,
     toolError,
 };

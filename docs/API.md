@@ -246,6 +246,7 @@
 - **エラー**: 400（ID不正）、404（パーツが見つからないか、ゴミ箱にない。**ゴミ箱外のパーツは完全削除できません**）、500
 - **副作用**:
   - `storage_logs` の対象パーツの履歴行を削除
+  - `purchase_records` は削除せず、対象パーツへのひも付け（`part_id`）だけ `NULL` に戻す
   - `part_tags` および `ai_name_suggestions` は CASCADE により自動削除
   - DB確定後に画像およびデータシートファイル（S3またはローカル）をストレージから完全削除
 
@@ -761,7 +762,7 @@
 - **リクエスト**: `multipart/form-data`（`file`: ZIPファイル）
 - **レスポンス**: 200 OK `{ "message": "Full restore successful" }`
 - **エラー**: 400（ファイルなし・Zip Slip検出）、500
-- **副作用**: **既存の全データ（DB・画像）を完全消去**し、ZIP内のデータで上書き復元
+- **副作用**: **既存の全データ（DB・画像）を完全消去**し、ZIP内のデータで上書き復元。購入履歴（`purchase_records`）も置き換わるため、購入履歴を含まない古いバックアップから復元すると購入履歴は空になります
 
 #### `GET /api/backup/import/presigned-url`
 - **用途**: 大容量バックアップファイルを直接S3へアップロードするための署名付きURLを発行します。
@@ -785,11 +786,11 @@
 - **副作用**: **既存の全データ（DB・画像）を完全消去**して上書き復元、一時ファイルおよびS3アップロードファイルの削除
 
 #### `POST /api/backup/reset`
-- **用途**: パーツデータ・入庫ログ・アップロード画像ファイルを全消去します（マスタデータは保持）。
+- **用途**: パーツデータ・入庫ログ・購入履歴・アップロード画像ファイルを全消去します（マスタデータは保持）。
 - **リクエスト**: なし
 - **レスポンス**: 200 OK `{ "message": "Reset successful" }`
 - **エラー**: 500
-- **副作用**: `parts`, `part_tags`, `storage_logs` の全レコード削除、`uploads/` ディレクトリ内の全画像・PDFファイル削除
+- **副作用**: `parts`, `part_tags`, `storage_logs`, `purchase_records` の全レコード削除、`uploads/` ディレクトリ内の全画像・PDFファイル削除
 
 ---
 
@@ -823,3 +824,124 @@ stateDiagram-v2
     
     ゴミ箱内パーツ --> [*] : DELETE /api/parts/:id/permanent\nまたは bulk/action "delete"\n(DB行・画像・ログを完全削除)
 ```
+
+---
+
+## 11. 購入履歴 (`/api/purchases`)
+
+メールの注文内容などから取り込んだ購入明細（注文の 1 明細が 1 レコード）を管理します。部品（`parts`）とは `part_id` で任意にひも付けます。部品の `shop` / `purchased_at` / `unit_price` とは連動しません。外貨の単価は換算せず、`currency` とともにそのまま保存します。
+
+**明細の項目**
+
+| 項目 | 型 | 説明 |
+|---|---|---|
+| `shop` | 文字列（必須） | 購入店。改行・タブは空白に置換して trim、1〜100文字 |
+| `order_id` | 文字列 / null | 注文番号（数値は文字列化）。最大100文字 |
+| `line_no` | 整数 / null | 注文内の明細行番号（0以上） |
+| `purchased_at` | 文字列 / null | 注文日（実在する `YYYY-MM-DD`） |
+| `code` | 文字列 / null | 店の通販コードまたはメーカー型番（最大100文字） |
+| `name` | 文字列（必須） | 商品名（1〜500文字） |
+| `unit_price` | 数値 / null | 単価（0以上 1e9以下。通貨は `currency`） |
+| `currency` | 文字列 | 通貨コード（3文字の英字、大文字に変換）。未指定・null・空文字は `JPY` |
+| `quantity` | 整数 / null | 数量（0以上） |
+| `part_id` | 整数 / null | ひも付ける部品の ID |
+| `source_msg_id` | 文字列 / null | 元になったメールのメッセージ ID（最大200文字） |
+| `note` | 文字列 / null | メモ（最大2000文字） |
+
+任意項目に文字列 `null`（大文字小文字不問）を渡すと `null` として扱います。
+
+**重複判定**: `(shop, dedupe_key)` が同じ明細は同一とみなします。`dedupe_key` は次のように作ります（`name` は NFKC 正規化・空白の連続を 1 つに・前後空白の除去・英字の小文字化をしてから使います）。
+- `order_id` と `line_no` があるとき: `o:<order_id>|l:<line_no>`
+- `order_id` があり `line_no` がないとき: `o:<order_id>|n:<name>`
+- `order_id` がなく `source_msg_id` があるとき: `m:<source_msg_id>|n:<name>`
+- `order_id` も `source_msg_id` もないとき: 登録できません（400 / 明細エラー）
+
+注意: `line_no` の有無でキーが変わるので、同じ店では `line_no` を付けるかどうかをそろえてください。
+
+各レスポンスの明細には、上記の項目に加えて `id`、`dedupe_key`、`created_at`、`updated_at` と、ひも付け先の部品名 `part_name`（ひも付けなし、または部品が存在しなければ `null`）が含まれます。
+
+#### `GET /api/purchases`
+- **用途**: 購入明細を絞り込んで取得します。並びは注文日の新しい順（`purchased_at DESC, shop, order_id, line_no, id`）です。
+- **リクエスト**: クエリパラメータ（すべて任意）
+  - `search`: 商品名・コード・注文番号の部分一致
+  - `shop`: 購入店（完全一致）
+  - `order_id`: 注文番号（完全一致）
+  - `part_id`: ひも付け先の部品 ID
+  - `linked`: `true` でひも付け済みのみ、`false` で未ひも付けのみ
+  - `from` / `to`: 注文日の範囲（`YYYY-MM-DD`、両端を含む）
+  - `currency`: 通貨コード
+  - `limit`（既定 100、最大 1000）/ `offset`（既定 0）
+- **レスポンス**: 200 OK
+  ```json
+  {
+    "total": 698,
+    "items": [
+      {
+        "id": 1, "shop": "秋月電子通商", "order_id": "A-1", "line_no": 1, "purchased_at": "2026-03-01",
+        "code": "I-001", "name": "LED", "unit_price": 10, "currency": "JPY", "quantity": 5,
+        "part_id": 3, "part_name": "赤色LED 5mm", "source_msg_id": null, "note": null,
+        "dedupe_key": "o:A-1|l:1", "created_at": "2026-03-02 00:00:00", "updated_at": "2026-03-02 00:00:00"
+      }
+    ]
+  }
+  ```
+  ※`total` は `limit` / `offset` に関係なく、条件に合う全件数です。
+- **エラー**: 400（`part_id`・`linked`・`from`・`to` の形式不正）、500
+- **副作用**: なし
+
+#### `GET /api/purchases/shops`
+- **用途**: 購入店の一覧を、明細数の多い順（同数は名前順）で取得します。
+- **レスポンス**: 200 OK
+  ```json
+  [
+    { "name": "秋月電子通商", "count": 467 },
+    { "name": "Amazon", "count": 30 }
+  ]
+  ```
+- **エラー**: 500
+- **副作用**: なし
+
+#### `GET /api/purchases/:id`
+- **用途**: 指定した ID の購入明細を 1 件取得します（`part_name` 付き）。
+- **レスポンス**: 200 OK（明細オブジェクト）
+- **エラー**: 400（ID 不正）、404 `{ error: "購入明細が見つかりません" }`、500
+- **副作用**: なし
+
+#### `POST /api/purchases/import`
+- **用途**: 購入明細を一括で取り込みます。同じ明細は重複登録されません（再実行しても安全です）。
+- **リクエスト**: `application/json`。本文は次のどちらかです。
+  - 明細の配列そのもの（`on_duplicate` は `skip`）
+  - `{ "records": [...], "on_duplicate": "skip" | "update" }`
+  - `on_duplicate` はクエリパラメータ `?on_duplicate=update` でも指定できます（本文の指定が優先）。
+  - 1 回に最大 5000 件（超えると 400）
+  - 同時に複数の取り込みを送った場合は、サーバー側で 1 本ずつ順に処理します
+  - `on_duplicate`: `skip`（既定）は既存の明細を変更しません。`update` は送られた項目で既存の明細を上書きします（送られていない項目は変更しません。`part_id` が `null` または未指定なら既存のひも付けを、`currency` が `null` または空なら既存の通貨を残します）。
+- **レスポンス**: 200 OK。`results` には全件を入れます。`status` は `created` / `updated` / `skipped` / `error` です。
+  ```json
+  {
+    "total": 3, "created": 1, "updated": 0, "skipped": 1, "errors": 1,
+    "results": [
+      { "index": 0, "status": "created", "id": 10, "warning": "part_id 999 の部品が見つからないため、ひも付けずに登録しました" },
+      { "index": 1, "status": "skipped", "id": 4 },
+      { "index": 2, "status": "error", "error": "unit_price は0以上の数値で指定してください" }
+    ]
+  }
+  ```
+  ※存在しない `part_id` は、新規登録では `NULL` にして登録し、`on_duplicate=update` では無視して既存のひも付けを維持します。どちらも `warning` を付けます。同じリクエスト内で同じキーになった 2 件目以降にも `warning`（最初の index を示す）を付けます。検証エラーの明細は登録せず `error` にし、ほかの明細の処理は続けます。同じリクエスト内の重複も、2 件目以降は同じ規則（`skip` / `update`）で処理します。
+- **エラー**: 400（本文が配列でも `{ records }` でもない・空・5000 件超・`on_duplicate` 不正）、500
+- **副作用**: `purchase_records` への登録・更新（全体を 1 つのトランザクションで実行。失敗時はロールバック）
+
+#### `PATCH /api/purchases/:id`
+- **用途**: 購入明細の指定した項目だけを更新します。部品とのひも付けは `part_id`、解除は `part_id: null` です。
+- **リクエスト**: `application/json`。明細の項目のうち更新するものだけを指定します（`shop` / `name` は消去できません）。
+- **レスポンス**: 200 OK（更新後の明細オブジェクト、`part_name` 付き）
+- **エラー**: 400（更新項目なし・値の不正・存在しない `part_id`・`order_id` と `source_msg_id` がともになくなる更新）、404、409 `{ error: "同じ明細がすでにあります（id: N）" }`。UNIQUE 制約違反も 409、500
+- **副作用**: `shop`・`order_id`・`line_no`・`name`・`source_msg_id` のいずれかが変わると、既存の値とマージして `dedupe_key` を作り直します。`updated_at` を現在時刻に更新します。
+
+#### `DELETE /api/purchases/:id`
+- **用途**: 購入明細を 1 件物理削除します（取り消し不可）。
+- **レスポンス**: 200 OK `{ "deleted": true, "id": 10 }`
+- **エラー**: 400（ID 不正）、404、500
+- **副作用**: 該当行の削除
+
+---

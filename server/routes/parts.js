@@ -99,6 +99,11 @@ async function permanentlyDeleteParts(db, ids) {
     try {
         // storage_logs.part_id は ON DELETE CASCADE ではないため明示的に削除する
         await db.run(`DELETE FROM storage_logs WHERE part_id IN (${ph})`, targetIds);
+        // purchase_records.part_id には外部キーがないため、購入履歴は残してひも付けだけ外す
+        await db.run(
+            `UPDATE purchase_records SET part_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE part_id IN (${ph})`,
+            targetIds
+        );
         // part_tags / ai_name_suggestions は ON DELETE CASCADE で削除される
         const result = await db.run(`DELETE FROM parts WHERE id IN (${ph}) AND deleted_at IS NOT NULL`, targetIds);
         affected = result.changes;

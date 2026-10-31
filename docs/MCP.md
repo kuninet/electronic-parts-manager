@@ -36,7 +36,7 @@ flowchart LR
 
 ## 2. 公開ツール一覧
 
-本サーバーは 8 つのツールを公開します（参照系 4 ツール、書き込み系 4 ツール）。
+本サーバーは 11 個のツールを公開します（参照系 5 ツール、書き込み系 6 ツール）。
 
 | ツール名 | 分類 | 冪等性 | 説明 |
 |---|---|---|---|
@@ -48,6 +48,9 @@ flowchart LR
 | `update_part` | 更新 (`readOnlyHint: false`) | 非冪等 (`idempotentHint: false`) | 既存部品の汎用更新（名前・型番・説明・カテゴリ・購入情報・タグ・数量・保管場所） |
 | `update_part_quantity` | 更新 (`readOnlyHint: false`) | 非冪等 (`destructiveHint: true`) | 在庫数量の増減（delta）または絶対値上書き（absolute） |
 | `store_part_location` | 更新 (`readOnlyHint: false`) | 冪等 (`idempotentHint: true`) | 部品の保管場所への格納（入出庫ログ記録） |
+| `search_purchase_items` | 参照 (`readOnlyHint: true`) | 冪等 (`idempotentHint: true`) | 購入履歴（メール由来の購入明細）の検索 |
+| `import_purchase_items` | 更新 (`readOnlyHint: false`) | 冪等 (`idempotentHint: true`) | 購入明細の一括取り込み（重複は登録されない） |
+| `update_purchase_item` | 更新 (`readOnlyHint: false`) | 冪等 (`idempotentHint: true`) | 購入明細の更新（部品とのひも付け・解除を含む） |
 
 ### 2-1. `search_parts`（電子部品検索）
 
@@ -307,6 +310,105 @@ flowchart LR
   ```
   ※`steps.quantity` と `steps.location` は、その更新を行わなかった場合は `null`、`steps.fields` は項目の更新がなければ空配列です。更新後の詳細取得に失敗した場合は `part` を省き `warning` を付けて返します。
 
+### 2-9. `search_purchase_items`（購入履歴検索）
+
+メールの注文内容などから取り込んだ購入明細（何をいつどこでいくつ買ったか）を検索します。結果は注文日の新しい順です。外貨の単価は換算せず、`currency` とともにそのまま返します。
+
+- **入力パラメータ**（すべて任意）:
+  - `query` (string): 商品名・型番や通販コード・注文番号の部分一致（最大200文字）
+  - `shop` (string): 購入店の完全一致（最大100文字）
+  - `order_id` (string): 注文番号の完全一致
+  - `part_id` (integer): ひも付け先の部品ID
+  - `linked` (boolean): `true` でひも付け済みのみ、`false` で**部品に未ひも付けの明細のみ**
+  - `from` / `to` (string): 注文日の範囲（`YYYY-MM-DD`、両端を含む）
+  - `currency` (string): 通貨コード（例: `USD`）
+  - `limit` (integer): 最大件数（1〜100、デフォルト 50）
+  - `offset` (integer): 先頭から読み飛ばす件数（デフォルト 0）
+- **使い方の例**: 未ひも付けの明細を探すには `linked: false` を使います。部品との照合では、`search_parts` で部品を探し、その `id` を `update_purchase_item` の `part_id` に指定します。
+- **返却例**:
+  ```json
+  {
+    "total": 467,
+    "returned": 50,
+    "offset": 0,
+    "truncated": true,
+    "hint": "続きは offset: 50 で取得できます。条件を絞ることもできます（limit は最大 100）",
+    "items": [
+      {
+        "id": 12, "shop": "秋月電子通商", "order_id": "A-1", "line_no": 2, "purchased_at": "2026-03-01",
+        "code": "I-001", "name": "LED", "unit_price": 10, "currency": "JPY", "quantity": 5,
+        "part": { "id": 3, "name": "赤色LED 5mm" }, "source_msg_id": null, "note": null
+      }
+    ]
+  }
+  ```
+  ※`part` は部品にひも付いていなければ `null` です。
+
+### 2-10. `import_purchase_items`（購入履歴取り込み）
+
+購入明細（注文の 1 明細が 1 レコード）を一括で登録します。1 回に 1〜500 件までで、500 件を超えるときは分けて、順番に（並列にせず）呼んでください。大量のファイルは REST の `POST /api/purchases/import` に直接送れます（「[購入履歴の一括取り込み](#購入履歴の一括取り込み)」を参照）。
+
+- **入力パラメータ**:
+  - `records` (array, 必須): 明細のオブジェクトの配列（1〜500件）。各明細の項目は `shop`（必須）、`name`（必須）、`order_id`、`line_no`、`purchased_at`（`YYYY-MM-DD`）、`code`、`unit_price`、`currency`（既定 `JPY`）、`quantity`、`part_id`、`source_msg_id`、`note`。形式や範囲の細かい検証はサーバー側で行い、明細ごとのエラーとして返します
+  - `on_duplicate` (`"skip"` | `"update"`, デフォルト `"skip"`): 重複する明細の扱い。`skip` は既存を変更せず、`update` は送った項目で上書きします（`part_id` が `null` や未指定なら既存のひも付けは残ります）
+- **重複の判定キー**: 同じ `shop` の中で、次のキーが同じ明細は同一とみなします。同じデータを再度取り込んでも二重に登録されません。
+  - `order_id` と `line_no` があるとき: `order_id` + `line_no`
+  - `order_id` のみあるとき: `order_id` + 正規化した `name`（全角半角・空白・大文字小文字の違いを無視）
+  - `order_id` がなく `source_msg_id` があるとき: `source_msg_id` + 正規化した `name`
+  - `order_id` も `source_msg_id` もない明細はエラーになります
+  - 注意: `line_no` の有無でキーが変わるので、同じ店では `line_no` を付けるかどうかをそろえてください。同じリクエスト内で同じキーになった明細には `warning` が付きます
+- **存在しない `part_id`**: 新規登録ではひも付けずに登録し、`on_duplicate: "update"` では無視して既存のひも付けを維持します。どちらも `results` に `warning` を付けます。
+- **返却例**（`results` はエラーまたは `warning` のある明細だけ。作成・更新された明細の ID は `ids` にまとまります）:
+  ```json
+  {
+    "total": 3,
+    "created": 1,
+    "updated": 0,
+    "skipped": 1,
+    "errors": 1,
+    "ids": [10],
+    "results": [
+      { "index": 0, "status": "created", "id": 10, "warning": "part_id 999 の部品が見つからないため、ひも付けずに登録しました" },
+      { "index": 2, "status": "error", "error": "unit_price は0以上の数値で指定してください" }
+    ]
+  }
+  ```
+- **タイムアウト時**: 結果不明のエラーになりますが、同じ内容で再実行しても重複は登録されません。
+
+### 2-11. `update_purchase_item`（購入履歴更新）
+
+購入明細 1 件の項目を更新します。指定しなかった項目は変更されません。
+
+- **入力パラメータ**（`id` 以外はすべて任意ですが、更新項目を 1 つ以上指定する必要があります）:
+  - `id` (integer, 必須): 購入明細ID（`search_purchase_items` で調べます）
+  - `shop` (string, 1〜100文字) / `name` (string, 1〜500文字): 消去はできません
+  - `order_id` / `line_no` / `purchased_at` / `code` / `unit_price` / `currency` / `quantity` / `source_msg_id` / `note`: 値の規則は `import_purchase_items` と同じ。`null` を指定すると消去できます（`currency` は `JPY` に戻ります）
+  - `part_id` (integer / null): 部品とのひも付け。部品の `id` を指定すると付き、**`null` を指定すると外れます**。存在しない部品はエラーです
+- **注意**: `shop`・`order_id`・`line_no`・`name`・`source_msg_id` を変えた結果、ほかの明細と同じ明細になる場合は競合エラーになります。
+- **返却例**:
+  ```json
+  {
+    "updated": true,
+    "item": {
+      "id": 12, "shop": "秋月電子通商", "order_id": "A-1", "line_no": 2, "purchased_at": "2026-03-01",
+      "code": "I-001", "name": "LED", "unit_price": 10, "currency": "JPY", "quantity": 5,
+      "part": { "id": 3, "name": "赤色LED 5mm" }, "source_msg_id": null, "note": null
+    }
+  }
+  ```
+
+### 購入履歴の一括取り込み
+
+メールの注文内容をまとめた JSON ファイル（`purchase-records.json`。明細の配列）は、MCP ツールを介さず REST API に直接送れます。1 回に最大 5000 件です。
+
+```bash
+curl -X POST -H 'Content-Type: application/json' --data-binary @purchase-records.json http://<サーバー>:3001/api/purchases/import
+```
+
+- トークン認証を有効にしている場合は `-H 'Authorization: Bearer <EPM_API_TOKEN>'` を付けてください。
+- 既定では、すでにある明細は変更しません（`skip`）。送った項目で上書きするには `?on_duplicate=update` を付けます（例: `.../api/purchases/import?on_duplicate=update`）。
+- 同じファイルを再度送っても二重に登録されません。応答の `created` / `updated` / `skipped` / `errors` と、明細ごとの `results` で結果を確認できます。詳細は `docs/API.md` の「11. 購入履歴」を参照してください。
+
 ---
 
 ## 3. 環境変数
@@ -318,7 +420,7 @@ flowchart LR
 | `EPM_API_URL` | `http://localhost:3001` | EPM バックエンドのベース URL。末尾のスラッシュや `/api` は自動的に除去・正規化されます。 |
 | `EPM_AUTH_TOKEN` | なし | Bearer トークン認証用。サーバー側の環境変数 `EPM_API_TOKEN` と**同じ値**を設定します。 |
 | `EPM_BASIC_AUTH` | なし | CloudFront やリモートホストへの Basic 認証情報（`username:password` 形式）。コロン必須。 |
-| `EPM_MCP_READONLY` | `0` | `1` または `true` を設定すると、書き込み系ツール（`create_part`, `update_part`, `update_part_quantity`, `store_part_location`）を無効化し、参照専用モードとして起動します。 |
+| `EPM_MCP_READONLY` | `0` | `1` または `true` を設定すると、書き込み系ツール（`create_part`, `update_part`, `update_part_quantity`, `store_part_location`, `import_purchase_items`, `update_purchase_item`）を無効化し、参照専用モードとして起動します。 |
 | `EPM_API_TIMEOUT_MS` | `10000` | API リクエストのタイムアウト時間（ミリ秒、正の整数）。 |
 | `EPM_IMAGE_MAX_BYTES` | `10485760` (10MB) | `get_part_image` で取得を許可する画像ファイルの最大バイト数（正の整数、上限 50MB = 52428800）。 |
 

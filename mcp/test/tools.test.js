@@ -23,26 +23,29 @@ describe('MCP Tools Unit Tests (T-1 ~ T-14)', () => {
         return { client, server, apiClient };
     }
 
-    test('T-1: 8ツールが登録され、参照系は readOnlyHint: true、書き込み系は false', async () => {
+    test('T-1: 11ツールが登録され、参照系は readOnlyHint: true、書き込み系は false', async () => {
         const { client } = await createClientWithMock();
         const toolsResult = await client.listTools();
         const tools = toolsResult.tools;
 
-        assert.equal(tools.length, 8);
+        assert.equal(tools.length, 11);
         const names = tools.map((t) => t.name).sort();
         assert.deepEqual(names, [
             'create_part',
             'get_part_detail',
             'get_part_image',
+            'import_purchase_items',
             'list_master_data',
             'search_parts',
+            'search_purchase_items',
             'store_part_location',
             'update_part',
             'update_part_quantity',
+            'update_purchase_item',
         ]);
 
-        const readOnlyTools = ['get_part_detail', 'get_part_image', 'list_master_data', 'search_parts'];
-        const writeTools = ['create_part', 'store_part_location', 'update_part', 'update_part_quantity'];
+        const readOnlyTools = ['get_part_detail', 'get_part_image', 'list_master_data', 'search_parts', 'search_purchase_items'];
+        const writeTools = ['create_part', 'import_purchase_items', 'store_part_location', 'update_part', 'update_part_quantity', 'update_purchase_item'];
 
         for (const tool of tools) {
             if (readOnlyTools.includes(tool.name)) {

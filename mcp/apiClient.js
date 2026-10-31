@@ -355,6 +355,10 @@ function createApiClient(config, { fetchImpl = globalThis.fetch } = {}) {
         patchPart: (id, body) => request('PATCH', `/api/parts/${id}`, { body }),
         changeQuantity: (id, body) => request('POST', `/api/parts/${id}/quantity`, { body }),
         storePart: (body) => request('POST', '/api/qr/store', { body }),
+        listPurchases: (params) => request('GET', '/api/purchases', { query: params }),
+        getPurchase: (id) => request('GET', `/api/purchases/${id}`),
+        importPurchases: (body) => request('POST', '/api/purchases/import', { body }),
+        patchPurchase: (id, body) => request('PATCH', `/api/purchases/${id}`, { body }),
     };
 }
 

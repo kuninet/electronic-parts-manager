@@ -81,6 +81,7 @@ app.use('/api/master', require('./routes/master'));
 app.use('/api/backup', backupRouter);
 app.use('/api/qr', require('./routes/qr'));
 app.use('/api/ai-naming', require('./routes/aiNaming'));
+app.use('/api/purchases', require('./routes/purchases'));
 
 // Multer and general error handling middleware
 const multer = require('multer');
