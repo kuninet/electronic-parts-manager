@@ -308,13 +308,14 @@ test('ひも付け候補 API (PS-1 〜)', async (t) => {
     const r = await (await send('POST', '/purchases/import', [
       rec({ line_no: 1, suggested_part_id: p, suggestion_note: '理由' }),
       rec({ line_no: 2, part_id: p }),
-      rec({ line_no: 3, suggested_part_id: 9999 })
+      rec({ line_no: 3, suggested_part_id: 9999, suggestion_note: '孤児' })
     ])).json();
     assert.equal(r.created, 3);
     assert.equal(r.results[2].warning.includes('suggested_part_id 9999'), true);
     const rows = await db.all('SELECT line_no, part_id, suggested_part_id, suggestion_note FROM purchase_records ORDER BY line_no');
     assert.deepEqual(rows[0], { line_no: 1, part_id: null, suggested_part_id: p, suggestion_note: '理由' });
     assert.equal(rows[2].suggested_part_id, null);
+    assert.equal(rows[2].suggestion_note, null);
     assert.deepEqual(await db.get('SELECT shop, purchased_at, unit_price FROM parts WHERE id = ?', [p]),
       { shop: null, purchased_at: null, unit_price: null });
   });
@@ -328,9 +329,9 @@ test('ひも付け候補 API (PS-1 〜)', async (t) => {
     let row = await db.get('SELECT suggested_part_id, suggestion_note FROM purchase_records');
     assert.deepEqual(row, { suggested_part_id: q, suggestion_note: '新' });
 
-    r = await (await send('POST', '/purchases/import', { on_duplicate: 'update', records: [rec({ suggested_part_id: 9999 })] })).json();
+    r = await (await send('POST', '/purchases/import', { on_duplicate: 'update', records: [rec({ suggested_part_id: 9999, suggestion_note: '無視される' })] })).json();
     assert.ok(r.results[0].warning);
-    assert.equal((await db.get('SELECT suggested_part_id FROM purchase_records')).suggested_part_id, q);
+    assert.deepEqual(await db.get('SELECT suggested_part_id, suggestion_note FROM purchase_records'), { suggested_part_id: q, suggestion_note: '新' });
 
     await send('POST', '/purchases/import', { on_duplicate: 'update', records: [rec({ suggested_part_id: null, suggestion_note: null })] });
     row = await db.get('SELECT suggested_part_id, suggestion_note FROM purchase_records');

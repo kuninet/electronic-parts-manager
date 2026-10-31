@@ -276,6 +276,7 @@ async function planImport(db, records, onDuplicate) {
         if (value.suggested_part_id !== null && !(await hasPart(value.suggested_part_id))) {
             missingSuggestedId = value.suggested_part_id;
             value.suggested_part_id = null;
+            value.suggestion_note = null; // 候補がないのに理由だけが残らないようにする
         }
 
         const stateKey = `${value.shop}\u0000${key.value}`;
@@ -326,6 +327,7 @@ async function planImport(db, records, onDuplicate) {
                 if (f === 'part_id' && value.part_id === null) continue;
                 // 存在しない候補は無視する（明示的な null での消去は有効）
                 if (f === 'suggested_part_id' && value.suggested_part_id === null && missingSuggestedId !== null) continue;
+                if (f === 'suggestion_note' && missingSuggestedId !== null) continue;
                 if (f === 'currency' && (raw.currency === null || (typeof raw.currency === 'string' && raw.currency.trim() === ''))) continue;
                 changes[f] = value[f];
             }
