@@ -16,6 +16,9 @@ erDiagram
         integer id PK
         string name
         string part_number "型番 (最大100文字)"
+        string shop "購入先 (最大100文字)"
+        string purchased_at "購入日 (YYYY-MM-DD)"
+        real unit_price "単価 (円)"
         string description
         integer category_id FK
         integer location_id FK
@@ -60,6 +63,9 @@ erDiagram
 | `id` | INTEGER | 主キー (AUTOINCREMENT) |
 | `name` | TEXT | パーツ名 (必須) |
 | `part_number` | TEXT | 型番 (任意、最大100文字、インデックス `idx_parts_part_number` 設定。完全一致・前方一致や `ORDER BY part_number` ソートに有効。※中間一致検索 `LIKE '%...%'` ではインデックスは使用されません) |
+| `shop` | TEXT | 購入先 (任意、最大100文字。マスタは持たず自由入力。過去の値は `GET /api/parts/shops` で候補表示) |
+| `purchased_at` | TEXT | 購入日 (任意、`YYYY-MM-DD`) |
+| `unit_price` | REAL | 単価 (任意、円、0以上) |
 | `description` | TEXT | 詳細説明 |
 | `category_id` | INTEGER | `categories.id` への外部キー |
 | `location_id` | INTEGER | `locations.id` への外部キー |

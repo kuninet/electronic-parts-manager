@@ -5,7 +5,7 @@
 
 const { z } = require('zod');
 const { toPartSummary, toolResult, toolError } = require('../format.js');
-const { resolveByName, normalizePartNumberKey } = require('../resolveMaster.js');
+const { resolveCategoryId, resolveLocationId, normalizePartNumberKey } = require('../resolveMaster.js');
 const { ApiError } = require('../apiClient.js');
 
 const createPartSchema = {
@@ -17,6 +17,9 @@ const createPartSchema = {
     location_id: z.number().int().positive().optional(),
     location_name: z.string().max(100).optional(),
     description: z.string().max(2000).optional(),
+    shop: z.string().max(100).optional(),
+    purchased_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    unit_price: z.number().min(0).max(1e9).optional(),
     allow_duplicate: z.boolean().default(false),
 };
 
@@ -31,7 +34,7 @@ function registerCreatePartTool(server, { apiClient, apiUrl }) {
         'create_part',
         {
             title: '電子部品登録',
-            description: '新しい電子部品を登録します。実行するとデータが登録されます。必要に応じて事前に search_parts や list_master_data で重複や既存マスタを確認してください。',
+            description: '新しい電子部品を登録します。実行するとデータが登録されます。購入先（shop）・購入日（purchased_at: YYYY-MM-DD）・単価（unit_price: 円）も登録できます。必要に応じて事前に search_parts や list_master_data で重複や既存マスタを確認してください。',
             annotations: {
                 readOnlyHint: false,
                 idempotentHint: false,
@@ -53,34 +56,16 @@ function registerCreatePartTool(server, { apiClient, apiUrl }) {
                 // 2. カテゴリの名前解決
                 let resolvedCategoryId = args.category_id;
                 if (args.category_name !== undefined) {
-                    const categories = await apiClient.listCategories();
-                    const resolved = resolveByName(categories, args.category_name);
-                    if (resolved.error === 'ambiguous') {
-                        return toolError(`カテゴリ名「${args.category_name}」が複数あります（id: ${resolved.ids.join(', ')}）。category_id で指定してください。`);
-                    }
-                    if (resolved.error === 'not_found') {
-                        const candStr = resolved.candidates.length > 0
-                            ? `既存の候補: [${resolved.candidates.map(c => `${c.name} (id: ${c.id})`).join(', ')}]。`
-                            : '';
-                        return toolError(`カテゴリ「${args.category_name}」は存在しません。${candStr}list_master_data で一覧を確認してください。`);
-                    }
+                    const resolved = await resolveCategoryId(apiClient, args.category_name);
+                    if (resolved.error) return toolError(resolved.error);
                     resolvedCategoryId = resolved.id;
                 }
 
                 // 3. 保管場所の名前解決
                 let resolvedLocationId = args.location_id;
                 if (args.location_name !== undefined) {
-                    const locations = await apiClient.listLocations();
-                    const resolved = resolveByName(locations, args.location_name);
-                    if (resolved.error === 'ambiguous') {
-                        return toolError(`保管場所名「${args.location_name}」が複数あります（id: ${resolved.ids.join(', ')}）。location_id で指定してください。`);
-                    }
-                    if (resolved.error === 'not_found') {
-                        const candStr = resolved.candidates.length > 0
-                            ? `既存の候補: [${resolved.candidates.map(l => `${l.name} (id: ${l.id})`).join(', ')}]。`
-                            : '';
-                        return toolError(`保管場所「${args.location_name}」は存在しません。${candStr}list_master_data で一覧を確認してください。`);
-                    }
+                    const resolved = await resolveLocationId(apiClient, args.location_name);
+                    if (resolved.error) return toolError(resolved.error);
                     resolvedLocationId = resolved.id;
                 }
 
@@ -112,6 +97,9 @@ function registerCreatePartTool(server, { apiClient, apiUrl }) {
                 if (resolvedCategoryId !== undefined) payload.category_id = resolvedCategoryId;
                 if (resolvedLocationId !== undefined) payload.location_id = resolvedLocationId;
                 if (args.description !== undefined) payload.description = args.description;
+                if (args.shop !== undefined) payload.shop = args.shop;
+                if (args.purchased_at !== undefined) payload.purchased_at = args.purchased_at;
+                if (args.unit_price !== undefined) payload.unit_price = args.unit_price;
 
                 const createRes = await apiClient.createPart(payload);
                 const newId = createRes.id;

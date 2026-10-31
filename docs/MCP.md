@@ -36,7 +36,7 @@ flowchart LR
 
 ## 2. 公開ツール一覧
 
-本サーバーは 6 つのツールを公開します（参照系 3 ツール、書き込み系 3 ツール）。
+本サーバーは 8 つのツールを公開します（参照系 4 ツール、書き込み系 4 ツール）。
 
 | ツール名 | 分類 | 冪等性 | 説明 |
 |---|---|---|---|
@@ -45,17 +45,19 @@ flowchart LR
 | `get_part_image` | 参照 (`readOnlyHint: true`) | 冪等 (`idempotentHint: true`) | 部品写真の画像コンテンツ取得（刻印・型番・形状確認） |
 | `list_master_data` | 参照 (`readOnlyHint: true`) | 冪等 (`idempotentHint: true`) | カテゴリ一覧・保管場所一覧の取得 |
 | `create_part` | 更新 (`readOnlyHint: false`) | 非冪等 (`idempotentHint: false`) | 新規電子部品の登録（名前解決・型番重複チェック付き） |
+| `update_part` | 更新 (`readOnlyHint: false`) | 非冪等 (`idempotentHint: false`) | 既存部品の汎用更新（名前・型番・説明・カテゴリ・購入情報・タグ・数量・保管場所） |
 | `update_part_quantity` | 更新 (`readOnlyHint: false`) | 非冪等 (`destructiveHint: true`) | 在庫数量の増減（delta）または絶対値上書き（absolute） |
 | `store_part_location` | 更新 (`readOnlyHint: false`) | 冪等 (`idempotentHint: true`) | 部品の保管場所への格納（入出庫ログ記録） |
 
 ### 2-1. `search_parts`（電子部品検索）
 
-電子部品の在庫をキーワードやカテゴリ、保管場所で検索します。通常のアクティブな部品のみが対象で、使用済みやゴミ箱の部品は除外されます。
+電子部品の在庫をキーワードやカテゴリ、保管場所、購入先で検索します。通常のアクティブな部品のみが対象で、使用済みやゴミ箱の部品は除外されます。
 
 - **入力パラメータ**:
-  - `query` (string, 任意): 部品名・型番・説明の部分一致検索キーワード（最大200文字）
+  - `query` (string, 任意): 部品名・型番・説明・購入先の部分一致検索キーワード（最大200文字）
   - `category_id` (integer, 任意): カテゴリID（正の整数）
   - `location_id` (integer, 任意): 保管場所ID（正の整数）
+  - `shop` (string, 任意): 購入先での部分一致絞り込み（最大100文字）
   - `limit` (integer, 任意, 既定値: `50`): 返却件数の上限（1〜200）
 
 - **返却例**:
@@ -69,6 +71,7 @@ flowchart LR
         "id": 10,
         "name": "10kΩ 金属皮膜抵抗",
         "part_number": "MF25-10K",
+        "shop": "秋月電子通商",
         "quantity": 100,
         "description": "許容差±1%、1/4W…",
         "category": { "id": 1, "name": "抵抗" },
@@ -84,7 +87,7 @@ flowchart LR
 
 ### 2-2. `get_part_detail`（部品詳細取得）
 
-部品 ID を指定して、データシートURL、QRコード、作成・更新日時、使用記録などを含む完全な詳細情報を取得します。
+部品 ID を指定して、データシートURL、QRコード、作成・更新日時、使用記録などを含む完全な詳細情報（購入先・購入日・単価を含む）を取得します。
 
 - **入力パラメータ**:
   - `id` (integer, 必須): 部品ID（正の整数）
@@ -95,6 +98,7 @@ flowchart LR
     "id": 10,
     "name": "10kΩ 金属皮膜抵抗",
     "part_number": "MF25-10K",
+    "shop": "秋月電子通商",
     "quantity": 100,
     "description": "許容差±1%、1/4W、金属皮膜抵抗器です。",
     "category": { "id": 1, "name": "抵抗" },
@@ -103,6 +107,8 @@ flowchart LR
     "image_url": "http://localhost:3001/uploads/mf25.jpg",
     "status": "active",
     "datasheet_url": "https://example.com/datasheet.pdf",
+    "purchased_at": "2026-03-01",
+    "unit_price": 1.5,
     "qr_code": "P-0010",
     "used_at": null,
     "used_for": null,
@@ -183,6 +189,9 @@ flowchart LR
   - `location_id` (integer, 任意): 保管場所ID（`location_name` との排他指定）
   - `location_name` (string, 任意): 保管場所名（自動でIDに解決されます。`location_id` との排他指定）
   - `description` (string, 任意): 説明文（最大2000文字）
+  - `shop` (string, 任意): 購入先（最大100文字）
+  - `purchased_at` (string, 任意): 購入日（`YYYY-MM-DD` 形式。実在しない日付はエラー）
+  - `unit_price` (number, 任意): 単価（円。0以上の数値）
   - `allow_duplicate` (boolean, 任意, 既定値: `false`): 型番が既存部品と重複していても強制的に登録するかどうか
 
 - **名前解決の規則**:
@@ -257,6 +266,47 @@ flowchart LR
   ```
   ※既にその保管場所に格納されている場合は `unchanged: true` となり、入出庫ログは新規記録されません。
 
+### 2-8. `update_part`（電子部品更新）
+
+既存の電子部品の項目を更新します。名前・型番・説明・カテゴリ・データシートURL・購入先・購入日・単価・タグ・数量・保管場所を更新できます。指定しなかった項目は変更されません。画像・QRコード・使用済み・ゴミ箱の操作はできません。
+
+- **入力パラメータ**（`id` 以外はすべて任意ですが、更新項目を 1 つ以上指定する必要があります）:
+
+  | 項目 | 型 | 説明 |
+  |---|---|---|
+  | `id` | integer（必須） | 部品ID（正の整数） |
+  | `name` | string | 部品名（1〜200文字） |
+  | `part_number` | string / null | 型番（最大100文字）。`null` で消去 |
+  | `description` | string / null | 説明文（最大2000文字）。`null` で消去 |
+  | `category_id` | integer / null | カテゴリID。`null` で未分類。`category_name` との排他指定 |
+  | `category_name` | string | カテゴリ名（IDに解決）。`category_id` との排他指定 |
+  | `datasheet_url` | string / null | データシートURL（最大2000文字）。`null` で消去 |
+  | `shop` | string / null | 購入先（最大100文字）。`null` で消去 |
+  | `purchased_at` | string / null | 購入日（`YYYY-MM-DD`）。`null` で消去 |
+  | `unit_price` | number / null | 単価（円。0以上）。`null` で消去 |
+  | `tags` | string の配列 | **全置換**です。指定した配列が新しいタグの全体になります（空配列で全タグを外します）。前後の空白と重複は取り除きます。空白だけの要素しかない場合はエラーです |
+  | `quantity` | integer | 更新後の数量（絶対値。0以上）。専用処理で更新されログが残ります |
+  | `quantity_reason` | string | 数量変更の理由（最大200文字）。`quantity` と一緒のときだけ指定できます |
+  | `location_id` | integer | 格納先の保管場所ID。入出庫ログ（メモ `MCP`）が残ります。保管場所の消去はできません。`location_name` との排他指定 |
+  | `location_name` | string | 保管場所名（IDに解決）。`location_id` との排他指定 |
+
+- **処理の順序**: 入力の検証と名前解決をすべて済ませてから、(1) 項目の更新、(2) 数量の更新、(3) 保管場所の更新の順に実行します。途中で失敗した場合は、それまでに完了した手順（例:「項目（shop, unit_price）の更新は完了しましたが、数量の更新に失敗しました」）をエラーメッセージに含めます。タイムアウトで結果が不明な場合は `get_part_detail` での確認を促します。
+- **対象外**: ゴミ箱内の部品は項目の更新ができず、ゴミ箱・使用済みの部品は数量の更新ができません（`404`）。
+
+- **返却例**:
+  ```json
+  {
+    "updated": true,
+    "part": { "id": 45, "name": "赤色LED 5mm", "shop": "秋月電子通商", "purchased_at": "2026-03-01", "unit_price": 30, "quantity": 10 },
+    "steps": {
+      "fields": ["shop", "unit_price"],
+      "quantity": { "previous": 3, "new": 10 },
+      "location": { "previous_location_name": "一時保管トレイ", "unchanged": false }
+    }
+  }
+  ```
+  ※`steps.quantity` と `steps.location` は、その更新を行わなかった場合は `null`、`steps.fields` は項目の更新がなければ空配列です。更新後の詳細取得に失敗した場合は `part` を省き `warning` を付けて返します。
+
 ---
 
 ## 3. 環境変数
@@ -268,7 +318,7 @@ flowchart LR
 | `EPM_API_URL` | `http://localhost:3001` | EPM バックエンドのベース URL。末尾のスラッシュや `/api` は自動的に除去・正規化されます。 |
 | `EPM_AUTH_TOKEN` | なし | Bearer トークン認証用。サーバー側の環境変数 `EPM_API_TOKEN` と**同じ値**を設定します。 |
 | `EPM_BASIC_AUTH` | なし | CloudFront やリモートホストへの Basic 認証情報（`username:password` 形式）。コロン必須。 |
-| `EPM_MCP_READONLY` | `0` | `1` または `true` を設定すると、書き込み系ツール（`create_part`, `update_part_quantity`, `store_part_location`）を無効化し、参照専用モードとして起動します。 |
+| `EPM_MCP_READONLY` | `0` | `1` または `true` を設定すると、書き込み系ツール（`create_part`, `update_part`, `update_part_quantity`, `store_part_location`）を無効化し、参照専用モードとして起動します。 |
 | `EPM_API_TIMEOUT_MS` | `10000` | API リクエストのタイムアウト時間（ミリ秒、正の整数）。 |
 | `EPM_IMAGE_MAX_BYTES` | `10485760` (10MB) | `get_part_image` で取得を許可する画像ファイルの最大バイト数（正の整数、上限 50MB = 52428800）。 |
 

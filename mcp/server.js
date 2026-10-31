@@ -9,6 +9,7 @@ const { registerGetPartDetailTool } = require('./tools/getPartDetail.js');
 const { registerListMasterDataTool } = require('./tools/listMasterData.js');
 const { registerGetPartImageTool } = require('./tools/getPartImage.js');
 const { registerCreatePartTool } = require('./tools/createPart.js');
+const { registerUpdatePartTool } = require('./tools/updatePart.js');
 const { registerUpdatePartQuantityTool } = require('./tools/updatePartQuantity.js');
 const { registerStorePartLocationTool } = require('./tools/storePartLocation.js');
 
@@ -35,6 +36,7 @@ function createMcpServer({ apiClient, version = '1.0.0', readOnly = false }) {
     // 書き込み系ツール（readOnly が false の場合のみ登録）
     if (!readOnly) {
         registerCreatePartTool(server, { apiClient, apiUrl });
+        registerUpdatePartTool(server, { apiClient, apiUrl });
         registerUpdatePartQuantityTool(server, { apiClient, apiUrl });
         registerStorePartLocationTool(server, { apiClient, apiUrl });
     }

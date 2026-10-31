@@ -143,6 +143,11 @@ async function initDb() {
     await db.run('CREATE INDEX IF NOT EXISTS idx_parts_part_number ON parts(part_number)');
   } catch (e) { }
 
+  // Migration: partsテーブルに購入情報カラム追加 (#97)
+  try { await db.run('ALTER TABLE parts ADD COLUMN shop TEXT'); } catch (e) { }
+  try { await db.run('ALTER TABLE parts ADD COLUMN purchased_at TEXT'); } catch (e) { }   // 'YYYY-MM-DD'
+  try { await db.run('ALTER TABLE parts ADD COLUMN unit_price REAL'); } catch (e) { }
+
   // Migration: storage_logs.previous_location_id（「戻す」で元の保管場所に戻すため。外部キーは付けない）
   try {
     await db.run('ALTER TABLE storage_logs ADD COLUMN previous_location_id INTEGER DEFAULT NULL');

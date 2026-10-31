@@ -28,10 +28,10 @@ describe('MCP get_part_image Tool Unit Tests (GI-1 ~ GI-16)', () => {
         return { client, server, apiClient };
     }
 
-    test('GI-1: readOnly: false で 7 ツール登録、get_part_image の annotations と inputSchema.required が正しく設定される', async () => {
+    test('GI-1: readOnly: false で 8 ツール登録、get_part_image の annotations と inputSchema.required が正しく設定される', async () => {
         const { client } = await createClientWithMock();
         const toolsResult = await client.listTools();
-        assert.equal(toolsResult.tools.length, 7);
+        assert.equal(toolsResult.tools.length, 8);
 
         const imgTool = toolsResult.tools.find((t) => t.name === 'get_part_image');
         assert.ok(imgTool);

@@ -77,12 +77,13 @@
 - **用途**: パーツ一覧を検索・フィルタ・ソートして取得します。
 - **リクエスト**:
   - クエリパラメータ:
-    - `search` (string): 検索キーワード（名前、型番、説明の部分一致）
+    - `search` (string): 検索キーワード（名前、型番、説明、購入先の部分一致）
     - `category_id` (number): カテゴリIDで絞り込み
     - `location_id` (number): 保管場所IDで絞り込み
     - `tag_id` (number): タグIDで絞り込み
     - `status` (string): `'trash'`（ゴミ箱）、`'used'`（使用済み）、未指定時は通常パーツ
     - `used_for` (string): 用途キーワードで絞り込み
+    - `shop` (string): 購入先の部分一致で絞り込み
     - `sort` (string): ソートキー (`name`, `category`, `location`, `created_at`, `quantity`, `used_for`, `used_at`, `part_number`)
     - `order` (string): 並び順 (`ASC`, `DESC`)。デフォルトは `DESC`
 - **レスポンス**: 200 OK
@@ -98,6 +99,9 @@
       "location_id": 3,
       "image_path": "/uploads/123.jpg",
       "datasheet_url": "https://example.com/sheet.pdf",
+      "shop": "秋月電子通商",
+      "purchased_at": "2026-03-01",
+      "unit_price": 1.5,
       "qr_code": "P-0001",
       "used_at": null,
       "used_for": null,
@@ -135,6 +139,17 @@
 - **エラー**: 500
 - **副作用**: なし
 
+#### `GET /api/parts/shops`
+- **用途**: 購入先の入力候補を、登録件数の多い順（同数は名前順）で取得します。ゴミ箱内の部品と空の購入先は含みません。
+- **レスポンス**: 200 OK
+  ```json
+  [
+    { "name": "秋月電子通商", "count": 12 },
+    { "name": "マルツ", "count": 3 }
+  ]
+  ```
+- **エラー**: 500
+
 #### `GET /api/parts/:id`
 - **用途**: 指定したIDのパーツ詳細情報を取得します。
 - **リクエスト**: パスパラメータ `:id`（正の整数）
@@ -154,6 +169,9 @@
     - `quantity` (number, 任意): 数量（0以上の整数。デフォルト: 0）
     - `tags` (string | array, 任意): カンマ区切りタグ文字列、または文字列の配列
     - `datasheet_url` (string, 任意): データシートURL
+    - `shop` (string, 任意): 購入先（最大100文字）
+    - `purchased_at` (string, 任意): 購入日（`YYYY-MM-DD`。実在する日付のみ）
+    - `unit_price` (number, 任意): 単価（円。0以上、1e9以下）
     - `image` (file, 任意, multipartのみ): 画像ファイル（最大20MB、JPG/PNG/GIF/WEBP）
     - `datasheet` (file, 任意, multipartのみ): データシートPDFファイル（最大20MB）
 - **レスポンス**: 201 Created (`{ id: <新パーツID> }`)
@@ -188,7 +206,7 @@
 - **用途**: パーツ情報を包括的に更新します（マルチパート対応）。
 - **リクエスト**: `multipart/form-data`
   - パスパラメータ: `:id`
-  - ボディ: `POST /api/parts` と同様のフィールド。`part_number` が未送信の場合は既存値を保持、空文字の場合はNULLクリア。
+  - ボディ: `POST /api/parts` と同様のフィールド。`part_number`・`shop`・`purchased_at`・`unit_price` は未送信の場合は既存値を保持、空文字の場合はNULLクリア。
 - **レスポンス**: 200 OK（更新後のパーツオブジェクト）
 - **エラー**: 400（入力不備・画像破損等）、409（QRコード重複）、413（ファイルサイズ超過）、500
 - **副作用**: 新規ファイル添付時の古いファイルの削除（S3またはローカル）、タグ付けの更新
@@ -197,7 +215,7 @@
 - **用途**: パーツの指定フィールドのみを部分更新します（数量ステッパー操作や即時フィールド更新で使用）。
 - **リクエスト**: `application/json`
   - パスパラメータ: `:id`
-  - ボディ: 更新対象のキー・値のオブジェクト（`quantity`, `name`, `part_number`, `description`, `category_id`, `location_id`, `tags` など）
+  - ボディ: 更新対象のキー・値のオブジェクト（`quantity`, `name`, `part_number`, `description`, `category_id`, `location_id`, `shop`, `purchased_at`, `unit_price`, `tags` など。`shop`・`purchased_at`・`unit_price` は `null` または空文字で消去）
 - **レスポンス**: 200 OK（更新後のパーツオブジェクト）
 - **エラー**: 400（更新キーなし・不正なID等）、404（パーツが存在しない、または**ゴミ箱内にある**）、409（QRコード重複）、500
 - **副作用**: 該当フィールドの更新、`updated_at` の現在時刻更新

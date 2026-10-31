@@ -80,7 +80,56 @@ function normalizePartNumberKey(raw) {
     return normalized.replace(/\s+/g, ' ').toUpperCase();
 }
 
+/**
+ * マスタ名を ID に解決し、失敗時は AI 向けのエラーメッセージを返す共通処理
+ *
+ * @param {Array<{ id: number, name: string }>} items
+ * @param {string} name
+ * @param {string} label 表示名（「カテゴリ」「保管場所」）
+ * @param {string} idParam ID 指定時の引数名（category_id など）
+ * @returns {{ id: number } | { error: string }}
+ */
+function resolveMasterId(items, name, label, idParam) {
+    const resolved = resolveByName(items, name);
+    if (resolved.error === 'ambiguous') {
+        return { error: `${label}名「${name}」が複数あります（id: ${resolved.ids.join(', ')}）。${idParam} で指定してください。` };
+    }
+    if (resolved.error === 'not_found') {
+        const candStr = resolved.candidates.length > 0
+            ? `既存の候補: [${resolved.candidates.map(c => `${c.name} (id: ${c.id})`).join(', ')}]。`
+            : '';
+        return { error: `${label}「${name}」は存在しません。${candStr}list_master_data で一覧を確認してください。` };
+    }
+    return { id: resolved.id };
+}
+
+/**
+ * カテゴリ名を ID に解決する
+ *
+ * @param {{ listCategories: () => Promise<Array<{ id: number, name: string }>> }} apiClient
+ * @param {string} name
+ * @returns {Promise<{ id: number } | { error: string }>}
+ */
+async function resolveCategoryId(apiClient, name) {
+    const categories = await apiClient.listCategories();
+    return resolveMasterId(categories, name, 'カテゴリ', 'category_id');
+}
+
+/**
+ * 保管場所名を ID に解決する
+ *
+ * @param {{ listLocations: () => Promise<Array<{ id: number, name: string }>> }} apiClient
+ * @param {string} name
+ * @returns {Promise<{ id: number } | { error: string }>}
+ */
+async function resolveLocationId(apiClient, name) {
+    const locations = await apiClient.listLocations();
+    return resolveMasterId(locations, name, '保管場所', 'location_id');
+}
+
 module.exports = {
     resolveByName,
+    resolveCategoryId,
+    resolveLocationId,
     normalizePartNumberKey,
 };

@@ -31,6 +31,9 @@ const formData = ref({
   used_for: '',
   used_note: '',
   datasheet_url: '',
+  shop: '',
+  purchased_at: '',
+  unit_price: '',
   qr_code: '',
   tags: []
 });
@@ -54,6 +57,7 @@ const takeSnapshot = () => { initialSnapshot = JSON.stringify(formData.value); }
 const isDirty = () => JSON.stringify(formData.value) !== initialSnapshot;
 
 const suggestedTags = ref([]);
+const shopSuggestions = ref([]);
 
 const formatUsedAtForDisplay = (value) => {
   if (!value) return '';
@@ -68,14 +72,17 @@ const createCurrentTimestamp = () => {
 
 onMounted(async () => {
   try {
-    const [catsRes, locsRes, tagsRes] = await Promise.all([
+    const [catsRes, locsRes, tagsRes, shopsRes] = await Promise.all([
       api.get('/categories'),
       api.get('/locations'),
-      api.get('/tags')
+      api.get('/tags'),
+      // 購入先候補の取得に失敗しても他の読み込みは止めない
+      api.get('/parts/shops').catch(() => ({ data: [] }))
     ]);
     categories.value = catsRes.data;
     locations.value = locsRes.data;
     suggestedTags.value = tagsRes.data;
+    shopSuggestions.value = Array.isArray(shopsRes.data) ? shopsRes.data : [];
 
     if (props.part) {
       formData.value = { ...props.part };
@@ -86,6 +93,9 @@ onMounted(async () => {
           formData.value.tags = [];
       }
       formData.value.part_number = props.part.part_number || '';
+      formData.value.shop = props.part.shop || '';
+      formData.value.purchased_at = props.part.purchased_at || '';
+      formData.value.unit_price = props.part.unit_price ?? '';
       formData.value.used_at = props.part.used_at || '';
       formData.value.used_for = props.part.used_for || '';
       formData.value.used_note = props.part.used_note || '';
@@ -414,6 +424,24 @@ const toggleUsedState = (nextValue) => {
           <div class="form-group">
             <label>タグ</label>
             <TagInput v-model="formData.tags" :suggestions="suggestedTags" />
+          </div>
+
+          <div class="form-group">
+            <label>購入先</label>
+            <input v-model="formData.shop" list="shop-suggestions" maxlength="100" placeholder="例: 秋月電子（任意）" />
+            <datalist id="shop-suggestions">
+              <option v-for="s in shopSuggestions" :key="s.name" :value="s.name" />
+            </datalist>
+          </div>
+
+          <div class="form-group">
+            <label>購入日</label>
+            <input type="date" v-model="formData.purchased_at" />
+          </div>
+
+          <div class="form-group">
+            <label>単価（円）</label>
+            <input type="number" min="0" step="any" v-model="formData.unit_price" placeholder="例: 30（任意）" />
           </div>
 
           <div class="form-group">

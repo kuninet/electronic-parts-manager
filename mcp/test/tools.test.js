@@ -23,12 +23,12 @@ describe('MCP Tools Unit Tests (T-1 ~ T-14)', () => {
         return { client, server, apiClient };
     }
 
-    test('T-1: 7ツールが登録され、参照系は readOnlyHint: true、書き込み系は false', async () => {
+    test('T-1: 8ツールが登録され、参照系は readOnlyHint: true、書き込み系は false', async () => {
         const { client } = await createClientWithMock();
         const toolsResult = await client.listTools();
         const tools = toolsResult.tools;
 
-        assert.equal(tools.length, 7);
+        assert.equal(tools.length, 8);
         const names = tools.map((t) => t.name).sort();
         assert.deepEqual(names, [
             'create_part',
@@ -37,11 +37,12 @@ describe('MCP Tools Unit Tests (T-1 ~ T-14)', () => {
             'list_master_data',
             'search_parts',
             'store_part_location',
+            'update_part',
             'update_part_quantity',
         ]);
 
         const readOnlyTools = ['get_part_detail', 'get_part_image', 'list_master_data', 'search_parts'];
-        const writeTools = ['create_part', 'store_part_location', 'update_part_quantity'];
+        const writeTools = ['create_part', 'store_part_location', 'update_part', 'update_part_quantity'];
 
         for (const tool of tools) {
             if (readOnlyTools.includes(tool.name)) {
@@ -91,6 +92,7 @@ describe('MCP Tools Unit Tests (T-1 ~ T-14)', () => {
             search: undefined,
             category_id: undefined,
             location_id: undefined,
+            shop: undefined,
         });
 
         const data = JSON.parse(res.content[0].text);
@@ -101,6 +103,20 @@ describe('MCP Tools Unit Tests (T-1 ~ T-14)', () => {
         assert.equal(data.parts[0].id, 1);
         assert.equal(data.parts[49].id, 50);
         assert.ok(data.hint);
+    });
+
+    test('T-3b: shop を指定すると listParts に前後空白を除いて渡る', async () => {
+        let calledParams = null;
+        const { client } = await createClientWithMock({
+            listParts: async (params) => {
+                calledParams = params;
+                return [];
+            },
+        });
+
+        const res = await client.callTool({ name: 'search_parts', arguments: { shop: ' 秋月電子 ' } });
+        assert.equal(res.isError, undefined);
+        assert.equal(calledParams.shop, '秋月電子');
     });
 
     test('T-4: query, category_id, location_id, limit の指定が正しく渡る', async () => {
@@ -131,6 +147,7 @@ describe('MCP Tools Unit Tests (T-1 ~ T-14)', () => {
             search: 'LED',
             category_id: 2,
             location_id: 3,
+            shop: undefined,
         });
 
         const data = JSON.parse(res.content[0].text);
