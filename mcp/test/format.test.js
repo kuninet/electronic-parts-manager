@@ -6,6 +6,7 @@ const {
     toCategory,
     toLocation,
     toPurchaseRecord,
+    toImportBatch,
     toolResult,
     toolError,
 } = require('../format.js');
@@ -274,6 +275,7 @@ describe('MCP Format Unit Tests (F-1 ~ F-9)', () => {
             part: { id: 3, name: '高輝度LED' },
             source_msg_id: 'msg1',
             note: 'メモ',
+            import_batch_id: null,
         });
     });
 
@@ -287,6 +289,23 @@ describe('MCP Format Unit Tests (F-1 ~ F-9)', () => {
 
         const orphan = toPurchaseRecord({ id: 1, shop: 'S', name: 'x', part_id: 9 });
         assert.deepEqual(orphan.part, { id: 9, name: null });
+    });
+
+    test('toPurchaseRecord: import_batch_id を出す（なければ null）', () => {
+        assert.equal(toPurchaseRecord({ id: 1, shop: 'S', name: 'x', import_batch_id: 4 }).import_batch_id, 4);
+        assert.equal(toPurchaseRecord({ id: 1, shop: 'S', name: 'x' }).import_batch_id, null);
+    });
+
+    test('toImportBatch: 件数の列名を短くし、undone_at を出す', () => {
+        assert.deepEqual(toImportBatch({
+            id: 2, source: 'muse', note: null, on_duplicate: 'update', total: 10,
+            created_count: 7, updated_count: 2, skipped_count: 1, error_count: 0,
+            created_at: '2026-10-31 10:00:00', undone_at: '2026-10-31 11:00:00',
+        }), {
+            id: 2, source: 'muse', note: null, on_duplicate: 'update', total: 10,
+            created: 7, updated: 2, skipped: 1, errors: 0,
+            created_at: '2026-10-31 10:00:00', undone_at: '2026-10-31 11:00:00',
+        });
     });
 
     test('toolResult と toolError のフォーマット検証', () => {

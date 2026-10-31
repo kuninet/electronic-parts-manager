@@ -26,10 +26,10 @@ describe('MCP 書き込みツール単体テスト (WT-1 ~ WT-20)', () => {
         return { client, server, apiClient };
     }
 
-    test('WT-1: readOnly: false では 11 ツールが登録され、書き込みツールは readOnlyHint: false、store_part_location・import_purchase_items・update_purchase_item だけが idempotentHint: true', async () => {
+    test('WT-1: readOnly: false では 13 ツールが登録され、書き込みツールは readOnlyHint: false、store_part_location・import_purchase_items・update_purchase_item だけが idempotentHint: true', async () => {
         const { client } = await createClientWithMock({}, { readOnly: false });
         const { tools } = await client.listTools();
-        assert.equal(tools.length, 11);
+        assert.equal(tools.length, 13);
 
         const createTool = tools.find(t => t.name === 'create_part');
         const updateTool = tools.find(t => t.name === 'update_part_quantity');
@@ -52,6 +52,11 @@ describe('MCP 書き込みツール単体テスト (WT-1 ~ WT-20)', () => {
         assert.equal(storeTool.annotations?.idempotentHint, true);
         assert.equal(storeTool.annotations?.destructiveHint, false);
 
+        const undoTool = tools.find(t => t.name === 'undo_import_batch');
+        assert.equal(undoTool.annotations?.readOnlyHint, false);
+        assert.equal(undoTool.annotations?.idempotentHint, false);
+        assert.equal(undoTool.annotations?.destructiveHint, true);
+
         for (const name of ['import_purchase_items', 'update_purchase_item']) {
             const tool = tools.find(t => t.name === name);
             assert.equal(tool.annotations?.readOnlyHint, false, name);
@@ -60,14 +65,15 @@ describe('MCP 書き込みツール単体テスト (WT-1 ~ WT-20)', () => {
         }
     });
 
-    test('WT-2: readOnly: true では参照系の 5 ツールのみ登録される', async () => {
+    test('WT-2: readOnly: true では参照系の 6 ツールのみ登録される', async () => {
         const { client } = await createClientWithMock({}, { readOnly: true });
         const { tools } = await client.listTools();
-        assert.equal(tools.length, 5);
+        assert.equal(tools.length, 6);
         const names = tools.map(t => t.name).sort();
-        assert.deepEqual(names, ['get_part_detail', 'get_part_image', 'list_master_data', 'search_parts', 'search_purchase_items']);
+        assert.deepEqual(names, ['get_part_detail', 'get_part_image', 'list_import_batches', 'list_master_data', 'search_parts', 'search_purchase_items']);
         assert.ok(!names.includes('update_part'));
         assert.ok(!names.includes('import_purchase_items'));
+        assert.ok(!names.includes('undo_import_batch'));
         assert.ok(!names.includes('update_purchase_item'));
     });
 

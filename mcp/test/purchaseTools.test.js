@@ -5,7 +5,7 @@ const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { createMcpServer } = require('../server.js');
 const { ApiError } = require('../apiClient.js');
 
-describe('MCP 購入履歴ツールテスト (PT-1 ~ PT-24)', () => {
+describe('MCP 購入履歴ツールテスト (PT-1 ~ PT-38)', () => {
     const item = (over = {}) => ({
         id: 1,
         shop: '秋月電子通商',
@@ -42,6 +42,18 @@ describe('MCP 購入履歴ツールテスト (PT-1 ~ PT-24)', () => {
                     results: b.records.map((_, index) => ({ index, status: 'created', id: 100 + index })),
                 };
             },
+            listImportBatches: async (q) => {
+                calls.push(['listImportBatches', q]);
+                return [{
+                    id: 3, source: 'muse', note: '初回', on_duplicate: 'skip', total: 10,
+                    created_count: 8, updated_count: 1, skipped_count: 1, error_count: 0,
+                    created_at: '2026-10-31 10:00:00', undone_at: null,
+                }];
+            },
+            undoImportBatch: async (id, b) => {
+                calls.push(['undoImportBatch', id, b]);
+                return { batch_id: id, dry_run: b.dry_run, deleted: 8, restored: 1, missing: 0, linked_deleted: 2, modified_after_import: 1 };
+            },
             patchPurchase: async (id, b) => {
                 calls.push(['patchPurchase', id, b]);
                 return item({ id, ...b, part_name: b.part_id ? '高輝度LED' : null });
@@ -68,6 +80,7 @@ describe('MCP 購入履歴ツールテスト (PT-1 ~ PT-24)', () => {
             shop: '秋月電子通商',
             order_id: undefined,
             part_id: undefined,
+            batch_id: undefined,
             linked: false,
             from: '2026-01-01',
             to: undefined,
@@ -137,10 +150,12 @@ describe('MCP 購入履歴ツールテスト (PT-1 ~ PT-24)', () => {
         assert.equal(tool.annotations.readOnlyHint, true);
     });
 
-    test('PT-7: readOnly では search_purchase_items だけが登録される', async () => {
+    test('PT-7: readOnly では参照系の search_purchase_items と list_import_batches だけが登録され、書き込み系は登録されない', async () => {
         const { client } = await setup({}, { readOnly: true });
         const names = (await client.listTools()).tools.map((t) => t.name);
         assert.ok(names.includes('search_purchase_items'));
+        assert.ok(names.includes('list_import_batches'));
+        assert.ok(!names.includes('undo_import_batch'));
         assert.ok(!names.includes('import_purchase_items'));
         assert.ok(!names.includes('update_purchase_item'));
     });
@@ -156,6 +171,7 @@ describe('MCP 購入履歴ツールテスト (PT-1 ~ PT-24)', () => {
         assert.deepEqual(calls[0], ['importPurchases', { records, on_duplicate: 'skip' }]);
         assert.deepEqual(body(res), {
             total: 2, created: 2, updated: 0, skipped: 0, errors: 0,
+            batch_id: null,
             ids: [100, 101],
             results: [],
         });
@@ -360,5 +376,151 @@ describe('MCP 購入履歴ツールテスト (PT-1 ~ PT-24)', () => {
         assert.equal(res.isError, true);
         assert.match(res.content[0].text, /結果不明/);
         assert.match(res.content[0].text, /search_purchase_items/);
+    });
+
+    test('PT-30: search_purchase_items は batch_id を API に渡し、出力に import_batch_id を含む', async () => {
+        const { client, calls } = await setup({
+            listPurchases: async (q) => {
+                calls.push(['listPurchases', q]);
+                return { total: 1, items: [item({ import_batch_id: 3 })] };
+            },
+        });
+        const res = await call(client, 'search_purchase_items', { batch_id: 3 });
+        assert.equal(calls[0][1].batch_id, 3);
+        assert.equal(body(res).items[0].import_batch_id, 3);
+        const bad = await call(client, 'search_purchase_items', { batch_id: 0 });
+        assert.equal(bad.isError, true);
+    });
+
+    test('PT-31: import_purchase_items は dry_run / source / note を API に渡し、preview（先頭20件）を返し、ids は出さない', async () => {
+        const { client, calls } = await setup({
+            importPurchases: async (b) => {
+                calls.push(['importPurchases', b]);
+                return {
+                    total: 25, created: 24, updated: 1, skipped: 0, errors: 0, dry_run: true,
+                    results: [
+                        ...Array.from({ length: 24 }, (_, i) => ({ index: i, status: 'created', record: { shop: 'S', name: `n${i}` } })),
+                        { index: 24, status: 'updated', id: 9, record: { shop: 'S', name: 'u' }, before: { id: 9, shop: 'S', name: 'old' } },
+                    ],
+                };
+            },
+        });
+        const records = Array.from({ length: 25 }, (_, i) => ({ shop: 'S', name: `n${i}`, order_id: 'O', line_no: i }));
+        const res = await call(client, 'import_purchase_items', { records, dry_run: true, source: 'muse', note: 'テスト' });
+        assert.ok(!res.isError);
+        assert.deepEqual(calls[0][1], { records, on_duplicate: 'skip', dry_run: true, source: 'muse', note: 'テスト' });
+        const data = body(res);
+        assert.equal(data.dry_run, true);
+        assert.equal(data.created, 24);
+        assert.equal(data.preview.length, 20);
+        assert.equal(data.preview[0].status, 'created');
+        assert.deepEqual(data.preview[0].record, { shop: 'S', name: 'n0' });
+        assert.equal('ids' in data, false);
+        assert.equal('batch_id' in data, false);
+
+        // updated は before 付きで、created が20件を超える分は preview に入らない
+        const { client: c2 } = await setup({
+            importPurchases: async () => ({
+                total: 2, created: 0, updated: 2, skipped: 0, errors: 0, dry_run: true,
+                results: [
+                    { index: 0, status: 'updated', id: 9, record: { name: 'u' }, before: { name: 'old' } },
+                    { index: 1, status: 'skipped', id: 10 },
+                ],
+            }),
+        });
+        const d2 = body(await call(c2, 'import_purchase_items', { records: [{ shop: 'S', name: 'x' }], dry_run: true }));
+        assert.equal(d2.preview.length, 1);
+        assert.deepEqual(d2.preview[0].before, { name: 'old' });
+    });
+
+    test('PT-32: import_purchase_items の本番は batch_id を返し、dry_run を送らない', async () => {
+        const { client, calls } = await setup({
+            importPurchases: async (b) => {
+                calls.push(['importPurchases', b]);
+                return { total: 1, created: 1, updated: 0, skipped: 0, errors: 0, batch_id: 7, results: [{ index: 0, status: 'created', id: 3 }] };
+            },
+        });
+        const data = body(await call(client, 'import_purchase_items', { records: [{ shop: 'S', name: 'x', order_id: '1' }] }));
+        assert.equal(data.batch_id, 7);
+        assert.deepEqual(data.ids, [3]);
+        assert.equal('dry_run' in calls[0][1], false);
+        assert.equal('source' in calls[0][1], false);
+    });
+
+    test('PT-33: import_purchase_items の説明に dry_run の案内と取り消しの方法が書かれている', async () => {
+        const { client } = await setup();
+        const tool = (await client.listTools()).tools.find((t) => t.name === 'import_purchase_items');
+        assert.match(tool.description, /dry_run: true で件数と内容を確認してください/);
+        assert.match(tool.description, /undo_import_batch/);
+    });
+
+    test('PT-34: list_import_batches は limit（既定20）を渡し、件数とともに整形して返す', async () => {
+        const { client, calls } = await setup();
+        const res = await call(client, 'list_import_batches', {});
+        assert.deepEqual(calls[0], ['listImportBatches', { limit: 20 }]);
+        const data = body(res);
+        assert.equal(data.returned, 1);
+        assert.deepEqual(data.batches[0], {
+            id: 3, source: 'muse', note: '初回', on_duplicate: 'skip', total: 10,
+            created: 8, updated: 1, skipped: 1, errors: 0,
+            created_at: '2026-10-31 10:00:00', undone_at: null,
+        });
+        for (const limit of [0, 51]) {
+            assert.equal((await call(client, 'list_import_batches', { limit })).isError, true);
+        }
+    });
+
+    test('PT-35: undo_import_batch は confirm なしだと dry_run で呼び、確認メッセージを付ける', async () => {
+        const { client, calls } = await setup();
+        const res = await call(client, 'undo_import_batch', { batch_id: 3 });
+        assert.ok(!res.isError);
+        assert.deepEqual(calls[0], ['undoImportBatch', 3, { dry_run: true }]);
+        const data = body(res);
+        assert.equal(data.dry_run, true);
+        assert.equal(data.deleted, 8);
+        assert.equal(data.linked_deleted, 2);
+        assert.match(data.message, /confirm: true を指定してください/);
+        assert.equal('undone' in data, false);
+
+        await call(client, 'undo_import_batch', { batch_id: 3, confirm: false });
+        assert.deepEqual(calls[1], ['undoImportBatch', 3, { dry_run: true }]);
+    });
+
+    test('PT-36: undo_import_batch は confirm: true のときだけ実際に取り消す', async () => {
+        const { client, calls } = await setup();
+        const res = await call(client, 'undo_import_batch', { batch_id: 3, confirm: true });
+        assert.deepEqual(calls[0], ['undoImportBatch', 3, { dry_run: false }]);
+        const data = body(res);
+        assert.equal(data.dry_run, false);
+        assert.equal(data.undone, true);
+        assert.equal(data.message, undefined);
+    });
+
+    test('PT-37: undo_import_batch の 404 / 409 / unknownOutcome / スキーマ違反は isError', async () => {
+        let err = new ApiError('conflict', 409, '競合が発生しました: このバッチはすでに取り消されています');
+        const { client, calls } = await setup({ undoImportBatch: async () => { throw err; } });
+        let res = await call(client, 'undo_import_batch', { batch_id: 3, confirm: true });
+        assert.equal(res.isError, true);
+        assert.match(res.content[0].text, /すでに取り消されています/);
+
+        err = new ApiError('timeout', null, 'タイムアウト', { unknownOutcome: true });
+        res = await call(client, 'undo_import_batch', { batch_id: 3, confirm: true });
+        assert.match(res.content[0].text, /結果不明/);
+        assert.match(res.content[0].text, /list_import_batches/);
+
+        for (const args of [{}, { batch_id: 0 }, { batch_id: 1.5 }, { batch_id: 1, confirm: 'yes' }]) {
+            assert.equal((await call(client, 'undo_import_batch', args)).isError, true, JSON.stringify(args));
+        }
+        assert.equal(calls.length, 0);
+    });
+
+    test('PT-38: undo_import_batch の annotations は destructiveHint: true / idempotentHint: false', async () => {
+        const { client } = await setup();
+        const tool = (await client.listTools()).tools.find((t) => t.name === 'undo_import_batch');
+        assert.equal(tool.annotations.readOnlyHint, false);
+        assert.equal(tool.annotations.destructiveHint, true);
+        assert.equal(tool.annotations.idempotentHint, false);
+        const list = (await client.listTools()).tools.find((t) => t.name === 'list_import_batches');
+        assert.equal(list.annotations.readOnlyHint, true);
     });
 });

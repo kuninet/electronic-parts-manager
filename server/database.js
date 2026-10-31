@@ -196,13 +196,38 @@ async function initDb() {
       source_msg_id TEXT,
       note TEXT,
       dedupe_key TEXT NOT NULL,
+      import_batch_id INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_purchase_records_dedupe ON purchase_records(shop, dedupe_key);
     CREATE INDEX IF NOT EXISTS idx_purchase_records_part_id ON purchase_records(part_id);
     CREATE INDEX IF NOT EXISTS idx_purchase_records_order ON purchase_records(shop, order_id);
+    CREATE TABLE IF NOT EXISTS purchase_import_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT,
+      note TEXT,
+      on_duplicate TEXT NOT NULL,
+      total INTEGER NOT NULL,
+      created_count INTEGER NOT NULL,
+      updated_count INTEGER NOT NULL,
+      skipped_count INTEGER NOT NULL,
+      error_count INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      undone_at DATETIME DEFAULT NULL
+    );
+    CREATE TABLE IF NOT EXISTS purchase_import_changes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id INTEGER NOT NULL,
+      record_id INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      before_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_purchase_import_changes_batch ON purchase_import_changes(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_purchase_import_changes_record ON purchase_import_changes(record_id);
   `);
+  // 先に作られた purchase_records には import_batch_id がないため追加する
+  try { await db.run('ALTER TABLE purchase_records ADD COLUMN import_batch_id INTEGER'); } catch (e) { }
 
   // Seed some initial data if empty
   const categories = await db.all('SELECT * FROM categories');

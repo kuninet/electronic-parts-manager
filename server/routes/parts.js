@@ -101,7 +101,7 @@ async function permanentlyDeleteParts(db, ids) {
         await db.run(`DELETE FROM storage_logs WHERE part_id IN (${ph})`, targetIds);
         // purchase_records.part_id には外部キーがないため、購入履歴は残してひも付けだけ外す
         await db.run(
-            `UPDATE purchase_records SET part_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE part_id IN (${ph})`,
+            `UPDATE purchase_records SET part_id = NULL, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE part_id IN (${ph})`,
             targetIds
         );
         // part_tags / ai_name_suggestions は ON DELETE CASCADE で削除される

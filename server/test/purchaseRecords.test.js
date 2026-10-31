@@ -231,6 +231,8 @@ test('購入履歴 API テスト (PR-1 〜)', async (t) => {
 
   t.beforeEach(async () => {
     await db.run('DELETE FROM purchase_records');
+    await db.run('DELETE FROM purchase_import_batches');
+    await db.run('DELETE FROM purchase_import_changes');
     await db.run('DELETE FROM parts');
   });
 
@@ -743,6 +745,10 @@ test('購入履歴 API テスト (PR-1 〜)', async (t) => {
       rec({ shop: 'Mouser', order_id: 'M-1', line_no: null, currency: 'USD', unit_price: 1.25 })
     ]);
     const before = await db.all('SELECT * FROM purchase_records ORDER BY id');
+    const batchesBefore = await db.all('SELECT * FROM purchase_import_batches ORDER BY id');
+    const changesBefore = await db.all('SELECT * FROM purchase_import_changes ORDER BY id');
+    assert.equal(batchesBefore.length, 1);
+    assert.equal(changesBefore.length, 2);
 
     const exportRes = await fetch(`${baseUrl}/backup/export/full`);
     assert.equal(exportRes.status, 200);
@@ -750,9 +756,13 @@ test('購入履歴 API テスト (PR-1 〜)', async (t) => {
     const zip = new AdmZip(zipBuffer);
     const dump = JSON.parse(zip.getEntry('backup_data.json').getData().toString('utf8'));
     assert.equal(dump.purchaseRecords.length, 2);
+    assert.equal(dump.purchaseImportBatches.length, 1);
+    assert.equal(dump.purchaseImportChanges.length, 2);
 
     // 消してから復元する
     await db.run('DELETE FROM purchase_records');
+    await db.run('DELETE FROM purchase_import_batches');
+    await db.run('DELETE FROM purchase_import_changes');
     const form = new FormData();
     form.append('file', new Blob([zipBuffer], { type: 'application/zip' }), 'backup.zip');
     const restoreRes = await fetch(`${baseUrl}/backup/import/full`, { method: 'POST', body: form });
@@ -760,6 +770,8 @@ test('購入履歴 API テスト (PR-1 〜)', async (t) => {
 
     const after = await db.all('SELECT * FROM purchase_records ORDER BY id');
     assert.deepEqual(after, before);
+    assert.deepEqual(await db.all('SELECT * FROM purchase_import_batches ORDER BY id'), batchesBefore);
+    assert.deepEqual(await db.all('SELECT * FROM purchase_import_changes ORDER BY id'), changesBefore);
   });
 
   await t.test('PR-61: purchaseRecords を含まない古いバックアップでも復元でき、購入履歴は空になる', async () => {
@@ -772,6 +784,8 @@ test('購入履歴 API テスト (PR-1 〜)', async (t) => {
     const res = await fetch(`${baseUrl}/backup/import/full`, { method: 'POST', body: form });
     assert.equal(res.status, 200, await res.clone().text());
     assert.equal((await db.get('SELECT COUNT(*) AS c FROM purchase_records')).c, 0);
+    assert.equal((await db.get('SELECT COUNT(*) AS c FROM purchase_import_batches')).c, 0);
+    assert.equal((await db.get('SELECT COUNT(*) AS c FROM purchase_import_changes')).c, 0);
   });
 
   await t.test('PR-62: POST /backup/reset で purchase_records も空になる', async () => {
@@ -779,5 +793,483 @@ test('購入履歴 API テスト (PR-1 〜)', async (t) => {
     const res = await send('POST', '/backup/reset', {});
     assert.equal(res.status, 200);
     assert.equal((await db.get('SELECT COUNT(*) AS c FROM purchase_records')).c, 0);
+    assert.equal((await db.get('SELECT COUNT(*) AS c FROM purchase_import_batches')).c, 0);
+    assert.equal((await db.get('SELECT COUNT(*) AS c FROM purchase_import_changes')).c, 0);
+  });
+
+  const count = async (table) => (await db.get(`SELECT COUNT(*) AS c FROM ${table}`)).c;
+  const undo = (id, body) => send('POST', `/purchases/batches/${id}/undo`, body);
+
+  await t.test('PR-70: dry_run は本番と同じ件数・状態になり、DB に何も残らない', async () => {
+    const records = [
+      rec({ line_no: 1, name: '既存' }),
+      rec({ line_no: 1, name: '既存', quantity: 50 }),   // リクエスト内の重複
+      rec({ line_no: 2, name: '新規' }),
+      rec({ line_no: 3, unit_price: -1 }),                // エラー
+      rec({ line_no: 4, part_id: 9999 })                  // 存在しない part_id
+    ];
+    for (const on_duplicate of ['skip', 'update']) {
+      await db.run('DELETE FROM purchase_records');
+      await importRecords([rec({ line_no: 1, name: '既存', quantity: 1 })]);
+      await db.run('DELETE FROM purchase_import_batches');
+      await db.run('DELETE FROM purchase_import_changes');
+      const snapshot = await db.all('SELECT * FROM purchase_records ORDER BY id');
+
+      const dry = await (await importRecords({ records, on_duplicate, dry_run: true })).json();
+      assert.equal(dry.dry_run, true);
+      assert.equal('batch_id' in dry, false);
+      assert.deepEqual(await db.all('SELECT * FROM purchase_records ORDER BY id'), snapshot);
+      assert.equal(await count('purchase_import_batches'), 0);
+      assert.equal(await count('purchase_import_changes'), 0);
+
+      const real = await (await importRecords({ records, on_duplicate })).json();
+      assert.equal(typeof real.batch_id, 'number');
+      for (const k of ['total', 'created', 'updated', 'skipped', 'errors']) {
+        assert.equal(dry[k], real[k], `${on_duplicate}:${k}`);
+      }
+      assert.deepEqual(dry.results.map(r => [r.index, r.status, r.warning, r.error]), real.results.map(r => [r.index, r.status, r.warning, r.error]));
+    }
+  });
+
+  await t.test('PR-71: dry_run の results は created に id がなく、record と（updated なら）before が付く', async () => {
+    const partId = await insertPart('LED');
+    await importRecords([rec({ line_no: 1, name: '既存', quantity: 1, part_id: partId })]);
+    const body = await (await importRecords({
+      records: [rec({ line_no: 1, name: '既存', quantity: 9 }), rec({ line_no: 2, name: '新規' }), rec({ line_no: 2, name: '新規' }), rec({ line_no: 3, shop: '' })],
+      on_duplicate: 'update',
+      dry_run: true
+    })).json();
+    const [updated, created, again, error] = body.results;
+    assert.equal(updated.status, 'updated');
+    assert.equal(typeof updated.id, 'number');
+    assert.equal(updated.record.quantity, 9);
+    assert.equal(updated.record.name, '既存');
+    assert.equal('dedupe_key' in updated.record, false);
+    assert.equal(updated.before.quantity, 1);
+    assert.equal(updated.before.part_id, partId);
+    assert.equal('dedupe_key' in updated.before, false);
+
+    assert.equal(created.status, 'created');
+    assert.equal('id' in created, false);
+    assert.equal(created.record.name, '新規');
+    assert.equal('before' in created, false);
+
+    // このリクエストで作った行への 2 件目は、ROLLBACK される id を含まない
+    assert.equal(again.status, 'updated');
+    assert.equal('id' in again, false);
+    assert.equal('id' in again.before, false);
+
+    assert.equal(error.status, 'error');
+    assert.equal('record' in error, false);
+  });
+
+  await t.test('PR-72: ?dry_run=true（配列本文）と、dry_run / source / note の検証', async () => {
+    const res = await importRecords([rec()], '?dry_run=true');
+    const body = await res.json();
+    assert.equal(body.dry_run, true);
+    assert.equal(body.created, 1);
+    assert.equal(await count('purchase_records'), 0);
+
+    assert.equal((await importRecords({ records: [rec()], dry_run: 'maybe' })).status, 400);
+    assert.equal((await importRecords([rec()], '?dry_run=1')).status, 400);
+    assert.equal((await importRecords({ records: [rec()], source: 'a'.repeat(101) })).status, 400);
+    assert.equal((await importRecords({ records: [rec()], note: 'a'.repeat(1001) })).status, 400);
+    assert.equal((await importRecords({ records: [rec()], source: 5 })).status, 400);
+    assert.equal(await count('purchase_records'), 0);
+    assert.equal(await count('purchase_import_batches'), 0);
+  });
+
+  await t.test('PR-73: 本番の取り込みはバッチと変更を記録し、created の行に import_batch_id が入る', async () => {
+    const partId = await insertPart('LED');
+    const first = await (await importRecords([rec({ line_no: 1, part_id: partId, quantity: 1 })])).json();
+    const body = await (await importRecords({
+      records: [rec({ line_no: 1, quantity: 7 }), rec({ line_no: 2 }), rec({ line_no: 3, unit_price: -1 }), rec({ line_no: 2 })],
+      on_duplicate: 'update',
+      source: 'muse',
+      note: ' 2回目 '
+    })).json();
+    assert.equal(body.batch_id, first.batch_id + 1);
+
+    const batch = await db.get('SELECT * FROM purchase_import_batches WHERE id = ?', [body.batch_id]);
+    assert.equal(batch.source, 'muse');
+    assert.equal(batch.note, '2回目');
+    assert.equal(batch.on_duplicate, 'update');
+    assert.deepEqual(
+      [batch.total, batch.created_count, batch.updated_count, batch.skipped_count, batch.error_count, batch.undone_at],
+      [4, 1, 2, 0, 1, null]
+    );
+
+    const rows = await db.all('SELECT line_no, import_batch_id FROM purchase_records ORDER BY line_no');
+    assert.deepEqual(rows, [
+      { line_no: 1, import_batch_id: first.batch_id },
+      { line_no: 2, import_batch_id: body.batch_id }
+    ]);
+
+    // 変更は、同じ行を 2 回変えても 1 行だけ（戻す先は取り込み前）。skipped と error は記録しない
+    const changes = await db.all('SELECT * FROM purchase_import_changes WHERE batch_id = ? ORDER BY id', [body.batch_id]);
+    assert.deepEqual(changes.map(c => c.action), ['updated', 'created']);
+    const before = JSON.parse(changes[0].before_json);
+    assert.equal(before.quantity, 1);
+    assert.equal(before.part_id, partId);
+    assert.equal(changes[1].before_json, null);
+
+    // 内容が空のバッチ（全件 skip）も記録され、changes は 0 件
+    const skipOnly = await (await importRecords([rec({ line_no: 1 })])).json();
+    assert.equal(skipOnly.skipped, 1);
+    assert.equal(await count(`purchase_import_changes WHERE batch_id = ${skipOnly.batch_id}`), 0);
+  });
+
+  await t.test('PR-74: created だけのバッチを取り消すと行が消え、バッチと変更の記録は残る', async () => {
+    const keep = await (await importRecords([rec({ order_id: 'KEEP' })])).json();
+    const { batch_id } = await (await importRecords([rec({ line_no: 1 }), rec({ line_no: 2 }), rec({ line_no: 3 })])).json();
+    assert.equal(await count('purchase_records'), 4);
+
+    const res = await undo(batch_id);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      batch_id, dry_run: false, deleted: 3, restored: 0, missing: 0, linked_deleted: 0, modified_after_import: 0
+    });
+    const rows = await db.all('SELECT order_id FROM purchase_records');
+    assert.deepEqual(rows, [{ order_id: 'KEEP' }]);
+    assert.ok((await db.get('SELECT undone_at FROM purchase_import_batches WHERE id = ?', [batch_id])).undone_at);
+    assert.equal(await count(`purchase_import_changes WHERE batch_id = ${batch_id}`), 3);
+    assert.equal((await db.get('SELECT undone_at FROM purchase_import_batches WHERE id = ?', [keep.batch_id])).undone_at, null);
+  });
+
+  await t.test('PR-75: update のバッチを取り消すと値が元に戻る（part_id も含む）。同じ行を 2 回変えても取り込み前に戻る', async () => {
+    const partA = await insertPart('A');
+    const partB = await insertPart('B');
+    const b1 = await (await importRecords([rec({ line_no: 1, part_id: partA, quantity: 1, note: '元' })])).json();
+    const original = await db.get('SELECT * FROM purchase_records');
+
+    const b2 = await (await importRecords({
+      records: [
+        rec({ line_no: 1, part_id: partB, quantity: 2, note: '変更1', unit_price: 99 }),
+        rec({ line_no: 1, quantity: 3, note: '変更2' })
+      ],
+      on_duplicate: 'update'
+    })).json();
+    assert.equal(b2.updated, 2);
+    assert.equal((await db.get('SELECT quantity FROM purchase_records')).quantity, 3);
+
+    // b1 は b2 が同じ明細を変えているため、先には取り消せない（PR-77 参照）。b2 を取り消す
+    const res = await undo(b2.batch_id);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.restored, 1);
+    assert.equal(body.deleted, 0);
+    assert.deepEqual(await db.get('SELECT * FROM purchase_records'), original);
+    assert.equal(b1.created, 1);
+  });
+
+  await t.test('PR-76: 取り消し済みのバッチをもう一度取り消すと 409', async () => {
+    const { batch_id } = await (await importRecords([rec()])).json();
+    assert.equal((await undo(batch_id)).status, 200);
+    const res = await undo(batch_id);
+    assert.equal(res.status, 409);
+    assert.equal((await res.json()).error, 'このバッチはすでに取り消されています');
+  });
+
+  await t.test('PR-77: あとのバッチが同じ明細を変更していると 409。あとのバッチを先に取り消せば通る', async () => {
+    const b1 = await (await importRecords([rec({ line_no: 1 }), rec({ line_no: 2, name: '他' })])).json();
+    const b2 = await (await importRecords({ records: [rec({ line_no: 1, quantity: 99 })], on_duplicate: 'update' })).json();
+    const b3 = await (await importRecords({ records: [rec({ line_no: 1, quantity: 100 })], on_duplicate: 'update' })).json();
+
+    let res = await undo(b1.batch_id);
+    assert.equal(res.status, 409);
+    assert.equal(
+      (await res.json()).error,
+      `あとのバッチ（id: ${b2.batch_id}, ${b3.batch_id}）が同じ明細を変更しています。先にそちらを取り消してください`
+    );
+    assert.equal(await count('purchase_records'), 2);
+
+    assert.equal((await undo(b3.batch_id)).status, 200);
+    res = await undo(b1.batch_id);
+    assert.equal(res.status, 409); // b2 がまだ残っている
+    assert.match((await res.json()).error, new RegExp(`id: ${b2.batch_id}）`));
+
+    assert.equal((await undo(b2.batch_id)).status, 200);
+    assert.equal((await db.get('SELECT quantity FROM purchase_records WHERE line_no = 1')).quantity, 5);
+    res = await undo(b1.batch_id);
+    assert.equal(res.status, 200);
+    assert.equal(await count('purchase_records'), 0);
+  });
+
+  await t.test('PR-78: 取り消しの dry_run（本文・クエリ）は何も変えず、本番と同じ件数を返す', async () => {
+    const partId = await insertPart('LED');
+    const { batch_id } = await (await importRecords([rec({ line_no: 1 }), rec({ line_no: 2 })])).json();
+    const snapshot = await db.all('SELECT * FROM purchase_records ORDER BY id');
+    const batchSnapshot = await db.all('SELECT * FROM purchase_import_batches');
+
+    const viaBody = await (await undo(batch_id, { dry_run: true })).json();
+    const viaQuery = await (await fetch(`${baseUrl}/purchases/batches/${batch_id}/undo?dry_run=true`, { method: 'POST' })).json();
+    assert.deepEqual(viaBody, viaQuery);
+    assert.equal(viaBody.dry_run, true);
+    assert.equal(viaBody.deleted, 2);
+    assert.deepEqual(await db.all('SELECT * FROM purchase_records ORDER BY id'), snapshot);
+    assert.deepEqual(await db.all('SELECT * FROM purchase_import_batches'), batchSnapshot);
+
+    const real = await (await undo(batch_id)).json();
+    assert.equal(real.dry_run, false);
+    assert.equal(real.deleted, viaBody.deleted);
+    assert.equal(partId > 0, true);
+
+    assert.equal((await undo(batch_id, { dry_run: 'maybe' })).status, 400);
+  });
+
+  await t.test('PR-79: linked_deleted と modified_after_import と missing を数える', async () => {
+    const partId = await insertPart('LED');
+    const { batch_id, results } = await (await importRecords([
+      rec({ line_no: 1 }), rec({ line_no: 2 }), rec({ line_no: 3 }), rec({ line_no: 4 })
+    ])).json();
+    const ids = results.map(r => r.id);
+
+    // 取り込み後にひも付け・メモ変更（PATCH）、削除する。更新時刻はミリ秒まで残るので、同じ秒でも判定できる
+    for (const id of ids) {
+      assert.match((await db.get('SELECT updated_at FROM purchase_records WHERE id = ?', [id])).updated_at, /\.\d{3}$/);
+    }
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal((await send('PATCH', `/purchases/${ids[0]}`, { part_id: partId })).status, 200);
+    assert.equal((await send('PATCH', `/purchases/${ids[1]}`, { note: '後から' })).status, 200);
+    assert.equal((await send('DELETE', `/purchases/${ids[3]}`)).status, 200);
+
+    const dry = await (await undo(batch_id, { dry_run: true })).json();
+    assert.deepEqual(dry, {
+      batch_id, dry_run: true, deleted: 3, restored: 0, missing: 1, linked_deleted: 1, modified_after_import: 2
+    });
+    assert.equal(await count('purchase_records'), 3);
+    const real = await (await undo(batch_id)).json();
+    assert.equal(real.deleted, 3);
+    assert.equal(real.missing, 1);
+    assert.equal(await count('purchase_records'), 0);
+    assert.equal((await db.get('SELECT 1 AS x FROM parts WHERE id = ?', [partId])).x, 1);
+  });
+
+  await t.test('PR-80: 取り消しの途中で例外が出ると ROLLBACK され、バッチは取り消されないまま。後続の処理は動く', async () => {
+    const { batch_id } = await (await importRecords([rec({ line_no: 1 }), rec({ line_no: 2 }), rec({ line_no: 3 })])).json();
+    let deletes = 0;
+    db.run = async function (sql, ...args) {
+      if (/^\s*DELETE FROM purchase_records/.test(sql) && ++deletes === 2) {
+        throw new Error('boom');
+      }
+      return Object.getPrototypeOf(db).run.call(this, sql, ...args);
+    };
+    try {
+      const res = await undo(batch_id);
+      assert.equal(res.status, 500);
+      assert.equal((await res.json()).error, 'boom');
+    } finally {
+      delete db.run;
+    }
+    assert.equal(await count('purchase_records'), 3);
+    assert.equal((await db.get('SELECT undone_at FROM purchase_import_batches WHERE id = ?', [batch_id])).undone_at, null);
+
+    const ok = await undo(batch_id);
+    assert.equal(ok.status, 200);
+    assert.equal(await count('purchase_records'), 0);
+  });
+
+  await t.test('PR-81: 元の値に戻すと別の明細とキーが重なる場合は 409（ROLLBACK される）', async () => {
+    const b1 = await (await importRecords([rec({ line_no: 1, quantity: 1 })])).json();
+    const b2 = await (await importRecords({ records: [rec({ line_no: 1, quantity: 2 })], on_duplicate: 'update' })).json();
+    const id = (await db.get('SELECT id FROM purchase_records')).id;
+    // 取り込み後にキーを変え（line_no 1 -> 9）、元のキー（line_no 1）の明細を新しく作る
+    assert.equal((await send('PATCH', `/purchases/${id}`, { line_no: 9 })).status, 200);
+    await importRecords([rec({ line_no: 1, name: '別' })]);
+    const res = await undo(b2.batch_id);
+    // 戻すのはキーも含む全列なので、先に作られた line_no 1 の明細と衝突する
+    assert.equal(res.status, 409);
+    assert.equal((await db.get('SELECT undone_at FROM purchase_import_batches WHERE id = ?', [b2.batch_id])).undone_at, null);
+    assert.equal(b1.created, 1);
+  });
+
+  await t.test('PR-82: /batches は /:id に吸われず、新しい順・limit・404・batch_id 絞り込みが動く', async () => {
+    const b1 = await (await importRecords({ records: [rec({ order_id: 'X1' })], source: 'a' })).json();
+    const b2 = await (await importRecords({ records: [rec({ order_id: 'X2' }), rec({ order_id: 'X3' })], source: 'b' })).json();
+
+    let res = await fetch(`${baseUrl}/purchases/batches`);
+    assert.equal(res.status, 200);
+    let list = await res.json();
+    assert.deepEqual(list.map(b => b.id), [b2.batch_id, b1.batch_id]);
+    assert.equal(list[0].source, 'b');
+    assert.equal(list[0].created_count, 2);
+    assert.equal(list[0].undone_at, null);
+
+    list = await (await fetch(`${baseUrl}/purchases/batches?limit=1`)).json();
+    assert.deepEqual(list.map(b => b.id), [b2.batch_id]);
+
+    res = await fetch(`${baseUrl}/purchases/batches/${b1.batch_id}`);
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).source, 'a');
+    assert.equal((await fetch(`${baseUrl}/purchases/batches/99999`)).status, 404);
+    assert.equal((await fetch(`${baseUrl}/purchases/batches/abc`)).status, 400);
+    assert.equal((await undo(99999)).status, 404);
+
+    const filtered = await (await fetch(`${baseUrl}/purchases?batch_id=${b2.batch_id}`)).json();
+    assert.equal(filtered.total, 2);
+    assert.deepEqual(filtered.items.map(i => i.order_id).sort(), ['X2', 'X3']);
+    assert.equal(filtered.items[0].import_batch_id, b2.batch_id);
+    assert.equal((await fetch(`${baseUrl}/purchases?batch_id=abc`)).status, 400);
+  });
+
+  // db.exec の呼び出しを記録する（BEGIN / ROLLBACK を発行していないことの確認用）
+  const spyExec = () => {
+    const calls = [];
+    db.exec = async function (sql, ...args) {
+      calls.push(String(sql).trim());
+      return Object.getPrototypeOf(db).exec.call(this, sql, ...args);
+    };
+    return { calls, restore: () => { delete db.exec; } };
+  };
+
+  await t.test('PR-84: dry_run（import / undo）は BEGIN も ROLLBACK も発行しない', async () => {
+    const { batch_id } = await (await importRecords([rec({ line_no: 1 })])).json();
+    const spy = spyExec();
+    try {
+      assert.equal((await importRecords({ records: [rec({ line_no: 2 })], dry_run: true })).status, 200);
+      assert.equal((await undo(batch_id, { dry_run: true })).status, 200);
+    } finally {
+      spy.restore();
+    }
+    assert.deepEqual(spy.calls, []);
+  });
+
+  await t.test('PR-85: dry_run の最中に届いた別の PATCH が、dry_run の ROLLBACK で消えない', async () => {
+    const { results } = await (await importRecords([rec({ order_id: 'KEEP', line_no: 1 })])).json();
+    const keepId = results[0].id;
+    const many = Array.from({ length: 3000 }, (_, i) => rec({ order_id: 'BIG', line_no: i + 1 }));
+
+    const dry = importRecords({ records: many, dry_run: true });
+    await new Promise((r) => setTimeout(r, 15));
+    const patch = await send('PATCH', `/purchases/${keepId}`, { note: '同時に更新' });
+    assert.equal(patch.status, 200);
+    const dryRes = await dry;
+    assert.equal(dryRes.status, 200);
+    assert.equal((await dryRes.json()).created, 3000);
+
+    assert.equal((await db.get('SELECT note FROM purchase_records WHERE id = ?', [keepId])).note, '同時に更新');
+    assert.equal(await count('purchase_records'), 1);
+  });
+
+  await t.test('PR-86: 取り消しの dry_run が、元に戻したときのキー衝突を予告する（409、何も変えない）', async () => {
+    await importRecords([rec({ line_no: 1, quantity: 1 })]);
+    const b2 = await (await importRecords({ records: [rec({ line_no: 1, quantity: 2 })], on_duplicate: 'update' })).json();
+    const id = (await db.get('SELECT id FROM purchase_records')).id;
+    assert.equal((await send('PATCH', `/purchases/${id}`, { line_no: 9 })).status, 200);
+    await importRecords([rec({ line_no: 1, name: '別' })]);
+    const snapshot = await db.all('SELECT * FROM purchase_records ORDER BY id');
+
+    const dry = await undo(b2.batch_id, { dry_run: true });
+    assert.equal(dry.status, 409);
+    assert.match((await dry.json()).error, /重複/);
+    assert.deepEqual(await db.all('SELECT * FROM purchase_records ORDER BY id'), snapshot);
+  });
+
+  await t.test('PR-87: before_json に不正なキーや存在しない列があっても、SQL に埋め込まれず無視される', async () => {
+    const { batch_id } = await (await importRecords([rec({ line_no: 1, quantity: 1, note: '元' })])).json();
+    const upd = await (await importRecords({ records: [rec({ line_no: 1, quantity: 2, note: '変更' })], on_duplicate: 'update' })).json();
+    const row = await db.get('SELECT * FROM purchase_records');
+    // 取り込み前の行のつもりで、不正なキーを含む before_json に差し替える
+    const evil = {
+      ...row,
+      quantity: 77,
+      'note = (SELECT 1), quantity': 5,
+      "note = 'x' WHERE 1=1; --": 1,
+      no_such_column: 'x'
+    };
+    await db.run('UPDATE purchase_import_changes SET before_json = ? WHERE batch_id = ? AND action = ?', [JSON.stringify(evil), upd.batch_id, 'updated']);
+
+    const res = await undo(upd.batch_id);
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).restored, 1);
+    const after = await db.get('SELECT * FROM purchase_records');
+    assert.equal(after.quantity, 77);
+    assert.equal(after.note, '変更');
+    assert.equal(batch_id < upd.batch_id, true);
+    assert.equal(await count('purchase_records'), 1);
+  });
+
+  // plan のあと（バッチ作成の直前）に、直接 DB を操作して PATCH / DELETE が割り込んだ状態を作る
+  const interceptAfterPlan = (action) => {
+    db.run = async function (sql, ...args) {
+      if (/^\s*INSERT INTO purchase_import_batches/.test(sql)) {
+        const proto = Object.getPrototypeOf(db);
+        await action((q, params) => proto.run.call(this, q, params));
+      }
+      return Object.getPrototypeOf(db).run.call(this, sql, ...args);
+    };
+    return () => { delete db.run; };
+  };
+
+  await t.test('PR-88: plan のあとに削除・更新された行は、error に振り替え、before_json には読み直した値を残す', async () => {
+    await importRecords([rec({ line_no: 1 }), rec({ line_no: 2 }), rec({ line_no: 3 })]);
+    const ids = (await db.all('SELECT id FROM purchase_records ORDER BY line_no')).map(r => r.id);
+
+    const restore = interceptAfterPlan(async (run) => {
+      await run('DELETE FROM purchase_records WHERE id = ?', [ids[0]]);
+      await run("UPDATE purchase_records SET note = 'MANUAL' WHERE id = ?", [ids[1]]);
+    });
+    let body;
+    try {
+      const res = await importRecords({
+        records: [rec({ line_no: 1, quantity: 11 }), rec({ line_no: 2, quantity: 22 }), rec({ line_no: 3, quantity: 33 })],
+        on_duplicate: 'update'
+      });
+      assert.equal(res.status, 200);
+      body = await res.json();
+    } finally {
+      restore();
+    }
+
+    assert.deepEqual(body.results.map(r => r.status), ['error', 'updated', 'updated']);
+    assert.equal(body.results[0].error, '取り込み中に明細が削除されたため更新できませんでした');
+    assert.equal(body.updated, 2);
+    assert.equal(body.errors, 1);
+
+    const batch = await db.get('SELECT * FROM purchase_import_batches WHERE id = ?', [body.batch_id]);
+    assert.deepEqual([batch.updated_count, batch.error_count], [2, 1]);
+
+    const changes = await db.all('SELECT * FROM purchase_import_changes WHERE batch_id = ?', [body.batch_id]);
+    assert.deepEqual(changes.map(c => c.record_id).sort(), [ids[1], ids[2]].sort());
+    const change = changes.find(c => c.record_id === ids[1]);
+    assert.equal(JSON.parse(change.before_json).note, 'MANUAL');
+
+    // 取り消すと、手で入れたメモは残り、数量だけが戻る
+    assert.equal((await undo(body.batch_id)).status, 200);
+    const row = await db.get('SELECT note, quantity FROM purchase_records WHERE id = ?', [ids[1]]);
+    assert.equal(row.note, 'MANUAL');
+    assert.equal(row.quantity, 5);
+  });
+
+  await t.test('PR-89: apply の途中で UNIQUE 制約に当たったら、ROLLBACK して 409 を返す', async () => {
+    await importRecords([rec({ line_no: 1 })]);
+    const batchesBefore = await count('purchase_import_batches');
+    db.run = async function (sql, ...args) {
+      if (/^\s*INSERT INTO purchase_records/.test(sql)) {
+        throw Object.assign(new Error('SQLITE_CONSTRAINT: UNIQUE constraint failed'), { code: 'SQLITE_CONSTRAINT' });
+      }
+      return Object.getPrototypeOf(db).run.call(this, sql, ...args);
+    };
+    try {
+      const res = await importRecords([rec({ line_no: 2 }), rec({ line_no: 3 })]);
+      assert.equal(res.status, 409);
+      assert.equal((await res.json()).error, '取り込み中にほかの更新と重なりました。もう一度実行してください');
+    } finally {
+      delete db.run;
+    }
+    assert.equal(await count('purchase_records'), 1);
+    assert.equal(await count('purchase_import_batches'), batchesBefore);
+
+    // 後続の取り込みは動く
+    assert.equal((await importRecords([rec({ line_no: 2 })])).status, 200);
+  });
+
+  await t.test('PR-83: 取り消しと import を並列に送っても直列に処理される', async () => {
+    const { batch_id } = await (await importRecords([rec({ order_id: 'U1' })])).json();
+    const make = (n) => Array.from({ length: n }, (_, i) => rec({ order_id: 'P', line_no: i + 1 }));
+    const [a, b] = await Promise.all([undo(batch_id), importRecords(make(200))]);
+    assert.equal(a.status, 200);
+    assert.equal(b.status, 200);
+    assert.equal(await count('purchase_records'), 200);
   });
 });

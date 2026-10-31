@@ -27,7 +27,13 @@ const purchaseRecordInputSchema = z.object({
 const importPurchaseItemsSchema = {
     records: z.array(purchaseRecordInputSchema).min(1).max(500),
     on_duplicate: z.enum(['skip', 'update']).default('skip'),
+    dry_run: z.boolean().default(false),
+    source: z.string().max(100).optional(),
+    note: z.string().max(1000).optional(),
 };
+
+// dry_run の preview に載せる件数の上限
+const PREVIEW_LIMIT = 20;
 
 /**
  * McpServer に import_purchase_items ツールを登録します。
@@ -49,6 +55,8 @@ function registerImportPurchaseItemsTool(server, { apiClient }) {
                 '同じ注文でも line_no の有無でキーが変わるため、同じ店では line_no を付けるかどうかをそろえてください。同じリクエスト内で同じキーになった明細には warning が付きます。' +
                 '同じデータを再度取り込んでも二重に登録されません（on_duplicate: skip は既存を変えず、update は送った項目で上書きします。update でも part_id が null や未指定なら既存のひも付けは残ります）。' +
                 '存在しない part_id はひも付けずに登録し、warning を返します。明細ごとのエラーはほかの明細に影響しません。' +
+                '大量に取り込む前は dry_run: true で件数と内容を確認してください（何も登録せず、集計と、created・updated の先頭20件の preview を返します）。' +
+                '本番の取り込みは batch_id を返します（同じデータを再実行しても明細は重複しませんが、取り込みバッチの記録は毎回作られます）。取り込みを取り消すには undo_import_batch に batch_id を指定します（list_import_batches で一覧、search_purchase_items の batch_id で内容を確認できます）。source と note は取り込みバッチの記録用の任意項目です。' +
                 '数千件を超える大量のファイルは、REST の POST /api/purchases/import に直接送れます（docs/MCP.md 参照）。' +
                 '実行するとデータが変更されます。',
             annotations: {
@@ -61,24 +69,52 @@ function registerImportPurchaseItemsTool(server, { apiClient }) {
         },
         async (args) => {
             try {
-                const res = await apiClient.importPurchases({
+                const dryRun = args.dry_run === true;
+                const payload = {
                     records: args.records,
                     on_duplicate: args.on_duplicate ?? 'skip',
-                });
+                };
+                if (dryRun) payload.dry_run = true;
+                if (args.source !== undefined) payload.source = args.source;
+                if (args.note !== undefined) payload.note = args.note;
+
+                const res = await apiClient.importPurchases(payload);
 
                 const results = Array.isArray(res?.results) ? res.results : [];
-                const ids = results
-                    .filter((r) => (r.status === 'created' || r.status === 'updated') && r.id !== undefined)
-                    .map((r) => r.id);
                 // 全件を返すと長くなるため、エラーと warning のある明細だけを返す
                 const notable = results.filter((r) => r.status === 'error' || r.warning);
-
-                return toolResult({
+                const summary = {
                     total: res.total,
                     created: res.created,
                     updated: res.updated,
                     skipped: res.skipped,
                     errors: res.errors,
+                };
+
+                if (dryRun) {
+                    const preview = results
+                        .filter((r) => r.status === 'created' || r.status === 'updated')
+                        .slice(0, PREVIEW_LIMIT)
+                        .map((r) => {
+                            const item = { index: r.index, status: r.status, record: r.record };
+                            if (r.before !== undefined) item.before = r.before;
+                            return item;
+                        });
+                    return toolResult({
+                        dry_run: true,
+                        ...summary,
+                        results: notable,
+                        preview,
+                        message: '何も登録していません。内容を確認して問題なければ、dry_run を外して実行してください。',
+                    });
+                }
+
+                const ids = results
+                    .filter((r) => (r.status === 'created' || r.status === 'updated') && r.id !== undefined)
+                    .map((r) => r.id);
+                return toolResult({
+                    ...summary,
+                    batch_id: res.batch_id ?? null,
                     ids,
                     results: notable,
                 });

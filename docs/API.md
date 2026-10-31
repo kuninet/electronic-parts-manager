@@ -762,7 +762,7 @@
 - **リクエスト**: `multipart/form-data`（`file`: ZIPファイル）
 - **レスポンス**: 200 OK `{ "message": "Full restore successful" }`
 - **エラー**: 400（ファイルなし・Zip Slip検出）、500
-- **副作用**: **既存の全データ（DB・画像）を完全消去**し、ZIP内のデータで上書き復元。購入履歴（`purchase_records`）も置き換わるため、購入履歴を含まない古いバックアップから復元すると購入履歴は空になります
+- **副作用**: **既存の全データ（DB・画像）を完全消去**し、ZIP内のデータで上書き復元。購入履歴（`purchase_records` と取り込みバッチ）も置き換わるため、購入履歴を含まない古いバックアップから復元すると購入履歴は空になります
 
 #### `GET /api/backup/import/presigned-url`
 - **用途**: 大容量バックアップファイルを直接S3へアップロードするための署名付きURLを発行します。
@@ -786,11 +786,11 @@
 - **副作用**: **既存の全データ（DB・画像）を完全消去**して上書き復元、一時ファイルおよびS3アップロードファイルの削除
 
 #### `POST /api/backup/reset`
-- **用途**: パーツデータ・入庫ログ・購入履歴・アップロード画像ファイルを全消去します（マスタデータは保持）。
+- **用途**: パーツデータ・入庫ログ・購入履歴（取り込みバッチを含む）・アップロード画像ファイルを全消去します（マスタデータは保持）。
 - **リクエスト**: なし
 - **レスポンス**: 200 OK `{ "message": "Reset successful" }`
 - **エラー**: 500
-- **副作用**: `parts`, `part_tags`, `storage_logs`, `purchase_records` の全レコード削除、`uploads/` ディレクトリ内の全画像・PDFファイル削除
+- **副作用**: `parts`, `part_tags`, `storage_logs`, `purchase_records`, `purchase_import_batches`, `purchase_import_changes` の全レコード削除、`uploads/` ディレクトリ内の全画像・PDFファイル削除
 
 ---
 
@@ -858,7 +858,7 @@ stateDiagram-v2
 
 注意: `line_no` の有無でキーが変わるので、同じ店では `line_no` を付けるかどうかをそろえてください。
 
-各レスポンスの明細には、上記の項目に加えて `id`、`dedupe_key`、`created_at`、`updated_at` と、ひも付け先の部品名 `part_name`（ひも付けなし、または部品が存在しなければ `null`）が含まれます。
+各レスポンスの明細には、上記の項目に加えて `id`、`dedupe_key`、`import_batch_id`（新規登録したバッチの ID。バッチなしは `null`）、`created_at`、`updated_at` と、ひも付け先の部品名 `part_name`（ひも付けなし、または部品が存在しなければ `null`）が含まれます。
 
 #### `GET /api/purchases`
 - **用途**: 購入明細を絞り込んで取得します。並びは注文日の新しい順（`purchased_at DESC, shop, order_id, line_no, id`）です。
@@ -867,6 +867,7 @@ stateDiagram-v2
   - `shop`: 購入店（完全一致）
   - `order_id`: 注文番号（完全一致）
   - `part_id`: ひも付け先の部品 ID
+  - `batch_id`: 取り込みバッチの ID（そのバッチで新規登録した明細だけに絞る）
   - `linked`: `true` でひも付け済みのみ、`false` で未ひも付けのみ
   - `from` / `to`: 注文日の範囲（`YYYY-MM-DD`、両端を含む）
   - `currency`: 通貨コード
@@ -880,13 +881,13 @@ stateDiagram-v2
         "id": 1, "shop": "秋月電子通商", "order_id": "A-1", "line_no": 1, "purchased_at": "2026-03-01",
         "code": "I-001", "name": "LED", "unit_price": 10, "currency": "JPY", "quantity": 5,
         "part_id": 3, "part_name": "赤色LED 5mm", "source_msg_id": null, "note": null,
-        "dedupe_key": "o:A-1|l:1", "created_at": "2026-03-02 00:00:00", "updated_at": "2026-03-02 00:00:00"
+        "dedupe_key": "o:A-1|l:1", "import_batch_id": 3, "created_at": "2026-03-02 00:00:00", "updated_at": "2026-03-02 00:00:00"
       }
     ]
   }
   ```
   ※`total` は `limit` / `offset` に関係なく、条件に合う全件数です。
-- **エラー**: 400（`part_id`・`linked`・`from`・`to` の形式不正）、500
+- **エラー**: 400（`part_id`・`batch_id`・`linked`・`from`・`to` の形式不正）、500
 - **副作用**: なし
 
 #### `GET /api/purchases/shops`
@@ -901,6 +902,42 @@ stateDiagram-v2
 - **エラー**: 500
 - **副作用**: なし
 
+#### `GET /api/purchases/batches`
+- **用途**: 取り込みバッチの一覧を、新しい順に取得します。
+- **リクエスト**: クエリパラメータ `limit`（任意。既定 50、最大 200）
+- **レスポンス**: 200 OK（バッチの配列。各バッチの全列）
+  ```json
+  [
+    {
+      "id": 5, "source": "muse", "note": "初回", "on_duplicate": "skip",
+      "total": 698, "created_count": 690, "updated_count": 0, "skipped_count": 5, "error_count": 3,
+      "created_at": "2026-10-31 10:00:00", "undone_at": null
+    }
+  ]
+  ```
+  ※`created_at` は取り込みの完了時刻です。`undone_at` は取り消し済みなら日時、そうでなければ `null` です。
+- **エラー**: 500
+- **副作用**: なし
+
+#### `GET /api/purchases/batches/:id`
+- **用途**: 取り込みバッチを 1 件取得します。
+- **レスポンス**: 200 OK（バッチオブジェクト）
+- **エラー**: 400（ID 不正）、404 `{ error: "取り込みバッチが見つかりません" }`、500
+- **副作用**: なし
+
+#### `POST /api/purchases/batches/:id/undo`
+- **用途**: 取り込みバッチを取り消します。そのバッチで新規登録した明細は削除し、上書きした明細は更新前の全列（`part_id` を含む）に戻します。取り込み後に PATCH した内容やひも付けも、削除または元に戻されます。
+- **リクエスト**: `application/json` `{ "dry_run": true }` または `?dry_run=true`（任意。`true` のときは DB に一切書き込まず、取り消した場合の件数だけを返します。409 になる条件も同じように判定します）
+- **レスポンス**: 200 OK
+  ```json
+  { "batch_id": 5, "dry_run": false, "deleted": 690, "restored": 5, "missing": 0, "linked_deleted": 2, "modified_after_import": 1 }
+  ```
+  - `deleted`: 削除した明細数、`restored`: 元に戻した明細数、`missing`: すでに存在しない明細数
+  - `linked_deleted`: 削除した明細のうち `part_id` が入っていたもの（取り込み後にひも付けたもの）
+  - `modified_after_import`: 対象の明細のうち、取り込みの完了後に更新されていたもの（更新時刻はミリ秒まで比較します）
+- **エラー**: 400（ID 不正・`dry_run` 不正）、404（バッチなし）、409（取り消し済み、あとの取り消していないバッチが同じ明細を変更している、元に戻すと別の明細とキーが重なる）、500
+- **副作用**: 明細の削除・復元（1 つのトランザクション、直列に処理）と、バッチの `undone_at` の設定。バッチと変更記録は残ります
+
 #### `GET /api/purchases/:id`
 - **用途**: 指定した ID の購入明細を 1 件取得します（`part_name` 付き）。
 - **レスポンス**: 200 OK（明細オブジェクト）
@@ -911,15 +948,17 @@ stateDiagram-v2
 - **用途**: 購入明細を一括で取り込みます。同じ明細は重複登録されません（再実行しても安全です）。
 - **リクエスト**: `application/json`。本文は次のどちらかです。
   - 明細の配列そのもの（`on_duplicate` は `skip`）
-  - `{ "records": [...], "on_duplicate": "skip" | "update" }`
-  - `on_duplicate` はクエリパラメータ `?on_duplicate=update` でも指定できます（本文の指定が優先）。
+  - `{ "records": [...], "on_duplicate": "skip" | "update", "dry_run": false, "source": "muse", "note": "メモ" }`
+  - `on_duplicate`・`dry_run`・`source`・`note` はクエリパラメータ（`?on_duplicate=update`、`?dry_run=true`、`?source=...`、`?note=...`）でも指定できます。配列本文で使うときはクエリで指定します（本文の指定が優先）。
+  - `dry_run`: `true` にすると、DB に一切書き込まず（トランザクションも開始せず）、本番と同じ判定だけを行って結果を返します。何も登録せず、バッチも作りません。投入前に件数と内容を確認するために使います。
+  - `source`（最大100文字）/ `note`（最大1000文字）: 取り込みバッチに残す任意の記録です。
   - 1 回に最大 5000 件（超えると 400）
   - 同時に複数の取り込みを送った場合は、サーバー側で 1 本ずつ順に処理します
   - `on_duplicate`: `skip`（既定）は既存の明細を変更しません。`update` は送られた項目で既存の明細を上書きします（送られていない項目は変更しません。`part_id` が `null` または未指定なら既存のひも付けを、`currency` が `null` または空なら既存の通貨を残します）。
-- **レスポンス**: 200 OK。`results` には全件を入れます。`status` は `created` / `updated` / `skipped` / `error` です。
+- **レスポンス**: 200 OK。`results` には全件を入れます。`status` は `created` / `updated` / `skipped` / `error` です。本番の取り込みは、取り込みバッチの ID を `batch_id` で返します（取り消しに使います）。`dry_run` のときは `batch_id` の代わりに `dry_run: true` を返し、`created` の result に `id` を付けません（ROLLBACK されるため）。また各 result に、正規化後の値 `record`（`dedupe_key` を除く）を付け、`updated` の result には更新前の値 `before` も付けます。
   ```json
   {
-    "total": 3, "created": 1, "updated": 0, "skipped": 1, "errors": 1,
+    "total": 3, "created": 1, "updated": 0, "skipped": 1, "errors": 1, "batch_id": 5,
     "results": [
       { "index": 0, "status": "created", "id": 10, "warning": "part_id 999 の部品が見つからないため、ひも付けずに登録しました" },
       { "index": 1, "status": "skipped", "id": 4 },
@@ -928,8 +967,9 @@ stateDiagram-v2
   }
   ```
   ※存在しない `part_id` は、新規登録では `NULL` にして登録し、`on_duplicate=update` では無視して既存のひも付けを維持します。どちらも `warning` を付けます。同じリクエスト内で同じキーになった 2 件目以降にも `warning`（最初の index を示す）を付けます。検証エラーの明細は登録せず `error` にし、ほかの明細の処理は続けます。同じリクエスト内の重複も、2 件目以降は同じ規則（`skip` / `update`）で処理します。
-- **エラー**: 400（本文が配列でも `{ records }` でもない・空・5000 件超・`on_duplicate` 不正）、500
-- **副作用**: `purchase_records` への登録・更新（全体を 1 つのトランザクションで実行。失敗時はロールバック）
+- **エラー**: 400（本文が配列でも `{ records }` でもない・空・5000 件超・`on_duplicate`・`dry_run`・`source`・`note` の不正）、409（取り込み中にほかの更新と UNIQUE 制約が重なった。ロールバック済みなので再実行できます）、500
+  ※取り込みの判定のあとに明細が削除された場合、その明細は `status: "error"`（「取り込み中に明細が削除されたため更新できませんでした」）になり、`updated` / `errors` の件数にも反映されます。
+- **副作用**: `purchase_records` への登録・更新と、取り込みバッチ（`purchase_import_batches`）・変更記録（`purchase_import_changes`）の作成（全体を 1 つのトランザクションで実行。失敗時はロールバック）。`dry_run` では何も残りません。新規登録した行には `import_batch_id` を入れ、更新した行は更新前の全列を変更記録に残します（`skipped` と `error` は記録しません）
 
 #### `PATCH /api/purchases/:id`
 - **用途**: 購入明細の指定した項目だけを更新します。部品とのひも付けは `part_id`、解除は `part_id: null` です。

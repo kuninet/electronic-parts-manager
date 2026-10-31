@@ -545,10 +545,22 @@ describe('MCP API Client Unit Tests (A-1 ~ A-34)', () => {
         assert.equal(lastRequest.url, '/api/purchases/5');
         assert.equal(lastRequest.body, JSON.stringify({ part_id: null }));
 
+        await client.listImportBatches({ limit: 20 });
+        assert.equal(lastRequest.method, 'GET');
+        const batchUrl = new URL(lastRequest.url, 'http://x');
+        assert.equal(batchUrl.pathname, '/api/purchases/batches');
+        assert.equal(batchUrl.searchParams.get('limit'), '20');
+
+        await client.undoImportBatch(3, { dry_run: true });
+        assert.equal(lastRequest.method, 'POST');
+        assert.equal(lastRequest.url, '/api/purchases/batches/3/undo');
+        assert.equal(lastRequest.body, JSON.stringify({ dry_run: true }));
+
         handlerMode = 'hang';
         const slowClient = createApiClient({ apiUrl: baseUrl, authHeader: null, timeoutMs: 100 });
         for (const run of [
             () => slowClient.importPurchases({ records: [] }),
+            () => slowClient.undoImportBatch(3, { dry_run: false }),
             () => slowClient.patchPurchase(5, { note: 'x' }),
         ]) {
             await assert.rejects(run, (err) => {

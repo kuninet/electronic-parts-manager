@@ -36,7 +36,7 @@ flowchart LR
 
 ## 2. 公開ツール一覧
 
-本サーバーは 11 個のツールを公開します（参照系 5 ツール、書き込み系 6 ツール）。
+本サーバーは 13 個のツールを公開します（参照系 6 ツール、書き込み系 7 ツール）。
 
 | ツール名 | 分類 | 冪等性 | 説明 |
 |---|---|---|---|
@@ -51,6 +51,8 @@ flowchart LR
 | `search_purchase_items` | 参照 (`readOnlyHint: true`) | 冪等 (`idempotentHint: true`) | 購入履歴（メール由来の購入明細）の検索 |
 | `import_purchase_items` | 更新 (`readOnlyHint: false`) | 冪等 (`idempotentHint: true`) | 購入明細の一括取り込み（重複は登録されない） |
 | `update_purchase_item` | 更新 (`readOnlyHint: false`) | 冪等 (`idempotentHint: true`) | 購入明細の更新（部品とのひも付け・解除を含む） |
+| `list_import_batches` | 参照 (`readOnlyHint: true`) | 冪等 (`idempotentHint: true`) | 購入履歴の取り込みバッチの一覧 |
+| `undo_import_batch` | 更新 (`readOnlyHint: false`) | 非冪等 (`destructiveHint: true`) | 取り込みバッチの取り消し（`confirm: true` が無いときは件数の確認のみ） |
 
 ### 2-1. `search_parts`（電子部品検索）
 
@@ -319,6 +321,7 @@ flowchart LR
   - `shop` (string): 購入店の完全一致（最大100文字）
   - `order_id` (string): 注文番号の完全一致
   - `part_id` (integer): ひも付け先の部品ID
+  - `batch_id` (integer): 取り込みバッチのID（`import_purchase_items` が返す `batch_id`）。そのバッチで新規登録した明細に絞る（上書きされただけの明細は含まない）
   - `linked` (boolean): `true` でひも付け済みのみ、`false` で**部品に未ひも付けの明細のみ**
   - `from` / `to` (string): 注文日の範囲（`YYYY-MM-DD`、両端を含む）
   - `currency` (string): 通貨コード（例: `USD`）
@@ -337,12 +340,12 @@ flowchart LR
       {
         "id": 12, "shop": "秋月電子通商", "order_id": "A-1", "line_no": 2, "purchased_at": "2026-03-01",
         "code": "I-001", "name": "LED", "unit_price": 10, "currency": "JPY", "quantity": 5,
-        "part": { "id": 3, "name": "赤色LED 5mm" }, "source_msg_id": null, "note": null
+        "part": { "id": 3, "name": "赤色LED 5mm" }, "source_msg_id": null, "note": null, "import_batch_id": 3
       }
     ]
   }
   ```
-  ※`part` は部品にひも付いていなければ `null` です。
+  ※`part` は部品にひも付いていなければ `null` です。`import_batch_id` は新規登録したバッチのIDです。
 
 ### 2-10. `import_purchase_items`（購入履歴取り込み）
 
@@ -350,6 +353,8 @@ flowchart LR
 
 - **入力パラメータ**:
   - `records` (array, 必須): 明細のオブジェクトの配列（1〜500件）。各明細の項目は `shop`（必須）、`name`（必須）、`order_id`、`line_no`、`purchased_at`（`YYYY-MM-DD`）、`code`、`unit_price`、`currency`（既定 `JPY`）、`quantity`、`part_id`、`source_msg_id`、`note`。形式や範囲の細かい検証はサーバー側で行い、明細ごとのエラーとして返します
+  - `dry_run` (boolean, デフォルト `false`): `true` にすると何も登録せず、件数と内容（`preview`）だけを返します。**大量に取り込む前は `dry_run: true` で件数と内容を確認してください**
+  - `source` (string, 任意, 最大100文字) / `note` (string, 任意, 最大1000文字): 取り込みバッチに残す記録
   - `on_duplicate` (`"skip"` | `"update"`, デフォルト `"skip"`): 重複する明細の扱い。`skip` は既存を変更せず、`update` は送った項目で上書きします（`part_id` が `null` や未指定なら既存のひも付けは残ります）
 - **重複の判定キー**: 同じ `shop` の中で、次のキーが同じ明細は同一とみなします。同じデータを再度取り込んでも二重に登録されません。
   - `order_id` と `line_no` があるとき: `order_id` + `line_no`
@@ -373,6 +378,8 @@ flowchart LR
     ]
   }
   ```
+- **`batch_id`**: 本番の取り込みは、返却に取り込みバッチの `batch_id` を含みます。同じデータを再実行しても明細は重複しませんが、取り込みバッチの記録は毎回作られます。取り込みを取り消すには `undo_import_batch` にこの値を指定します。
+- **`dry_run: true` の返却**: 集計（`total` / `created` / `updated` / `skipped` / `errors`）、エラーと `warning` のある明細（`results`）に加えて、`created` と `updated` の先頭20件を `preview`（`index`、`status`、正規化後の値 `record`、`updated` なら更新前の値 `before`）で返します。`batch_id` と `ids` は返しません。
 - **タイムアウト時**: 結果不明のエラーになりますが、同じ内容で再実行しても重複は登録されません。
 
 ### 2-11. `update_purchase_item`（購入履歴更新）
@@ -392,10 +399,47 @@ flowchart LR
     "item": {
       "id": 12, "shop": "秋月電子通商", "order_id": "A-1", "line_no": 2, "purchased_at": "2026-03-01",
       "code": "I-001", "name": "LED", "unit_price": 10, "currency": "JPY", "quantity": 5,
-      "part": { "id": 3, "name": "赤色LED 5mm" }, "source_msg_id": null, "note": null
+      "part": { "id": 3, "name": "赤色LED 5mm" }, "source_msg_id": null, "note": null, "import_batch_id": 3
     }
   }
   ```
+
+### 2-12. `list_import_batches`（取り込みバッチ一覧）
+
+購入履歴の取り込みバッチ（`import_purchase_items` の 1 回分）を新しい順に返します。
+
+- **入力パラメータ**: `limit` (integer, 1〜50、デフォルト 20)
+- **返却例**:
+  ```json
+  {
+    "returned": 1,
+    "batches": [
+      {
+        "id": 5, "source": "muse", "note": "初回", "on_duplicate": "skip",
+        "total": 698, "created": 690, "updated": 0, "skipped": 5, "errors": 3,
+        "created_at": "2026-10-31 10:00:00", "undone_at": null
+      }
+    ]
+  }
+  ```
+  ※`undone_at` は取り消し済みなら日時です。バッチの内容は `search_purchase_items` の `batch_id` で確認できます。
+
+### 2-13. `undo_import_batch`（取り込みバッチの取り消し）
+
+取り込みバッチを取り消します。そのバッチで新規登録した明細は削除し、上書きした明細は取り込み前の値（`part_id` を含む）に戻します。取り込み後に手で変更・ひも付けした内容も、削除または元に戻されます。
+
+- **入力パラメータ**:
+  - `batch_id` (integer, 必須): 取り消すバッチのID
+  - `confirm` (boolean, デフォルト `false`): `true` のときだけ実際に取り消します。省略または `false` のときは何も変更せず、取り消した場合の件数だけを返します（`message` で `confirm: true` の指定を促します）
+- **返却例**（`confirm: true`）:
+  ```json
+  { "batch_id": 5, "dry_run": false, "deleted": 690, "restored": 5, "missing": 0, "linked_deleted": 2, "modified_after_import": 1, "undone": true }
+  ```
+  - `deleted`: 削除する明細数、`restored`: 元に戻す明細数、`missing`: すでに存在しない明細数
+  - `linked_deleted`: 削除する明細のうち、部品にひも付いているもの
+  - `modified_after_import`: 取り込みの完了後に更新されていた明細数
+- **エラー**: 取り消し済みのバッチ、あとの（取り消していない）バッチが同じ明細を変更しているバッチは取り消せません（あとのバッチを先に取り消してください）。
+- 取り消したバッチの記録は残ります。
 
 ### 購入履歴の一括取り込み
 
@@ -407,6 +451,10 @@ curl -X POST -H 'Content-Type: application/json' --data-binary @purchase-records
 
 - トークン認証を有効にしている場合は `-H 'Authorization: Bearer <EPM_API_TOKEN>'` を付けてください。
 - 既定では、すでにある明細は変更しません（`skip`）。送った項目で上書きするには `?on_duplicate=update` を付けます（例: `.../api/purchases/import?on_duplicate=update`）。
+- 取り込みの運用手順:
+  1. `?dry_run=true` を付けて送り、件数（`created` / `updated` / `skipped` / `errors`）と、各明細の内容（`record`、更新なら `before`）を確認します（何も登録されません）。例: `.../api/purchases/import?dry_run=true`
+  2. 問題なければ、`dry_run` を外して本番で取り込みます。応答の `batch_id` を控えます。`?source=muse&note=...` で取り込み元とメモを残せます。
+  3. おかしければ `POST /api/purchases/batches/<id>/undo` で取り込み単位で戻します（`?dry_run=true` で戻す件数を先に確認できます）。
 - 同じファイルを再度送っても二重に登録されません。応答の `created` / `updated` / `skipped` / `errors` と、明細ごとの `results` で結果を確認できます。詳細は `docs/API.md` の「11. 購入履歴」を参照してください。
 
 ---
@@ -420,7 +468,7 @@ curl -X POST -H 'Content-Type: application/json' --data-binary @purchase-records
 | `EPM_API_URL` | `http://localhost:3001` | EPM バックエンドのベース URL。末尾のスラッシュや `/api` は自動的に除去・正規化されます。 |
 | `EPM_AUTH_TOKEN` | なし | Bearer トークン認証用。サーバー側の環境変数 `EPM_API_TOKEN` と**同じ値**を設定します。 |
 | `EPM_BASIC_AUTH` | なし | CloudFront やリモートホストへの Basic 認証情報（`username:password` 形式）。コロン必須。 |
-| `EPM_MCP_READONLY` | `0` | `1` または `true` を設定すると、書き込み系ツール（`create_part`, `update_part`, `update_part_quantity`, `store_part_location`, `import_purchase_items`, `update_purchase_item`）を無効化し、参照専用モードとして起動します。 |
+| `EPM_MCP_READONLY` | `0` | `1` または `true` を設定すると、書き込み系ツール（`create_part`, `update_part`, `update_part_quantity`, `store_part_location`, `import_purchase_items`, `update_purchase_item`, `undo_import_batch`）を無効化し、参照専用モードとして起動します。 |
 | `EPM_API_TIMEOUT_MS` | `10000` | API リクエストのタイムアウト時間（ミリ秒、正の整数）。 |
 | `EPM_IMAGE_MAX_BYTES` | `10485760` (10MB) | `get_part_image` で取得を許可する画像ファイルの最大バイト数（正の整数、上限 50MB = 52428800）。 |
 

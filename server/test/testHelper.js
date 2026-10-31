@@ -113,6 +113,7 @@ async function createTestDb() {
       source_msg_id TEXT,
       note TEXT,
       dedupe_key TEXT NOT NULL,
+      import_batch_id INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -120,6 +121,30 @@ async function createTestDb() {
     CREATE UNIQUE INDEX idx_purchase_records_dedupe ON purchase_records(shop, dedupe_key);
     CREATE INDEX idx_purchase_records_part_id ON purchase_records(part_id);
     CREATE INDEX idx_purchase_records_order ON purchase_records(shop, order_id);
+
+    CREATE TABLE purchase_import_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT,
+      note TEXT,
+      on_duplicate TEXT NOT NULL,
+      total INTEGER NOT NULL,
+      created_count INTEGER NOT NULL,
+      updated_count INTEGER NOT NULL,
+      skipped_count INTEGER NOT NULL,
+      error_count INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      undone_at DATETIME DEFAULT NULL
+    );
+    CREATE TABLE purchase_import_changes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id INTEGER NOT NULL,
+      record_id INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      before_json TEXT
+    );
+
+    CREATE INDEX idx_purchase_import_changes_batch ON purchase_import_changes(batch_id);
+    CREATE INDEX idx_purchase_import_changes_record ON purchase_import_changes(record_id);
 
     CREATE INDEX idx_ai_name_suggestions_part_id ON ai_name_suggestions(part_id);
     CREATE INDEX idx_ai_name_suggestions_status ON ai_name_suggestions(status);

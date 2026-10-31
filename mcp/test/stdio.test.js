@@ -113,7 +113,7 @@ describe('MCP Stdio Integration Tests (S-1 ~ S-12)', () => {
         await new Promise((resolve) => mockServer.close(resolve));
     });
 
-    test('S-1: stdio 経由でプロセスを起動し listTools で 11 ツールが取得できる', async () => {
+    test('S-1: stdio 経由でプロセスを起動し listTools で 13 ツールが取得できる', async () => {
         const transport = new StdioClientTransport({
             command: process.execPath,
             args: [entrypoint],
@@ -128,17 +128,19 @@ describe('MCP Stdio Integration Tests (S-1 ~ S-12)', () => {
 
         try {
             const result = await client.listTools();
-            assert.equal(result.tools.length, 11);
+            assert.equal(result.tools.length, 13);
             const names = result.tools.map((t) => t.name).sort();
             assert.deepEqual(names, [
                 'create_part',
                 'get_part_detail',
                 'get_part_image',
                 'import_purchase_items',
+                'list_import_batches',
                 'list_master_data',
                 'search_parts',
                 'search_purchase_items',
                 'store_part_location',
+                'undo_import_batch',
                 'update_part',
                 'update_part_quantity',
                 'update_purchase_item',
@@ -198,7 +200,7 @@ describe('MCP Stdio Integration Tests (S-1 ~ S-12)', () => {
 
         try {
             const listRes = await client.listTools();
-            assert.equal(listRes.tools.length, 11);
+            assert.equal(listRes.tools.length, 13);
 
             const callRes = await client.callTool({
                 name: 'search_parts',
@@ -358,7 +360,7 @@ describe('MCP Stdio Integration Tests (S-1 ~ S-12)', () => {
         }
     });
 
-    test('S-8: EPM_MCP_READONLY=1 の場合、listTools で参照系 5 ツールのみ返る', async () => {
+    test('S-8: EPM_MCP_READONLY=1 の場合、listTools で参照系 6 ツールのみ返る', async () => {
         const transport = new StdioClientTransport({
             command: process.execPath,
             args: [entrypoint],
@@ -374,9 +376,9 @@ describe('MCP Stdio Integration Tests (S-1 ~ S-12)', () => {
 
         try {
             const result = await client.listTools();
-            assert.equal(result.tools.length, 5);
+            assert.equal(result.tools.length, 6);
             const names = result.tools.map((t) => t.name).sort();
-            assert.deepEqual(names, ['get_part_detail', 'get_part_image', 'list_master_data', 'search_parts', 'search_purchase_items']);
+            assert.deepEqual(names, ['get_part_detail', 'get_part_image', 'list_import_batches', 'list_master_data', 'search_parts', 'search_purchase_items']);
         } finally {
             await client.close();
         }
@@ -466,7 +468,7 @@ describe('MCP Stdio Integration Tests (S-1 ~ S-12)', () => {
 
             // 継続して listTools が実行可能
             const toolsRes = await client.listTools();
-            assert.equal(toolsRes.tools.length, 11);
+            assert.equal(toolsRes.tools.length, 13);
         } finally {
             await client.close();
         }

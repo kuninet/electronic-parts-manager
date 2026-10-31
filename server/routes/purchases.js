@@ -8,6 +8,10 @@ const { normalizePurchaseRecord, buildDedupeKey, FIELDS, KEY_FIELDS } = require(
 const IMPORT_MAX_RECORDS = 5000;
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
+const BATCH_DEFAULT_LIMIT = 50;
+const BATCH_MAX_LIMIT = 200;
+const SOURCE_MAX_LENGTH = 100;
+const BATCH_NOTE_MAX_LENGTH = 1000;
 
 const SELECT_WITH_PART_NAME = `
     SELECT pr.*, p.name AS part_name
@@ -31,7 +35,7 @@ async function getRecordWithPartName(db, id) {
 router.get('/', async (req, res) => {
     try {
         const db = getDb();
-        const { search, shop, order_id, part_id, linked, from, to, currency } = req.query;
+        const { search, shop, order_id, part_id, linked, from, to, currency, batch_id } = req.query;
 
         const where = [];
         const params = [];
@@ -54,6 +58,12 @@ router.get('/', async (req, res) => {
             if (!pid) return res.status(400).json({ error: 'part_id は正の整数で指定してください' });
             where.push('pr.part_id = ?');
             params.push(pid);
+        }
+        if (batch_id !== undefined && batch_id !== '') {
+            const bid = parseId(batch_id);
+            if (!bid) return res.status(400).json({ error: 'batch_id は正の整数で指定してください' });
+            where.push('pr.import_batch_id = ?');
+            params.push(bid);
         }
         if (linked !== undefined && linked !== '') {
             if (linked === 'true') where.push('pr.part_id IS NOT NULL');
@@ -114,21 +124,7 @@ router.get('/shops', async (req, res) => {
     }
 });
 
-// GET /api/purchases/:id
-router.get('/:id', async (req, res) => {
-    try {
-        const id = parseId(req.params.id);
-        if (!id) return res.status(400).json({ error: 'Invalid ID' });
-
-        const record = await getRecordWithPartName(getDb(), id);
-        if (!record) return res.status(404).json({ error: '購入明細が見つかりません' });
-        res.json(record);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// import は同じ接続で BEGIN / COMMIT を使うため、同時に走ると
+// import と undo は同じ接続で BEGIN / COMMIT を使うため、同時に走ると
 // 「cannot start a transaction within a transaction」になる。1 本ずつ直列に処理する。
 // 前の処理が失敗しても後続が止まらないよう、キューには失敗を握りつぶした Promise をつなぐ。
 let importQueue = Promise.resolve();
@@ -138,22 +134,49 @@ function runExclusive(task) {
     return run;
 }
 
+// 真偽値のクエリ・本文を解釈する。解釈できなければ undefined（呼び出し側で 400 にする）
+function parseBoolean(val) {
+    if (val === undefined || val === '') return false; // 空文字は指定なし
+    if (val === true || val === 'true') return true;
+    if (val === false || val === 'false') return false;
+    return undefined;
+}
+
+// 任意の文字列項目（source / note）を trim して検証する。空は null
+function parseOptionalText(label, val, maxLength) {
+    if (val === undefined || val === null) return { value: null };
+    if (typeof val !== 'string') return { error: `${label} は文字列で指定してください` };
+    const str = val.trim();
+    if (str === '') return { value: null };
+    if (str.length > maxLength) return { error: `${label} は${maxLength}文字以内で指定してください` };
+    return { value: str };
+}
+
 // POST /api/purchases/import - 購入明細の一括取り込み
-// 本文は配列そのもの、または { records: [...], on_duplicate: 'skip' | 'update' }
+// 本文は配列そのもの、または { records: [...], on_duplicate: 'skip' | 'update', dry_run, source, note }
 router.post('/import', async (req, res) => {
     try {
         const body = req.body;
         let records;
         let onDuplicate;
+        let dryRunRaw;
+        let sourceRaw;
+        let noteRaw;
         if (Array.isArray(body)) {
             records = body;
         } else if (body && typeof body === 'object') {
             records = body.records;
             onDuplicate = body.on_duplicate;
+            dryRunRaw = body.dry_run;
+            sourceRaw = body.source;
+            noteRaw = body.note;
         }
-        // 本文の指定を優先し、なければクエリ、どちらもなければ skip
+        // 本文の指定を優先し、なければクエリ、どちらもなければ既定値
         if (onDuplicate === undefined) onDuplicate = req.query.on_duplicate;
         if (onDuplicate === undefined) onDuplicate = 'skip';
+        if (dryRunRaw === undefined) dryRunRaw = req.query.dry_run;
+        if (sourceRaw === undefined) sourceRaw = req.query.source;
+        if (noteRaw === undefined) noteRaw = req.query.note;
 
         if (!Array.isArray(records)) {
             return res.status(400).json({ error: '本文は明細の配列、または { records: [...] } で指定してください' });
@@ -167,115 +190,222 @@ router.post('/import', async (req, res) => {
         if (onDuplicate !== 'skip' && onDuplicate !== 'update') {
             return res.status(400).json({ error: "on_duplicate は 'skip' または 'update' で指定してください" });
         }
+        const dryRun = parseBoolean(dryRunRaw);
+        if (dryRun === undefined) {
+            return res.status(400).json({ error: 'dry_run は true または false で指定してください' });
+        }
+        const source = parseOptionalText('source', sourceRaw, SOURCE_MAX_LENGTH);
+        if (source.error) return res.status(400).json({ error: source.error });
+        const note = parseOptionalText('note', noteRaw, BATCH_NOTE_MAX_LENGTH);
+        if (note.error) return res.status(400).json({ error: note.error });
 
-        const output = await runExclusive(() => importRecords(getDb(), records, onDuplicate));
+        const output = await runExclusive(() => importRecords(getDb(), records, onDuplicate, {
+            dryRun,
+            source: source.value,
+            note: note.value
+        }));
         res.json(output);
     } catch (err) {
+        // 取り込み中に、ほかの更新で UNIQUE 制約に当たった場合（ROLLBACK 済み）
+        if (err && err.code === 'SQLITE_CONSTRAINT') {
+            return res.status(409).json({ error: '取り込み中にほかの更新と重なりました。もう一度実行してください' });
+        }
         res.status(500).json({ error: err.message });
     }
 });
 
-// 明細を順に登録・更新して集計を返す。失敗したら ROLLBACK して例外を投げる
-async function importRecords(db, records, onDuplicate) {
+// 更新時刻はミリ秒まで残す（取り込み直後の変更を modified_after_import で見分けるため）
+const NOW_SQL = "strftime('%Y-%m-%d %H:%M:%f','now')";
+
+// 取り込みの判定だけを行い、何も書き込まない（SELECT のみ）。dry_run も本番も同じこの結果を使う。
+// 同じリクエスト内の重複は、Map 上の仮の行で模擬する。
+// 戻り値: { summary, items, ops }
+// - items: 明細ごとの結果（index, status, record, before, warning, error と、id または ref）
+// - ops: 本番で適用する操作の列（create / update）
+async function planImport(db, records, onDuplicate) {
+    const summary = { total: records.length, created: 0, updated: 0, skipped: 0, errors: 0 };
+    const items = [];
+    const ops = [];
+    const partExists = new Map();
+    const hasPart = async (partId) => {
+        if (!partExists.has(partId)) {
+            const row = await db.get('SELECT 1 AS ok FROM parts WHERE id = ?', [partId]);
+            partExists.set(partId, !!row);
+        }
+        return partExists.get(partId);
+    };
+    // このリクエストで処理済みの重複キー -> { index, row（仮の現在値）, op（新規 or 更新の操作）, id（既存行のとき）}
+    const state = new Map();
+
+    for (let index = 0; index < records.length; index++) {
+        const raw = records[index];
+        const norm = normalizePurchaseRecord(raw);
+        if (norm.error) {
+            summary.errors++;
+            items.push({ index, status: 'error', error: norm.error });
+            continue;
+        }
+        const value = norm.value;
+        const key = buildDedupeKey(value);
+        if (key.error) {
+            summary.errors++;
+            items.push({ index, status: 'error', error: key.error });
+            continue;
+        }
+
+        const warnings = [];
+        let missingPartId = null;
+        if (value.part_id !== null && !(await hasPart(value.part_id))) {
+            missingPartId = value.part_id;
+            value.part_id = null;
+        }
+
+        const stateKey = `${value.shop}\u0000${key.value}`;
+        let entry = state.get(stateKey);
+        if (entry) {
+            warnings.push(`同じリクエストの index ${entry.index} と同じ明細とみなしました（数量や単価が違う場合は line_no を付けてください）`);
+        } else {
+            const existing = await db.get(
+                'SELECT * FROM purchase_records WHERE shop = ? AND dedupe_key = ?',
+                [value.shop, key.value]
+            );
+            entry = { index, row: existing ? { ...existing } : null, original: existing || null, op: null, id: existing ? existing.id : null };
+            state.set(stateKey, entry);
+        }
+
+        const item = { index };
+        if (!entry.row) {
+            // 新規登録
+            if (missingPartId !== null) {
+                warnings.push(`part_id ${missingPartId} の部品が見つからないため、ひも付けずに登録しました`);
+            }
+            const op = { type: 'create', values: { ...value }, dedupe_key: key.value, id: null };
+            ops.push(op);
+            entry.op = op;
+            entry.row = { ...value, dedupe_key: key.value };
+            summary.created++;
+            item.status = 'created';
+            item.ref = op;
+        } else if (onDuplicate === 'skip') {
+            summary.skipped++;
+            item.status = 'skipped';
+            if (entry.id !== null) item.id = entry.id; else item.ref = entry.op;
+        } else {
+            if (missingPartId !== null) {
+                warnings.push(`part_id ${missingPartId} の部品が見つからないため無視しました（既存のひも付けは維持）`);
+            }
+            // 送られてきた項目だけを上書きする。
+            // part_id は null や未指定なら既存のひも付けを、currency は null や空なら既存の値を残す
+            const changes = {};
+            for (const f of FIELDS) {
+                if (raw[f] === undefined) continue;
+                if (f === 'part_id' && value.part_id === null) continue;
+                if (f === 'currency' && (raw.currency === null || (typeof raw.currency === 'string' && raw.currency.trim() === ''))) continue;
+                changes[f] = value[f];
+            }
+            const { dedupe_key: _ignored, ...before } = entry.row;
+            if (entry.id === null) delete before.id;
+            item.before = before;
+
+            if (entry.id === null) {
+                // このリクエストで作る行への上書きは、作成する値にまとめる
+                Object.assign(entry.op.values, changes);
+                item.ref = entry.op;
+            } else {
+                if (!entry.op) {
+                    entry.op = { type: 'update', id: entry.id, changes: {}, beforeRow: entry.original };
+                    ops.push(entry.op);
+                }
+                Object.assign(entry.op.changes, changes);
+                item.id = entry.id;
+                item.updOp = entry.op;
+            }
+            Object.assign(entry.row, changes);
+            summary.updated++;
+            item.status = 'updated';
+        }
+        // 確認用（dry_run）に返す、正規化後の値
+        item.record = { ...value };
+        if (warnings.length > 0) item.warning = warnings.join(' / ');
+        items.push(item);
+    }
+
+    return { summary, items, ops };
+}
+
+// plan を本番として適用する。同じトランザクション内でバッチと変更記録も作る。失敗したら ROLLBACK して例外を投げる
+async function applyImport(db, plan, records, onDuplicate, { source, note }) {
     let inTransaction = false;
     try {
-        const summary = { total: records.length, created: 0, updated: 0, skipped: 0, errors: 0 };
-        const results = [];
-        const partExists = new Map();
-        const hasPart = async (partId) => {
-            if (!partExists.has(partId)) {
-                const row = await db.get('SELECT 1 AS ok FROM parts WHERE id = ?', [partId]);
-                partExists.set(partId, !!row);
-            }
-            return partExists.get(partId);
-        };
-        // このリクエスト内で処理済みの重複キー -> 最初に現れた index
-        const seenKeys = new Map();
-
-        // node-sqlite3 は接続を共有するため、トランザクションはベストエフォート（速度のために包む）
         await db.exec('BEGIN');
         inTransaction = true;
 
-        for (let index = 0; index < records.length; index++) {
-            const raw = records[index];
-            const norm = normalizePurchaseRecord(raw);
-            if (norm.error) {
-                summary.errors++;
-                results.push({ index, status: 'error', error: norm.error });
-                continue;
-            }
-            const value = norm.value;
-            const key = buildDedupeKey(value);
-            if (key.error) {
-                summary.errors++;
-                results.push({ index, status: 'error', error: key.error });
-                continue;
-            }
+        const batch = await db.run(
+            `INSERT INTO purchase_import_batches
+             (source, note, on_duplicate, total, created_count, updated_count, skipped_count, error_count)
+             VALUES (?, ?, ?, ?, 0, 0, 0, 0)`,
+            [source, note, onDuplicate, records.length]
+        );
+        const batchId = batch.lastID;
 
-            const warnings = [];
-            let missingPartId = null;
-            if (value.part_id !== null && !(await hasPart(value.part_id))) {
-                missingPartId = value.part_id;
-                value.part_id = null;
-            }
-
-            const seenKey = `${value.shop}\u0000${key.value}`;
-            const firstIndex = seenKeys.get(seenKey);
-            if (firstIndex === undefined) {
-                seenKeys.set(seenKey, index);
-            } else {
-                warnings.push(`同じリクエストの index ${firstIndex} と同じ明細とみなしました（数量や単価が違う場合は line_no を付けてください）`);
-            }
-
-            const existing = await db.get(
-                'SELECT id FROM purchase_records WHERE shop = ? AND dedupe_key = ?',
-                [value.shop, key.value]
-            );
-
-            let result;
-            if (!existing) {
-                if (missingPartId !== null) {
-                    warnings.push(`part_id ${missingPartId} の部品が見つからないため、ひも付けずに登録しました`);
-                }
-                const cols = [...FIELDS, 'dedupe_key'];
+        for (const op of plan.ops) {
+            if (op.type === 'create') {
+                const cols = [...FIELDS, 'dedupe_key', 'import_batch_id'];
                 const insert = await db.run(
-                    `INSERT INTO purchase_records (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
-                    [...FIELDS.map(f => value[f]), key.value]
+                    `INSERT INTO purchase_records (${cols.join(', ')}, created_at, updated_at)
+                     VALUES (${cols.map(() => '?').join(', ')}, ${NOW_SQL}, ${NOW_SQL})`,
+                    [...FIELDS.map(f => op.values[f]), op.dedupe_key, batchId]
                 );
-                summary.created++;
-                result = { index, status: 'created', id: insert.lastID };
-            } else if (onDuplicate === 'skip') {
-                summary.skipped++;
-                result = { index, status: 'skipped', id: existing.id };
+                op.id = insert.lastID;
+                await db.run(
+                    'INSERT INTO purchase_import_changes (batch_id, record_id, action, before_json) VALUES (?, ?, ?, NULL)',
+                    [batchId, op.id, 'created']
+                );
             } else {
-                if (missingPartId !== null) {
-                    warnings.push(`part_id ${missingPartId} の部品が見つからないため無視しました（既存のひも付けは維持）`);
+                // plan のあとに PATCH / DELETE が入りうるため、更新の直前に行を読み直す。
+                // 取り消しで戻す先（before_json）は、この読み直した値にする
+                const current = await db.get('SELECT * FROM purchase_records WHERE id = ?', [op.id]);
+                if (!current) {
+                    op.failed = true;
+                    continue;
                 }
-                // 送られてきた項目だけを上書きする。
-                // part_id は null や未指定なら既存のひも付けを、currency は null や空なら既存の値を残す
-                const sets = [];
-                const params = [];
-                for (const f of FIELDS) {
-                    if (raw[f] === undefined) continue;
-                    if (f === 'part_id' && value.part_id === null) continue;
-                    if (f === 'currency' && (raw.currency === null || (typeof raw.currency === 'string' && raw.currency.trim() === ''))) continue;
-                    sets.push(`${f} = ?`);
-                    params.push(value[f]);
+                const cols = Object.keys(op.changes);
+                const update = await db.run(
+                    `UPDATE purchase_records SET ${[...cols.map(c => `${c} = ?`), `updated_at = ${NOW_SQL}`].join(', ')} WHERE id = ?`,
+                    [...cols.map(c => op.changes[c]), op.id]
+                );
+                if (update.changes === 0) {
+                    op.failed = true;
+                    continue;
                 }
-                sets.push('updated_at = CURRENT_TIMESTAMP');
-                params.push(existing.id);
-                await db.run(`UPDATE purchase_records SET ${sets.join(', ')} WHERE id = ?`, params);
-                summary.updated++;
-                result = { index, status: 'updated', id: existing.id };
+                await db.run(
+                    'INSERT INTO purchase_import_changes (batch_id, record_id, action, before_json) VALUES (?, ?, ?, ?)',
+                    [batchId, op.id, 'updated', JSON.stringify(current)]
+                );
             }
-            if (warnings.length > 0) result.warning = warnings.join(' / ');
-            results.push(result);
         }
 
+        // 更新できなかった明細（取り込み中に削除された）は error に振り替えて、件数を合わせる
+        const summary = { ...plan.summary };
+        for (const item of plan.items) {
+            if (item.status === 'updated' && item.updOp && item.updOp.failed) {
+                item.status = 'error';
+                item.error = '取り込み中に明細が削除されたため更新できませんでした';
+                summary.updated--;
+                summary.errors++;
+            }
+        }
+
+        // 件数を確定する。created_at は完了時刻にする（取り消し時に「取り込み後に変更された行」を判定する基準）
+        await db.run(
+            `UPDATE purchase_import_batches
+             SET created_count = ?, updated_count = ?, skipped_count = ?, error_count = ?, created_at = ${NOW_SQL}
+             WHERE id = ?`,
+            [summary.created, summary.updated, summary.skipped, summary.errors, batchId]
+        );
         await db.exec('COMMIT');
         inTransaction = false;
-
-        return { ...summary, results };
+        return { batchId, summary };
     } catch (err) {
         if (inTransaction) {
             await db.exec('ROLLBACK').catch(e => console.error('Rollback failed:', e));
@@ -283,6 +413,206 @@ async function importRecords(db, records, onDuplicate) {
         throw err;
     }
 }
+
+// 取り込みを実行する。
+// - dryRun: plan だけを返す。DB には一切書き込まない（BEGIN もしない。共有接続の ROLLBACK で他の書き込みが消えるのを防ぐ）
+// - 本番: plan を作ってから、トランザクション内で適用する
+async function importRecords(db, records, onDuplicate, { dryRun = false, source = null, note = null } = {}) {
+    const plan = await planImport(db, records, onDuplicate);
+
+    if (dryRun) {
+        // 確認用の結果。作成予定の行の id は存在しないため付けない
+        const results = plan.items.map(({ ref, id, ...item }) => {
+            if (id !== undefined) item.id = id;
+            return item;
+        });
+        return { ...plan.summary, dry_run: true, results };
+    }
+
+    const { batchId, summary } = await applyImport(db, plan, records, onDuplicate, { source, note });
+    const results = plan.items.map((item) => {
+        const out = { index: item.index, status: item.status };
+        if (item.error !== undefined) out.error = item.error;
+        const id = item.id !== undefined ? item.id : (item.ref ? item.ref.id : undefined);
+        if (id !== undefined) out.id = id;
+        if (item.warning !== undefined) out.warning = item.warning;
+        return out;
+    });
+    return { ...summary, batch_id: batchId, results };
+}
+
+// 取り消しの判定と件数の計算を行う（SELECT のみ。何も書き込まない）。
+// 409 にしたい条件は { conflict: メッセージ } で返す。それ以外は { counts, deletes, restores }
+async function planUndo(db, batch) {
+    if (batch.undone_at) {
+        return { conflict: 'このバッチはすでに取り消されています' };
+    }
+
+    // あとのバッチ（取り消していないもの）が同じ明細に手を加えていたら、先にそちらを取り消す必要がある
+    const later = await db.all(
+        `SELECT DISTINCT c2.batch_id AS batch_id
+         FROM purchase_import_changes c1
+         JOIN purchase_import_changes c2 ON c2.record_id = c1.record_id
+         JOIN purchase_import_batches b2 ON b2.id = c2.batch_id
+         WHERE c1.batch_id = ? AND c2.batch_id > ? AND b2.undone_at IS NULL
+         ORDER BY c2.batch_id`,
+        [batch.id, batch.id]
+    );
+    if (later.length > 0) {
+        return { conflict: `あとのバッチ（id: ${later.map(r => r.batch_id).join(', ')}）が同じ明細を変更しています。先にそちらを取り消してください` };
+    }
+
+    const counts = { batch_id: batch.id, deleted: 0, restored: 0, missing: 0, linked_deleted: 0, modified_after_import: 0 };
+    const deletes = [];
+    const restores = [];
+    const changes = await db.all('SELECT * FROM purchase_import_changes WHERE batch_id = ? ORDER BY id DESC', [batch.id]);
+    const rows = new Map();
+    for (const change of changes) {
+        const row = await db.get('SELECT * FROM purchase_records WHERE id = ?', [change.record_id]);
+        if (!row) {
+            counts.missing++;
+            continue;
+        }
+        rows.set(change.record_id, row);
+        if (row.updated_at && batch.created_at && row.updated_at > batch.created_at) {
+            counts.modified_after_import++;
+        }
+        if (change.action === 'created') {
+            if (row.part_id !== null && row.part_id !== undefined) counts.linked_deleted++;
+            deletes.push(row.id);
+            counts.deleted++;
+        } else {
+            restores.push({ id: row.id, before: JSON.parse(change.before_json) });
+            counts.restored++;
+        }
+    }
+
+    // 元の値に戻すと、削除・復元の対象外の行と (shop, dedupe_key) が重なる場合は取り消せない
+    const touched = new Set([...deletes, ...restores.map(r => r.id)]);
+    for (const r of restores) {
+        if (r.before.shop === undefined || r.before.dedupe_key === undefined) continue;
+        const clash = await db.get(
+            'SELECT id FROM purchase_records WHERE shop = ? AND dedupe_key = ? AND id != ?',
+            [r.before.shop, r.before.dedupe_key, r.id]
+        );
+        if (clash && !touched.has(clash.id)) {
+            return { conflict: '元の値に戻すと、ほかの明細と重複するため取り消せません' };
+        }
+    }
+
+    return { counts, deletes, restores };
+}
+
+// 取り消しを実行する。削除してから復元の順に行い、失敗したら ROLLBACK して例外を投げる
+async function applyUndo(db, batch, plan) {
+    // 復元できる列は、purchase_records の実際の列（id を除く）だけ。before_json のキーを SQL に埋め込まない
+    const tableInfo = await db.all('PRAGMA table_info(purchase_records)');
+    const validCols = tableInfo.map(c => c.name).filter(c => c !== 'id');
+
+    let inTransaction = false;
+    try {
+        await db.exec('BEGIN');
+        inTransaction = true;
+        for (const id of plan.deletes) {
+            await db.run('DELETE FROM purchase_records WHERE id = ?', [id]);
+        }
+        for (const r of plan.restores) {
+            const cols = validCols.filter(c => Object.prototype.hasOwnProperty.call(r.before, c));
+            if (cols.length === 0) continue;
+            await db.run(
+                `UPDATE purchase_records SET ${cols.map(c => `${c} = ?`).join(', ')} WHERE id = ?`,
+                [...cols.map(c => r.before[c]), r.id]
+            );
+        }
+        await db.run('UPDATE purchase_import_batches SET undone_at = CURRENT_TIMESTAMP WHERE id = ?', [batch.id]);
+        await db.exec('COMMIT');
+        inTransaction = false;
+    } catch (err) {
+        if (inTransaction) {
+            await db.exec('ROLLBACK').catch(e => console.error('Rollback failed:', e));
+        }
+        throw err;
+    }
+}
+
+// バッチの取り消し。dry_run は計算だけ（書き込みなし）。409 の条件は { conflict } で返す
+async function undoBatch(db, batch, dryRun) {
+    const plan = await planUndo(db, batch);
+    if (plan.conflict) return plan;
+    if (!dryRun) await applyUndo(db, batch, plan);
+    return { result: { ...plan.counts, dry_run: dryRun } };
+}
+
+// GET /api/purchases/batches - 取り込みバッチの一覧（新しい順）。/:id より前に定義すること
+router.get('/batches', async (req, res) => {
+    try {
+        let limit = parseInt(req.query.limit, 10);
+        if (!Number.isInteger(limit) || limit < 1) limit = BATCH_DEFAULT_LIMIT;
+        limit = Math.min(limit, BATCH_MAX_LIMIT);
+        const rows = await getDb().all('SELECT * FROM purchase_import_batches ORDER BY id DESC LIMIT ?', [limit]);
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/purchases/batches/:id
+router.get('/batches/:id', async (req, res) => {
+    try {
+        const id = parseId(req.params.id);
+        if (!id) return res.status(400).json({ error: 'Invalid ID' });
+        const batch = await getDb().get('SELECT * FROM purchase_import_batches WHERE id = ?', [id]);
+        if (!batch) return res.status(404).json({ error: '取り込みバッチが見つかりません' });
+        res.json(batch);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/purchases/batches/:id/undo - バッチ単位の取り消し（dry_run で件数だけ確認できる）
+router.post('/batches/:id/undo', async (req, res) => {
+    try {
+        const id = parseId(req.params.id);
+        if (!id) return res.status(400).json({ error: 'Invalid ID' });
+
+        let dryRunRaw = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body.dry_run : undefined;
+        if (dryRunRaw === undefined) dryRunRaw = req.query.dry_run;
+        const dryRun = parseBoolean(dryRunRaw);
+        if (dryRun === undefined) {
+            return res.status(400).json({ error: 'dry_run は true または false で指定してください' });
+        }
+
+        const outcome = await runExclusive(async () => {
+            const db = getDb();
+            const batch = await db.get('SELECT * FROM purchase_import_batches WHERE id = ?', [id]);
+            if (!batch) return { notFound: true };
+            return undoBatch(db, batch, dryRun);
+        });
+        if (outcome.notFound) return res.status(404).json({ error: '取り込みバッチが見つかりません' });
+        if (outcome.conflict) return res.status(409).json({ error: outcome.conflict });
+        res.json(outcome.result);
+    } catch (err) {
+        // 元の値に戻すと、取り込み後に作られた明細とキーが重なる場合
+        if (err && err.code === 'SQLITE_CONSTRAINT') {
+            return res.status(409).json({ error: '元の値に戻すと、ほかの明細と重複するため取り消せません' });
+        }
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/purchases/:id
+router.get('/:id', async (req, res) => {
+    try {
+        const id = parseId(req.params.id);
+        if (!id) return res.status(400).json({ error: 'Invalid ID' });
+
+        const record = await getRecordWithPartName(getDb(), id);
+        if (!record) return res.status(404).json({ error: '購入明細が見つかりません' });
+        res.json(record);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 // PATCH /api/purchases/:id - 部分更新
 router.patch('/:id', async (req, res) => {
@@ -330,7 +660,7 @@ router.patch('/:id', async (req, res) => {
             params.push(key.value);
         }
 
-        sets.push('updated_at = CURRENT_TIMESTAMP');
+        sets.push(`updated_at = ${NOW_SQL}`);
         params.push(id);
         await db.run(`UPDATE purchase_records SET ${sets.join(', ')} WHERE id = ?`, params);
 

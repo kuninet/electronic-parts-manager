@@ -181,6 +181,29 @@ function toPurchaseRecord(row) {
         part,
         source_msg_id: row.source_msg_id ?? null,
         note: row.note ?? null,
+        import_batch_id: row.import_batch_id ?? null,
+    };
+}
+
+/**
+ * 取り込みバッチを MCP 出力形式に整形します。
+ *
+ * @param {Record<string, any>} row
+ * @returns {object}
+ */
+function toImportBatch(row) {
+    return {
+        id: row.id,
+        source: row.source ?? null,
+        note: row.note ?? null,
+        on_duplicate: row.on_duplicate ?? null,
+        total: row.total ?? 0,
+        created: row.created_count ?? 0,
+        updated: row.updated_count ?? 0,
+        skipped: row.skipped_count ?? 0,
+        errors: row.error_count ?? 0,
+        created_at: row.created_at ?? null,
+        undone_at: row.undone_at ?? null,
     };
 }
 
@@ -229,6 +252,7 @@ module.exports = {
     toCategory,
     toLocation,
     toPurchaseRecord,
+    toImportBatch,
     toolResult,
     toolError,
 };

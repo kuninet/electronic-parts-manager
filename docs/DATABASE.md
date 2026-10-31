@@ -69,6 +69,24 @@ erDiagram
         string source_msg_id
         string note
         string dedupe_key "重複判定キー"
+        integer import_batch_id "新規登録した取り込みバッチ"
+    }
+
+    purchase_import_batches {
+        integer id PK
+        string source
+        string note
+        string on_duplicate
+        integer total
+        datetime undone_at "取り消し日時"
+    }
+
+    purchase_import_changes {
+        integer id PK
+        integer batch_id "外部キーなし"
+        integer record_id "外部キーなし"
+        string action "created / updated"
+        string before_json "更新前の行"
     }
 ```
 
@@ -158,12 +176,41 @@ QR「しまう」操作等による保管場所への移動履歴を記録しま
 | `source_msg_id` | TEXT | 元になったメールのメッセージ ID (任意、最大200文字) |
 | `note` | TEXT | メモ (任意、最大2000文字) |
 | `dedupe_key` | TEXT | 重複判定キー (必須)。作り方は API 仕様書 (`docs/API.md` 11章) を参照 |
+| `import_batch_id` | INTEGER | この行を新規登録した取り込みバッチ (`purchase_import_batches.id`)。外部キーは付けない。バッチを使わずに作った行は NULL |
 | `created_at` | DATETIME | 作成日時 |
-| `updated_at` | DATETIME | 更新日時 |
+| `updated_at` | DATETIME | 更新日時 (アプリが更新するときはミリ秒まで記録する) |
 
 インデックス:
 -   `idx_purchase_records_dedupe`: `(shop, dedupe_key)` の UNIQUE。同じ明細の二重登録を防ぎます
 -   `idx_purchase_records_part_id`: `part_id`
 -   `idx_purchase_records_order`: `(shop, order_id)`
 
-バックアップ (`backup_data.json`) には `purchaseRecords` として含まれます。復元は全置換のため、`purchaseRecords` を含まない古いバックアップから復元すると購入履歴は空になります。
+バックアップ (`backup_data.json`) には `purchaseRecords`、`purchaseImportBatches`、`purchaseImportChanges` として含まれます。復元は全置換のため、`purchaseRecords` を含まない古いバックアップから復元すると購入履歴は空になります。
+
+### `purchase_import_batches` (購入履歴の取り込みバッチ)
+`POST /api/purchases/import`（`dry_run` なし）1 回につき 1 行が作られます。取り込み単位で取り消す（`POST /api/purchases/batches/:id/undo`）ための記録で、取り消したあとも残ります。
+| カラム名 | 型 | 説明 |
+| --- | --- | --- |
+| `id` | INTEGER | 主キー (AUTOINCREMENT) |
+| `source` | TEXT | 取り込み元の名前 (任意、最大100文字。例: `muse`) |
+| `note` | TEXT | メモ (任意、最大1000文字) |
+| `on_duplicate` | TEXT | `skip` または `update` |
+| `total` | INTEGER | 受け取った明細数 |
+| `created_count` | INTEGER | 新規登録した件数 |
+| `updated_count` | INTEGER | 上書きした件数 |
+| `skipped_count` | INTEGER | 重複でスキップした件数 |
+| `error_count` | INTEGER | エラーの件数 |
+| `created_at` | DATETIME | 取り込みの完了時刻 (ミリ秒まで。取り消し時に「取り込み後に変更された明細」を判定する基準) |
+| `undone_at` | DATETIME | 取り消した日時 (取り消していなければ NULL) |
+
+### `purchase_import_changes` (取り込みバッチの変更記録)
+バッチが変更した明細の記録です。`skipped` と `error` は記録しません。外部キー制約は付けません。
+| カラム名 | 型 | 説明 |
+| --- | --- | --- |
+| `id` | INTEGER | 主キー (AUTOINCREMENT)。取り消しはこの降順に行う |
+| `batch_id` | INTEGER | `purchase_import_batches.id` |
+| `record_id` | INTEGER | `purchase_records.id` |
+| `action` | TEXT | `created`（新規登録。取り消しで削除）または `updated`（上書き。取り消しで `before_json` に戻す） |
+| `before_json` | TEXT | `updated` のときの更新前の行 (`purchase_records` の全列を JSON で)。同じバッチで同じ行を複数回変えても、取り込み前の 1 回分だけ残す |
+
+インデックス: `idx_purchase_import_changes_batch` (`batch_id`)、`idx_purchase_import_changes_record` (`record_id`)

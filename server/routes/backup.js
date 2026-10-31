@@ -84,7 +84,9 @@ async function runExportWorker(jobId) {
         const tags = await db.all('SELECT * FROM tags');
         const partTags = await db.all('SELECT * FROM part_tags');
         const purchaseRecords = await db.all('SELECT * FROM purchase_records');
-        const dbDump = { parts, categories, locations, tags, partTags, purchaseRecords };
+        const purchaseImportBatches = await db.all('SELECT * FROM purchase_import_batches');
+        const purchaseImportChanges = await db.all('SELECT * FROM purchase_import_changes');
+        const dbDump = { parts, categories, locations, tags, partTags, purchaseRecords, purchaseImportBatches, purchaseImportChanges };
 
         await updateJobStatus(jobId, { status: 'running', progress: 20, message: 'S3画像一覧取得中...' });
 
@@ -228,7 +230,9 @@ router.get('/export/full', async (req, res) => {
         const partTags = await db.all('SELECT * FROM part_tags');
 
         const purchaseRecords = await db.all('SELECT * FROM purchase_records');
-        const dbDump = { parts, categories, locations, tags, partTags, purchaseRecords };
+        const purchaseImportBatches = await db.all('SELECT * FROM purchase_import_batches');
+        const purchaseImportChanges = await db.all('SELECT * FROM purchase_import_changes');
+        const dbDump = { parts, categories, locations, tags, partTags, purchaseRecords, purchaseImportBatches, purchaseImportChanges };
         const archive = archiver('zip', { zlib: { level: 9 } });
         const fileName = `full_backup_${new Date().toISOString().split('T')[0]}.zip`;
 
@@ -305,6 +309,8 @@ router.post('/import/full', upload.single('file'), async (req, res) => {
         await db.run('DELETE FROM locations');
         await db.run('DELETE FROM tags');
         await db.run('DELETE FROM purchase_records');
+        await db.run('DELETE FROM purchase_import_batches');
+        await db.run('DELETE FROM purchase_import_changes');
 
         const restoreTable = async (table, rows) => {
             if (!rows || rows.length === 0) return;
@@ -332,6 +338,8 @@ router.post('/import/full', upload.single('file'), async (req, res) => {
         }
         if (dbDump.partTags) await restoreTable('part_tags', dbDump.partTags);
         if (dbDump.purchaseRecords) await restoreTable('purchase_records', dbDump.purchaseRecords);
+        if (dbDump.purchaseImportBatches) await restoreTable('purchase_import_batches', dbDump.purchaseImportBatches);
+        if (dbDump.purchaseImportChanges) await restoreTable('purchase_import_changes', dbDump.purchaseImportChanges);
         await db.run('COMMIT');
 
         const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
@@ -424,6 +432,8 @@ router.post('/import/restore', async (req, res) => {
         await db.run('DELETE FROM locations');
         await db.run('DELETE FROM tags');
         await db.run('DELETE FROM purchase_records');
+        await db.run('DELETE FROM purchase_import_batches');
+        await db.run('DELETE FROM purchase_import_changes');
 
         const restoreTable = async (table, rows) => {
             if (!rows || rows.length === 0) return;
@@ -451,6 +461,8 @@ router.post('/import/restore', async (req, res) => {
         }
         if (dbDump.partTags) await restoreTable('part_tags', dbDump.partTags);
         if (dbDump.purchaseRecords) await restoreTable('purchase_records', dbDump.purchaseRecords);
+        if (dbDump.purchaseImportBatches) await restoreTable('purchase_import_batches', dbDump.purchaseImportBatches);
+        if (dbDump.purchaseImportChanges) await restoreTable('purchase_import_changes', dbDump.purchaseImportChanges);
         await db.run('COMMIT');
 
         // Restore Upload Files
@@ -507,6 +519,8 @@ router.post('/reset', async (req, res) => {
         await db.run('DELETE FROM parts');
         await db.run('DELETE FROM part_tags');
         await db.run('DELETE FROM purchase_records');
+        await db.run('DELETE FROM purchase_import_batches');
+        await db.run('DELETE FROM purchase_import_changes');
         await db.run('COMMIT');
 
         const uploadsDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');

@@ -359,6 +359,8 @@ function createApiClient(config, { fetchImpl = globalThis.fetch } = {}) {
         getPurchase: (id) => request('GET', `/api/purchases/${id}`),
         importPurchases: (body) => request('POST', '/api/purchases/import', { body }),
         patchPurchase: (id, body) => request('PATCH', `/api/purchases/${id}`, { body }),
+        listImportBatches: (params) => request('GET', '/api/purchases/batches', { query: params }),
+        undoImportBatch: (id, body) => request('POST', `/api/purchases/batches/${id}/undo`, { body }),
     };
 }
 

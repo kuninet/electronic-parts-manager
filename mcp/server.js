@@ -15,6 +15,8 @@ const { registerStorePartLocationTool } = require('./tools/storePartLocation.js'
 const { registerSearchPurchaseItemsTool } = require('./tools/searchPurchaseItems.js');
 const { registerImportPurchaseItemsTool } = require('./tools/importPurchaseItems.js');
 const { registerUpdatePurchaseItemTool } = require('./tools/updatePurchaseItem.js');
+const { registerListImportBatchesTool } = require('./tools/listImportBatches.js');
+const { registerUndoImportBatchTool } = require('./tools/undoImportBatch.js');
 
 /**
  * MCP サーバーインスタンスを生成してツールを登録します。
@@ -36,6 +38,7 @@ function createMcpServer({ apiClient, version = '1.0.0', readOnly = false }) {
     registerListMasterDataTool(server, { apiClient, apiUrl });
     registerGetPartImageTool(server, { apiClient, apiUrl });
     registerSearchPurchaseItemsTool(server, { apiClient, apiUrl });
+    registerListImportBatchesTool(server, { apiClient, apiUrl });
 
     // 書き込み系ツール（readOnly が false の場合のみ登録）
     if (!readOnly) {
@@ -45,6 +48,7 @@ function createMcpServer({ apiClient, version = '1.0.0', readOnly = false }) {
         registerStorePartLocationTool(server, { apiClient, apiUrl });
         registerImportPurchaseItemsTool(server, { apiClient, apiUrl });
         registerUpdatePurchaseItemTool(server, { apiClient, apiUrl });
+        registerUndoImportBatchTool(server, { apiClient, apiUrl });
     }
 
     return server;
